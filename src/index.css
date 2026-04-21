@@ -79,7 +79,13 @@
     @apply items-center;
   }
 
-  .key-button[data-pressed='true'] {
+  .key-button[data-state='hovered'] {
+    border-color: rgba(214, 226, 247, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 22px rgba(0, 0, 0, 0.3);
+    filter: brightness(1.05);
+  }
+
+  .key-button[data-state='pressed'] {
     @apply translate-y-px scale-[0.985];
     border-color: rgba(227, 238, 255, 0.42);
     box-shadow: var(--shadow-keycap-pressed);
