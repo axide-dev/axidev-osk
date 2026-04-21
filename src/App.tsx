@@ -1,21 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import KeyButton, { type KeyButtonDisplay } from './components/KeyButton';
+import KeyButton, {
+  type KeyButtonDisplay,
+  type KeyButtonEvent,
+} from './components/KeyButton';
 import { keyboardLayout } from './layout/usIsoLayout';
-
-const modifierKeyIds = new Set([
-  'caps',
-  'shift-left',
-  'shift-right',
-  'ctrl-left',
-  'ctrl-right',
-  'meta-left',
-  'alt-left',
-  'alt-right',
-]);
 
 function App() {
   const keyboardRef = useRef<HTMLDivElement | null>(null);
-  const [latchedModifiers, setLatchedModifiers] = useState<Record<string, boolean>>({});
+  const [latchedModifiers, setLatchedModifiers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const keyboardElement = keyboardRef.current;
@@ -45,51 +37,31 @@ function App() {
     };
   }, []);
 
-  const handleModifierPressIn = (keyId: string) => {
-    console.log('modifier in', keyId);
+  const handleModifierLatchIn = (event: KeyButtonEvent) => {
+    setLatchedModifiers((currentModifiers) => ({
+      ...currentModifiers,
+      [event.keyId]: event.label,
+    }));
+    console.log('modifier in', event.keyId, event.label);
   };
 
-  const handleModifierPressOut = (keyId: string) => {
-    console.log('modifier out', keyId);
-  };
-
-  const toggleModifier = (keyId: string) => {
+  const handleModifierLatchOut = (event: KeyButtonEvent) => {
     setLatchedModifiers((currentModifiers) => {
-      const isActive = Boolean(currentModifiers[keyId]);
+      const nextModifiers = { ...currentModifiers };
+      delete nextModifiers[event.keyId];
+      return nextModifiers;
+    });
+    console.log('modifier out', event.keyId, event.label);
+  };
 
-      if (isActive) {
-        handleModifierPressOut(keyId);
-
-        return {
-          ...currentModifiers,
-          [keyId]: false,
-        };
-      }
-
-      handleModifierPressIn(keyId);
-
-      return {
-        ...currentModifiers,
-        [keyId]: true,
-      };
+  const handleTap = (event: KeyButtonEvent) => {
+    console.log('tap', event.keyId, event.label, {
+      activeModifiers: Object.values(latchedModifiers),
     });
   };
 
-  const handleTap = (keyId: string) => {
-    if (modifierKeyIds.has(keyId)) {
-      toggleModifier(keyId);
-      return;
-    }
-
-    const activeModifiers = Object.entries(latchedModifiers)
-      .filter(([, isActive]) => isActive)
-      .map(([modifierId]) => modifierId);
-
-    console.log('tap', keyId, { activeModifiers });
-  };
-
-  const handleHold = (keyId: string) => {
-    console.log('hold', keyId);
+  const handleHold = (event: KeyButtonEvent) => {
+    console.log('hold', event.keyId, event.label);
   };
 
   const getKeyDisplay = (keyId: string): KeyButtonDisplay | undefined => {
@@ -109,9 +81,10 @@ function App() {
           key={key.id}
           keySpec={key}
           display={getKeyDisplay(key.id)}
-          pressed={Boolean(latchedModifiers[key.id])}
           onTap={handleTap}
           onHold={handleHold}
+          onLatchIn={handleModifierLatchIn}
+          onLatchOut={handleModifierLatchOut}
         />
       ))}
     </div>

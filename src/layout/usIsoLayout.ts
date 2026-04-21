@@ -1,5 +1,12 @@
-export type KeyTone = 'default' | 'accent' | 'action';
-export type KeyShape = 'default' | 'iso-enter';
+import type { KeyButtonConfig } from '../components/keyButton.types';
+
+const stickyModifierButton: KeyButtonConfig = {
+  tone: 'accent',
+  options: {
+    sticky: true,
+    stickyMode: 'toggle',
+  },
+};
 
 export type KeySpec = {
   id: string;
@@ -10,13 +17,12 @@ export type KeySpec = {
   height?: number;
   subLabel?: string;
   legend?: string;
-  tone?: KeyTone;
-  shape?: KeyShape;
   a11yLabel?: string;
+  button?: KeyButtonConfig;
 };
 
 export const keyboardLayout: KeySpec[] = [
-  { id: 'esc', label: 'Esc', row: 1, column: 1, width: 2, tone: 'accent' },
+  { id: 'esc', label: 'Esc', row: 1, column: 1, width: 2, button: { tone: 'accent' } },
   { id: 'f1', label: 'F1', row: 1, column: 4, width: 2 },
   { id: 'f2', label: 'F2', row: 1, column: 6, width: 2 },
   { id: 'f3', label: 'F3', row: 1, column: 8, width: 2 },
@@ -49,10 +55,10 @@ export const keyboardLayout: KeySpec[] = [
     row: 2,
     column: 27,
     width: 4,
-    tone: 'action',
+    button: { tone: 'action' },
   },
 
-  { id: 'tab', label: 'Tab', row: 3, column: 1, width: 3, tone: 'accent' },
+  { id: 'tab', label: 'Tab', row: 3, column: 1, width: 3, button: { tone: 'accent' } },
   { id: 'q', label: 'Q', row: 3, column: 4, width: 2 },
   { id: 'w', label: 'W', row: 3, column: 6, width: 2 },
   { id: 'e', label: 'E', row: 3, column: 8, width: 2 },
@@ -72,18 +78,10 @@ export const keyboardLayout: KeySpec[] = [
     column: 28,
     width: 3,
     height: 2,
-    tone: 'action',
-    shape: 'iso-enter',
+    button: { tone: 'action', shape: 'iso-enter' },
   },
 
-  {
-    id: 'caps',
-    label: 'Caps Lock',
-    row: 4,
-    column: 1,
-    width: 4,
-    tone: 'accent',
-  },
+  { id: 'caps', label: 'Caps Lock', row: 4, column: 1, width: 4, button: stickyModifierButton },
   { id: 'a', label: 'A', row: 4, column: 5, width: 2 },
   { id: 's', label: 'S', row: 4, column: 7, width: 2 },
   { id: 'd', label: 'D', row: 4, column: 9, width: 2 },
@@ -97,14 +95,7 @@ export const keyboardLayout: KeySpec[] = [
   { id: 'quote', label: "'", subLabel: '"', row: 4, column: 25, width: 2 },
   { id: 'hash', label: '#', subLabel: '~', row: 4, column: 27, width: 1 },
 
-  {
-    id: 'shift-left',
-    label: 'Shift',
-    row: 5,
-    column: 1,
-    width: 3,
-    tone: 'accent',
-  },
+  { id: 'shift-left', label: 'Shift', row: 5, column: 1, width: 3, button: stickyModifierButton },
   { id: 'intl-backslash', label: '\\', subLabel: '|', row: 5, column: 4, width: 1 },
   { id: 'z', label: 'Z', row: 5, column: 5, width: 2 },
   { id: 'x', label: 'X', row: 5, column: 7, width: 2 },
@@ -116,35 +107,14 @@ export const keyboardLayout: KeySpec[] = [
   { id: 'comma', label: ',', subLabel: '<', row: 5, column: 19, width: 2 },
   { id: 'period', label: '.', subLabel: '>', row: 5, column: 21, width: 2 },
   { id: 'slash', label: '/', subLabel: '?', row: 5, column: 23, width: 2 },
-  {
-    id: 'shift-right',
-    label: 'Shift',
-    row: 5,
-    column: 25,
-    width: 6,
-    tone: 'accent',
-  },
+  { id: 'shift-right', label: 'Shift', row: 5, column: 25, width: 6, button: stickyModifierButton },
 
-  {
-    id: 'ctrl-left',
-    label: 'Ctrl',
-    row: 6,
-    column: 1,
-    width: 3,
-    tone: 'accent',
-  },
-  { id: 'meta-left', label: 'Win', row: 6, column: 4, width: 3, tone: 'accent' },
-  { id: 'alt-left', label: 'Alt', row: 6, column: 7, width: 3, tone: 'accent' },
-  { id: 'space', label: 'Space', row: 6, column: 10, width: 12, tone: 'action' },
-  { id: 'alt-right', label: 'AltGr', row: 6, column: 22, width: 3, tone: 'accent' },
-  { id: 'fn', label: 'Fn', row: 6, column: 25, width: 2, tone: 'accent' },
-  { id: 'menu', label: 'Menu', row: 6, column: 27, width: 2, tone: 'accent' },
-  {
-    id: 'ctrl-right',
-    label: 'Ctrl',
-    row: 6,
-    column: 29,
-    width: 2,
-    tone: 'accent',
-  },
+  { id: 'ctrl-left', label: 'Ctrl', row: 6, column: 1, width: 3, button: stickyModifierButton },
+  { id: 'meta-left', label: 'Win', row: 6, column: 4, width: 3, button: stickyModifierButton },
+  { id: 'alt-left', label: 'Alt', row: 6, column: 7, width: 3, button: stickyModifierButton },
+  { id: 'space', label: 'Space', row: 6, column: 10, width: 12, button: { tone: 'action' } },
+  { id: 'alt-right', label: 'AltGr', row: 6, column: 22, width: 3, button: stickyModifierButton },
+  { id: 'fn', label: 'Fn', row: 6, column: 25, width: 2, button: { tone: 'accent' } },
+  { id: 'menu', label: 'Menu', row: 6, column: 27, width: 2, button: { tone: 'accent' } },
+  { id: 'ctrl-right', label: 'Ctrl', row: 6, column: 29, width: 2, button: stickyModifierButton },
 ];
