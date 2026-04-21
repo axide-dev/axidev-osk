@@ -1,2 +1,12 @@
-// See the Electron documentation for details on how to use preload scripts:
-// https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
+import { contextBridge, ipcRenderer } from 'electron';
+
+export type KeyboardWindowSize = {
+  width: number;
+  height: number;
+};
+
+contextBridge.exposeInMainWorld('keyboardWindow', {
+  resizeToContent: (size: KeyboardWindowSize) => {
+    ipcRenderer.send('keyboard:resize-to-content', size);
+  },
+});
