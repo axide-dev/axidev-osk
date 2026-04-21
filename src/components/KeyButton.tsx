@@ -89,14 +89,12 @@ function KeyButton({ keySpec, onTap, onHold }: KeyButtonProps) {
       onContextMenu={(event) => event.preventDefault()}
     >
       <span className="key-stack">
-        <span className="key-primary">{keySpec.label}</span>
+        <span className="key-label">{keySpec.label}</span>
         {keySpec.subLabel ? (
-          <span className="key-secondary">{keySpec.subLabel}</span>
+          <span className="key-meta">{keySpec.subLabel}</span>
         ) : null}
       </span>
-      {keySpec.legend ? (
-        <span className="key-secondary">{keySpec.legend}</span>
-      ) : null}
+      {keySpec.legend ? <span className="key-meta">{keySpec.legend}</span> : null}
     </button>
   );
 }
