@@ -43,6 +43,8 @@
     "vite": "^8.0.9"
   },
   "dependencies": {
+    "@axidev/io": "^0.1.0",
+    "@axidev/electron-client-noactivate": "file:packages/electron-client-noactivate",
     "electron-squirrel-startup": "^1.0.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

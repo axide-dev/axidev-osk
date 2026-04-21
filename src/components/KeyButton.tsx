@@ -51,6 +51,7 @@ type KeyButtonProps = {
   display?: KeyButtonDisplay;
   options?: KeyButtonOptions;
   config?: KeyButtonConfig;
+  disabled?: boolean;
   pressed?: boolean;
   latched?: boolean;
   onTap?: (event: KeyButtonEvent) => void;
@@ -78,6 +79,7 @@ function KeyButton(
     display,
     options,
     config,
+    disabled = false,
     pressed = false,
     latched,
     onTap,
@@ -397,17 +399,26 @@ function KeyButton(
       type="button"
       className="key-button"
       style={style}
+      disabled={disabled}
       data-state={visualState}
       data-latched={effectiveLatched}
+      data-disabled={disabled}
       data-tone={config?.tone ?? keySpec.button?.tone ?? 'default'}
       data-shape={config?.shape ?? keySpec.button?.shape ?? 'default'}
       aria-label={effectiveDisplay.a11yLabel ?? effectiveDisplay.label}
       aria-pressed={visualState === 'pressed'}
+      tabIndex={-1}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
+      onFocus={(event) => {
+        event.currentTarget.blur();
+      }}
       onLostPointerCapture={handlePointerCancel}
       onContextMenu={(event) => event.preventDefault()}
     >

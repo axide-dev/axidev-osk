@@ -43,9 +43,23 @@
 }
 
 @layer components {
+  .keyboard-shell {
+    @apply flex flex-col gap-1.5 bg-board p-1.5;
+  }
+
+  .keyboard-status {
+    @apply flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[0.72rem] text-muted;
+    border-color: rgba(183, 197, 222, 0.18);
+    background: rgba(24, 29, 39, 0.92);
+  }
+
+  .keyboard-status[data-ready='true'] {
+    border-color: rgba(120, 175, 119, 0.28);
+  }
+
   .keyboard-grid {
     grid-template-columns: repeat(30, minmax(0, 1fr));
-    @apply grid w-max gap-1.5 bg-board p-1.5;
+    @apply grid w-max gap-1.5;
   }
 
   .key-button {
@@ -89,6 +103,12 @@
     @apply translate-y-px scale-[0.985];
     border-color: rgba(227, 238, 255, 0.42);
     box-shadow: var(--shadow-keycap-pressed);
+  }
+
+  .key-button[data-disabled='true'] {
+    @apply cursor-not-allowed;
+    opacity: 0.5;
+    filter: saturate(0.7);
   }
 
   .key-button:focus-visible {

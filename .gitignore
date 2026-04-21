@@ -90,3 +90,7 @@ typings/
 
 # Electron-Forge
 out/
+
+# Local native package builds
+packages/node_modules/
+packages/*/build/
