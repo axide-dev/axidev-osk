@@ -1,0 +1,28 @@
+name: Setup Ubuntu Runner
+description: Set up Python and native dependencies for Ubuntu CI jobs.
+
+inputs:
+  python-version:
+    description: Python version to install.
+    required: false
+    default: "3.14"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: ./.github/actions/setup-python-env
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Ubuntu native dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libegl1 \
+          libinput-dev \
+          libudev-dev \
+          libxkbcommon-dev

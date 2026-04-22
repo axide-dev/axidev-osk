@@ -161,7 +161,7 @@ def build_archive(version: str, arch: str) -> Path:
     work_dir = BUILD_ROOT / "pyinstaller-work"
     spec_dir = BUILD_ROOT / "pyinstaller-spec"
     stage_root = BUILD_ROOT / "stage"
-    bundle_root = stage_root / archive_base
+    bundle_root = stage_root / APP_NAME
 
     if BUILD_ROOT.exists():
         shutil.rmtree(BUILD_ROOT)

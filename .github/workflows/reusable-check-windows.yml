@@ -1,0 +1,55 @@
+name: Reusable Check Windows
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    name: Check (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up runner
+        uses: ./.github/actions/setup-windows-runner
+
+      - name: Install Python check tools
+        run: python -m pip install --upgrade pip build flake8
+
+      - name: Lint top-level Python code
+        run: |
+          python -c "import os, pathlib, subprocess, sysconfig; scripts = pathlib.Path(sysconfig.get_path('scripts')); exe = scripts / ('flake8.exe' if os.name == 'nt' else 'flake8'); raise SystemExit(subprocess.run([str(exe), '--select=F,E9,W6', 'src']).returncode)"
+
+      - name: Build vendored axidev-io stack
+        uses: ./.github/actions/build-vendored-axidev-io-windows
+        with:
+          package-version: ci
+
+      - name: Install vendored axidev-io-python
+        working-directory: vendor/axidev-io-python
+        run: python -m pip install -e .
+
+      - name: Build vendored axidev-io-python distributions
+        working-directory: vendor/axidev-io-python
+        run: python -m build
+
+      - name: Verify vendored axidev-io-python distribution contents
+        working-directory: vendor/axidev-io-python
+        run: |
+          python -c "import pathlib, tarfile, zipfile; dist = pathlib.Path('dist'); wheels = sorted(dist.glob('*.whl')); sdists = sorted(dist.glob('*.tar.gz')); assert wheels, 'No wheel produced'; assert sdists, 'No sdist produced'; wheel_required = {'axidev_io/vendor/axidev-io/LICENSE', 'axidev_io/vendor/axidev-io/README.md', 'axidev_io/vendor/axidev-io/docs/consumers/README.md', 'axidev_io/vendor/axidev-io/scripts/setup_uinput_permissions.sh', 'axidev_io/vendor/axidev-io/vendor/licenses/stb.txt'}; sdist_required = {'LICENSE', 'README.md', 'vendor/axidev-io/LICENSE', 'vendor/axidev-io/README.md', 'vendor/axidev-io/docs/consumers/README.md', 'vendor/axidev-io/docs/developers/README.md', 'vendor/axidev-io/scripts/setup_uinput_permissions.sh', 'vendor/axidev-io/vendor/licenses/stb.txt'}; wheel_names = set(zipfile.ZipFile(wheels[-1]).namelist()); missing_wheel = sorted(path for path in wheel_required if path not in wheel_names); assert not missing_wheel, f'Missing required files from {wheels[-1]}: {missing_wheel}'; sdist_names = {name.split('/', 1)[1] for name in tarfile.open(sdists[-1], 'r:gz').getnames() if '/' in name}; missing_sdist = sorted(path for path in sdist_required if path not in sdist_names); assert not missing_sdist, f'Missing required files from {sdists[-1]}: {missing_sdist}'; print('python-dist-ok')"
+
+      - name: Install axidev-osk
+        run: python -m pip install -e .
+
+      - name: Run app tests
+        env:
+          PYTHONPATH: src
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests
+
+      - name: Build axidev-osk distributions
+        run: python -m build

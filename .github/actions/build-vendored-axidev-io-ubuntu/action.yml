@@ -1,0 +1,58 @@
+name: Build Vendored Axidev IO Ubuntu
+description: Build, verify, and package the vendored axidev-io dependency on Ubuntu.
+
+inputs:
+  package-version:
+    description: Version label used when packaging the vendored release archive.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Build and test vendored axidev-io
+      shell: pwsh
+      working-directory: vendor/axidev-io-python/vendor/axidev-io
+      run: |
+        python build.py clean
+        python build.py test
+        python build.py example
+
+    - name: Build Linux linkage probe
+      shell: bash
+      working-directory: vendor/axidev-io-python/vendor/axidev-io
+      run: python build.py integration-binaries
+
+    - name: Verify Linux shared-library linkage
+      shell: bash
+      working-directory: vendor/axidev-io-python/vendor/axidev-io
+      run: |
+        set -euo pipefail
+
+        probe="build/linux/bin/test_integration_listener"
+        if [ ! -x "$probe" ]; then
+          echo "::error::Missing Linux linkage probe binary: $probe"
+          exit 1
+        fi
+
+        ldd_output="$(ldd "$probe")"
+        printf '%s\n' "$ldd_output"
+
+        printf '%s\n' "$ldd_output" | grep -E 'libinput\.so'
+        printf '%s\n' "$ldd_output" | grep -E 'libudev\.so'
+        printf '%s\n' "$ldd_output" | grep -E 'libxkbcommon\.so'
+
+        if printf '%s\n' "$ldd_output" | grep -E 'not found'; then
+          echo "::error::One or more required shared libraries were not resolved by ldd."
+          exit 1
+        fi
+
+    - name: Package vendored axidev-io release archive
+      shell: pwsh
+      working-directory: vendor/axidev-io-python/vendor/axidev-io
+      run: python build.py package --version "${{ inputs.package-version }}" --arch x64
+
+    - name: Verify vendored axidev-io release archive contents
+      shell: pwsh
+      working-directory: vendor/axidev-io-python/vendor/axidev-io
+      run: |
+        python -c "import os, pathlib, tarfile, zipfile; root = pathlib.Path('packages'); required = {'README.md', 'LICENSE', 'docs/consumers/README.md', 'vendor/licenses/stb.txt', 'include/axidev-io/c_api.h', 'lib/libaxidev-io.a'}; pattern = '*.zip' if os.name == 'nt' else '*.tar.gz'; matches = sorted(root.glob(pattern)); assert matches, f'No package archive matching {pattern}'; archive = matches[-1]; print(f'Checking {archive}'); names = set(zipfile.ZipFile(archive).namelist()) if archive.suffix == '.zip' else {member.name.lstrip('./') for member in tarfile.open(archive, 'r:gz').getmembers() if member.isfile()}; missing = sorted(path for path in required if path not in names); assert not missing, f'Missing required files from {archive}: {missing}'; print('archive-ok')"
