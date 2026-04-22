@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .overlay_window import AlwaysOnTopWindowConfig, configure_always_on_top_window
 from ..styles.theme import ThemePalette, build_theme_palette
 
 
@@ -108,6 +109,10 @@ class HotCornerWindowToggleController(QObject):
         self._indicator = HotCornerIndicator(
             size_px=self._config.indicator_size_px,
             palette=build_theme_palette(),
+        )
+        self._indicator_overlay = configure_always_on_top_window(
+            self._indicator,
+            config=AlwaysOnTopWindowConfig(manage_position=False),
         )
 
         self._timer = QTimer(self)
@@ -220,10 +225,14 @@ class HotCornerWindowToggleController(QObject):
             self._indicator.hide()
             return
 
-        self._indicator.move(self._indicator_position(screen.geometry(), corner))
+        self._indicator_overlay.move_to(
+            self._indicator_position(screen.geometry(), corner),
+            screen_geometry=screen.geometry(),
+        )
         self._indicator.set_progress(progress)
         if not self._indicator.isVisible():
             self._indicator.show()
+        self._indicator_overlay.handle_show()
 
     def _indicator_position(self, geometry: QRect, corner: ScreenCorner) -> QPoint:
         size = self._config.indicator_size_px
@@ -243,6 +252,8 @@ class HotCornerWindowToggleController(QObject):
             if not window.isWindow():
                 continue
             if not window.isVisible():
+                continue
+            if window is self._indicator:
                 continue
             if window.windowType() == Qt.WindowType.ToolTip:
                 continue

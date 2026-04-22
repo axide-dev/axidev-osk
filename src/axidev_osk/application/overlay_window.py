@@ -8,13 +8,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypeVar
 
-from PySide6.QtCore import QMargins, QRect, Qt, QTimer
+from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
 from .layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
+    ANCHOR_TOP,
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
@@ -47,6 +48,7 @@ class OverlayPlacement(str, Enum):
 class AlwaysOnTopWindowConfig:
     placement: OverlayPlacement = OverlayPlacement.TOP_RIGHT
     screen_margin: int = 16
+    manage_position: bool = True
 
 
 if sys.platform == "win32":
@@ -148,6 +150,8 @@ class AlwaysOnTopWindowController:
         self._config = config or AlwaysOnTopWindowConfig()
         self._backend = self._detect_backend()
         self._layer_shell_attempts = 0
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(0, 0, 0, 0)
         self._layer_shell_left_margin = 0
         self._layer_shell_bottom_margin = 0
         self._layer_shell_position_initialized = False
@@ -203,6 +207,30 @@ class AlwaysOnTopWindowController:
             self._window.show()
 
         return False
+
+    def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
+        target = QPoint(position)
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry()
+            self._layer_shell_left_margin = max(0, target.x() - geometry.x())
+            self._layer_shell_bottom_margin = 0
+            self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_TOP
+            self._layer_shell_margins = QMargins(
+                self._layer_shell_left_margin,
+                max(0, target.y() - geometry.y()),
+                0,
+                0,
+            )
+            self._layer_shell_position_initialized = True
+            self._window.move(target)
+            self._sync_wayland_layer_shell_with(
+                anchors=self._layer_shell_anchors,
+                margins=self._layer_shell_margins,
+            )
+            return
+
+        self._window.move(target)
+        self._floating_position_initialized = True
 
     def move_by(self, dx: int, dy: int) -> None:
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
@@ -274,15 +302,21 @@ class AlwaysOnTopWindowController:
         if not self._layer_shell_position_initialized:
             self._initialize_layer_shell_position()
 
+        return self._sync_wayland_layer_shell_with(
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+        )
+
+    def _sync_wayland_layer_shell_with(self, *, anchors: int, margins: QMargins) -> bool:
         return apply_wayland_layer_shell(
             self._window,
-            anchors=ANCHOR_LEFT | ANCHOR_BOTTOM,
+            anchors=anchors,
             layer=LAYER_OVERLAY,
             keyboard_interactivity=KEYBOARD_INTERACTIVITY_NONE,
             activate_on_show=False,
             wants_to_be_on_active_screen=True,
             exclusion_zone=0,
-            margins=QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin),
+            margins=margins,
         )
 
     def _move_layer_shell_by(self, dx: int, dy: int) -> None:
@@ -292,6 +326,8 @@ class AlwaysOnTopWindowController:
 
         self._layer_shell_left_margin = max(0, min(self._layer_shell_left_margin + dx, max_left))
         self._layer_shell_bottom_margin = max(0, min(self._layer_shell_bottom_margin - dy, max_bottom))
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
         self._sync_wayland_layer_shell()
 
@@ -307,6 +343,8 @@ class AlwaysOnTopWindowController:
             0,
             min(screen_size.height() - top_offset - next_height, screen_size.height()),
         )
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
         self._window.resize(next_width, next_height)
         self._sync_wayland_layer_shell()
@@ -322,10 +360,14 @@ class AlwaysOnTopWindowController:
             self._layer_shell_left_margin = max(0, screen_size.width() - self._window.width() - margin)
             self._layer_shell_bottom_margin = max(0, screen_size.height() - self._window.height() - margin)
 
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
 
     def _position_floating_window_if_needed(self) -> None:
         if self._floating_position_initialized:
+            return
+        if not self._config.manage_position:
             return
 
         geometry = self._current_screen_geometry()
