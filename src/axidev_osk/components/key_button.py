@@ -16,6 +16,10 @@ def format_key_label(label: str, secondary_label: str | None = None) -> str:
     return f"{secondary_label}\n{label}"
 
 
+def set_key_button_label(button: QPushButton, label: str, secondary_label: str | None = None) -> None:
+    button.setText(format_key_label(label, secondary_label))
+
+
 def refresh_key_button(button: QPushButton, state_machine: KeyStateMachine) -> None:
     button.setProperty("latched", state_machine.is_latched)
     button.setProperty("interactionState", state_machine.state.value)
@@ -35,7 +39,8 @@ def create_key_button(
     on_press: VoidCallback | None = None,
     on_release: VoidCallback | None = None,
 ) -> QPushButton:
-    button = QPushButton(format_key_label(label, secondary_label))
+    button = QPushButton()
+    set_key_button_label(button, label, secondary_label)
     button.setProperty("keyId", key_id or label)
     button.setProperty("keyWidth", width)
     button.setProperty("latched", state_machine.is_latched)

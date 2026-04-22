@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton
 from ..keyboard_io import AxidevIoKeyboardBackend
 from ..layouts.us_iso import build_us_iso_layout
 from ..models import KeySpec
-from .key_button import create_key_button
+from .key_button import create_key_button, set_key_button_label
 from .key_state_machine import KeyInteractionState, KeyStateChange, KeyStateMachine
 
 
@@ -30,6 +30,8 @@ class KeyboardWidget(QFrame):
             "super": [],
         }
         self._syncing_latch_keys: set[str] = set()
+        self._hold_visual_modifiers: set[str] = set()
+        self._buttons_by_spec: list[tuple[QPushButton, KeySpec]] = []
 
         self.setObjectName("keyboard")
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -57,6 +59,8 @@ class KeyboardWidget(QFrame):
         for row in range(max_row):
             container.setRowStretch(row, 1)
 
+        self._refresh_key_legends()
+
     def _build_key(self, spec: KeySpec) -> QPushButton:
         active_press: list[object | None] = [None]
         latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
@@ -70,6 +74,8 @@ class KeyboardWidget(QFrame):
             active_press[0] = None
 
         if spec.latchable and spec.key_id is not None:
+            if spec.holds_when_latched:
+                self._hold_visual_modifiers.add(spec.key_id)
             state_machine.add_listener(
                 lambda change, key_spec=spec, key_id=spec.key_id, machine=state_machine, press_ref=active_press: self._handle_latch_state_change(
                     key_spec,
@@ -81,11 +87,12 @@ class KeyboardWidget(QFrame):
             )
             self._latch_groups.setdefault(spec.key_id, []).append(state_machine)
 
+        display = spec.resolve_display(self._active_display_modifiers())
         button = create_key_button(
-            spec.label,
+            display.label,
             state_machine=state_machine,
             width=spec.width,
-            secondary_label=spec.secondary_label,
+            secondary_label=display.secondary_label,
             key_id=spec.key_id,
             on_press=on_press,
             on_release=on_release,
@@ -93,6 +100,7 @@ class KeyboardWidget(QFrame):
         if spec.height > 1:
             button.setMinimumHeight((56 * spec.height) + (6 * (spec.height - 1)))
 
+        self._buttons_by_spec.append((button, spec))
         return button
 
     def set_latched_state(self, key_id: str, latched: bool) -> None:
@@ -106,6 +114,7 @@ class KeyboardWidget(QFrame):
                 state_machine.set_latched(latched, reason="sync_group")
         finally:
             self._syncing_latch_keys.discard(key_id)
+        self._refresh_key_legends()
 
     def _handle_key_press(self, spec: KeySpec) -> object | None:
         return self._keyboard_backend.key_down(spec, self._latched_keys)
@@ -121,6 +130,9 @@ class KeyboardWidget(QFrame):
         change: KeyStateChange,
         active_press: list[object | None],
     ) -> None:
+        if spec.holds_when_latched and change.reason != "release":
+            self._refresh_key_legends()
+
         previously_latched = change.previous in {
             KeyInteractionState.LATCHED,
             KeyInteractionState.LATCHED_PRESSED,
@@ -151,3 +163,18 @@ class KeyboardWidget(QFrame):
                 sibling.set_latched(currently_latched, reason="sync_group")
         finally:
             self._syncing_latch_keys.discard(key_id)
+
+        self._refresh_key_legends()
+
+    def _active_display_modifiers(self) -> frozenset[str]:
+        active = {key_id for key_id, latched in self._latched_keys.items() if latched}
+        for key_id in self._hold_visual_modifiers:
+            if any(machine.is_pressed for machine in self._latch_groups.get(key_id, [])):
+                active.add(key_id)
+        return frozenset(active)
+
+    def _refresh_key_legends(self) -> None:
+        active_modifiers = self._active_display_modifiers()
+        for button, spec in self._buttons_by_spec:
+            display = spec.resolve_display(active_modifiers)
+            set_key_button_label(button, display.label, display.secondary_label)

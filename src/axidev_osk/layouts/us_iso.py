@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models import KeySpec
+from ..models import KeyDisplay, KeySpec
 
 
 UNIT = 4
@@ -23,6 +23,7 @@ def key(
     latched_io_key: str | None = None,
     holds_when_latched: bool = False,
     honors_latched_modifiers: bool = True,
+    display_variants: tuple[KeyDisplay, ...] = (),
 ) -> KeySpec:
     return KeySpec(
         label=label,
@@ -37,6 +38,7 @@ def key(
         latched_io_key=latched_io_key,
         holds_when_latched=holds_when_latched,
         honors_latched_modifiers=honors_latched_modifiers,
+        display_variants=display_variants,
     )
 
 
@@ -68,6 +70,42 @@ def u(value: int) -> int:
     return value * UNIT
 
 
+def shifted_key(
+    label: str,
+    shifted_label: str,
+    *,
+    row: int,
+    column: int,
+    width: float = 1.0,
+    height: int = 1,
+    key_id: str | None = None,
+    latchable: bool = False,
+    io_key: str | None = None,
+    latched_io_key: str | None = None,
+    holds_when_latched: bool = False,
+    honors_latched_modifiers: bool = True,
+) -> KeySpec:
+    return key(
+        label,
+        row=row,
+        column=column,
+        width=width,
+        height=height,
+        key_id=key_id,
+        latchable=latchable,
+        io_key=io_key,
+        latched_io_key=latched_io_key,
+        holds_when_latched=holds_when_latched,
+        honors_latched_modifiers=honors_latched_modifiers,
+        display_variants=(
+            KeyDisplay(
+                label=shifted_label,
+                requires_modifiers=frozenset({"shift"}),
+            ),
+        ),
+    )
+
+
 def build_us_iso_layout() -> list[KeySpec]:
     return [
         key("Esc", row=0, column=u(0), io_key="Escape"),
@@ -87,19 +125,19 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("ScrLk", row=0, column=NAV_START + u(1), io_key="ScrollLock"),
         key("Pause", row=0, column=NAV_START + u(2), io_key="Pause"),
 
-        key("`", row=1, column=u(0), secondary_label="~"),
-        key("1", row=1, column=u(1), secondary_label="!"),
-        key("2", row=1, column=u(2), secondary_label="@"),
-        key("3", row=1, column=u(3), secondary_label="#"),
-        key("4", row=1, column=u(4), secondary_label="$"),
-        key("5", row=1, column=u(5), secondary_label="%"),
-        key("6", row=1, column=u(6), secondary_label="^"),
-        key("7", row=1, column=u(7), secondary_label="&"),
-        key("8", row=1, column=u(8), secondary_label="*"),
-        key("9", row=1, column=u(9), secondary_label="("),
-        key("0", row=1, column=u(10), secondary_label=")"),
-        key("-", row=1, column=u(11), secondary_label="_"),
-        key("=", row=1, column=u(12), secondary_label="+"),
+        shifted_key("`", "~", row=1, column=u(0)),
+        shifted_key("1", "!", row=1, column=u(1)),
+        shifted_key("2", "@", row=1, column=u(2)),
+        shifted_key("3", "#", row=1, column=u(3)),
+        shifted_key("4", "$", row=1, column=u(4)),
+        shifted_key("5", "%", row=1, column=u(5)),
+        shifted_key("6", "^", row=1, column=u(6)),
+        shifted_key("7", "&", row=1, column=u(7)),
+        shifted_key("8", "*", row=1, column=u(8)),
+        shifted_key("9", "(", row=1, column=u(9)),
+        shifted_key("0", ")", row=1, column=u(10)),
+        shifted_key("-", "_", row=1, column=u(11)),
+        shifted_key("=", "+", row=1, column=u(12)),
         key("Backspace", row=1, column=u(13), width=2.0, io_key="Backspace"),
         key("Ins", row=1, column=NAV_START, io_key="Insert"),
         key("Home", row=1, column=NAV_START + u(1), io_key="Home"),
@@ -120,8 +158,8 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("I", row=2, column=34),
         key("O", row=2, column=38),
         key("P", row=2, column=42),
-        key("[", row=2, column=46, secondary_label="{"),
-        key("]", row=2, column=50, secondary_label="}"),
+        shifted_key("[", "{", row=2, column=46),
+        shifted_key("]", "}", row=2, column=50),
         key("Del", row=2, column=NAV_START, io_key="Delete"),
         key("End", row=2, column=NAV_START + u(1), io_key="End"),
         key("PgDn", row=2, column=NAV_START + u(2), io_key="PageDown"),
@@ -140,15 +178,15 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("J", row=3, column=31),
         key("K", row=3, column=35),
         key("L", row=3, column=39),
-        key(";", row=3, column=43, secondary_label=":"),
-        key("'", row=3, column=47, secondary_label='"'),
+        shifted_key(";", ":", row=3, column=43),
+        shifted_key("'", '"', row=3, column=47),
         key("Enter", row=3, column=51, width=2.25, io_key="Enter"),
         key("4", row=3, column=NUMPAD_START, secondary_label="Left", io_key="Numpad4"),
         key("5", row=3, column=NUMPAD_START + u(1), io_key="Numpad5"),
         key("6", row=3, column=NUMPAD_START + u(2), secondary_label="Right", io_key="Numpad6"),
 
         held_modifier("Shift", row=4, column=u(0), width=1.25, key_id="shift", io_key="ShiftLeft"),
-        key("\\", row=4, column=5, secondary_label="|"),
+        shifted_key("\\", "|", row=4, column=5),
         key("Z", row=4, column=9),
         key("X", row=4, column=13),
         key("C", row=4, column=17),
@@ -156,9 +194,9 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("B", row=4, column=25),
         key("N", row=4, column=29),
         key("M", row=4, column=33),
-        key(",", row=4, column=37, secondary_label="<"),
-        key(".", row=4, column=41, secondary_label=">"),
-        key("/", row=4, column=45, secondary_label="?"),
+        shifted_key(",", "<", row=4, column=37),
+        shifted_key(".", ">", row=4, column=41),
+        shifted_key("/", "?", row=4, column=45),
         held_modifier(
             "Shift",
             row=4,
