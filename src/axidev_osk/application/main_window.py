@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -50,7 +50,6 @@ class MainWindow(QMainWindow):
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
-        self.resize(1680, 460)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -69,6 +68,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.setStyleSheet(build_stylesheet())
+        self._apply_startup_size()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._keyboard_backend.shutdown()
@@ -98,3 +98,9 @@ class MainWindow(QMainWindow):
             | _SWP_FRAMECHANGED
             | _SWP_NOOWNERZORDER,
         )
+
+    def _apply_startup_size(self) -> None:
+        self.ensurePolished()
+        minimum_size = self.minimumSizeHint().expandedTo(QSize(0, 0))
+        self.setMinimumSize(minimum_size)
+        self.resize(minimum_size)
