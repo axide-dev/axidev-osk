@@ -23,6 +23,21 @@ Or after installation:
 axidev-osk
 ```
 
+## Releases
+
+Published releases now ship a single stand-alone archive per platform:
+
+- `axidev-osk-<version>-windows-x64.zip`
+- `axidev-osk-<version>-linux-x64.zip`
+
+Each archive contains the runnable app plus the bundled Python runtime and the
+required license/compliance files. Linux builds still rely on the system
+`libinput`, `libudev`, and `xkbcommon` shared libraries at runtime.
+
+## License
+
+This project is licensed under GPLv3. See `LICENSE`.
+
 ## Notes
 
 - The app initializes `axidev_io.keyboard` on startup and sends key events to the currently active window.
