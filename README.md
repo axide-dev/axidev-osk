@@ -25,3 +25,12 @@ axidev-osk
 
 - The keyboard is currently presentation-focused and does not type into external widgets yet.
 - `Shift` and `Caps` are wired as latchable examples so the button factory already supports latched state and separate latch/unlatch callbacks.
+
+## Structure
+
+- `src/axidev_osk/layouts/us_iso.py`: the US ISO keyboard layout definition.
+- `src/axidev_osk/components/key_button.py`: the reusable key button factory and latch helpers.
+- `src/axidev_osk/components/keyboard_widget.py`: the keyboard container that renders rows from the layout.
+- `src/axidev_osk/application/main_window.py`: the main Qt window.
+- `src/axidev_osk/styles/theme.py`: the utilitarian stylesheet.
+- `src/axidev_osk/app.py`: the application entrypoint.
