@@ -11,4 +11,6 @@ class KeySpec:
     key_id: str | None = None
     latchable: bool = False
     io_key: str | None = None
+    latched_io_key: str | None = None
+    holds_when_latched: bool = False
     honors_latched_modifiers: bool = True

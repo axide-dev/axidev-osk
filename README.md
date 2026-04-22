@@ -26,12 +26,14 @@ axidev-osk
 ## Notes
 
 - The app initializes `axidev_io.keyboard` on startup and sends key events to the currently active window.
-- `Shift` and `Caps` are sticky in the UI and affect the emitted character selection for printable keys.
+- `Shift`, `Ctrl`, `Alt`, and `AltGr` are sticky in the UI and stay physically held through `key_down` until you unlatch them.
+- `Caps` remains latchable in the UI and still participates in printable letter casing.
 - If `axidev-io-python` is not installed yet, the window stays open but the keyboard is disabled and the status line explains how to install the submodule package.
 
 ## Structure
 
 - `src/axidev_osk/layouts/us_iso.py`: the US ISO keyboard layout definition.
+- `src/axidev_osk/components/key_state_machine.py`: the button interaction state machine and transition notifications.
 - `src/axidev_osk/components/key_button.py`: the reusable key button factory and latch helpers.
 - `src/axidev_osk/components/keyboard_widget.py`: the keyboard container that renders rows from the layout.
 - `src/axidev_osk/keyboard_io.py`: the `axidev_io` bridge that initializes the backend and dispatches key presses.
