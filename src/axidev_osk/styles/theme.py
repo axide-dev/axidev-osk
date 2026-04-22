@@ -1,23 +1,63 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PySide6.QtGui import QColor
 
 
+@dataclass(frozen=True)
+class ThemePalette:
+    shell_fill: QColor
+    shell_edge: QColor
+    shell_bar: QColor
+    shell_bar_hover: QColor
+    key_fill: QColor
+    key_hover: QColor
+    key_pressed: QColor
+    key_edge: QColor
+    active_fill: QColor
+    active_edge: QColor
+    text: QColor
+    disabled_text: QColor
+    disabled_fill: QColor
+    disabled_edge: QColor
+
+
+def build_theme_palette() -> ThemePalette:
+    return ThemePalette(
+        shell_fill=QColor("#1c1318"),
+        shell_edge=QColor("#6d4c5b"),
+        shell_bar=QColor("#24181f"),
+        shell_bar_hover=QColor("#2b1d25"),
+        key_fill=QColor("#3f2c35"),
+        key_hover=QColor("#4b3440"),
+        key_pressed=QColor("#312129"),
+        key_edge=QColor("#745261"),
+        active_fill=QColor("#5b3c49"),
+        active_edge=QColor("#9d7284"),
+        text=QColor("#f4e9ee"),
+        disabled_text=QColor("#b89ba7"),
+        disabled_fill=QColor("#24191f"),
+        disabled_edge=QColor("#4f3843"),
+    )
+
+
 def build_stylesheet() -> str:
-    shell_fill = QColor("#1c1318").name()
-    shell_edge = QColor("#6d4c5b").name()
-    shell_bar = QColor("#24181f").name()
-    shell_bar_hover = QColor("#2b1d25").name()
-    key_fill = QColor("#3f2c35").name()
-    key_hover = QColor("#4b3440").name()
-    key_pressed = QColor("#312129").name()
-    key_edge = QColor("#745261").name()
-    active_fill = QColor("#5b3c49").name()
-    active_edge = QColor("#9d7284").name()
-    text = QColor("#f4e9ee").name()
-    disabled_text = QColor("#b89ba7").name()
-    disabled_fill = QColor("#24191f").name()
-    disabled_edge = QColor("#4f3843").name()
+    palette = build_theme_palette()
+    shell_fill = palette.shell_fill.name()
+    shell_edge = palette.shell_edge.name()
+    shell_bar = palette.shell_bar.name()
+    shell_bar_hover = palette.shell_bar_hover.name()
+    key_fill = palette.key_fill.name()
+    key_hover = palette.key_hover.name()
+    key_pressed = palette.key_pressed.name()
+    key_edge = palette.key_edge.name()
+    active_fill = palette.active_fill.name()
+    active_edge = palette.active_edge.name()
+    text = palette.text.name()
+    disabled_text = palette.disabled_text.name()
+    disabled_fill = palette.disabled_fill.name()
+    disabled_edge = palette.disabled_edge.name()
 
     return f"""
         QMainWindow {{
