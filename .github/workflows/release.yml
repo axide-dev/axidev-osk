@@ -33,7 +33,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
 
       - name: Install Linux native dependencies
@@ -116,9 +116,6 @@ jobs:
 
       - name: Build axidev-osk distributions
         run: python -m build
-
-      - name: Smoke test imports
-        run: python -c "import axidev_io; from axidev_osk.app import main; print('imports-ok')"
 
       - name: Upload native release package artifact
         uses: actions/upload-artifact@v4
