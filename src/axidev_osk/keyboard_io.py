@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,15 @@ from .models import KeySpec
 class KeyPressHandle:
     key_name: str
     mods: str | None = None
+
+
+@dataclass(frozen=True)
+class PermissionSetupOutcome:
+    already_granted: bool
+    helper_applied: bool
+    requires_logout: bool
+    helper_path: str | None = None
+    error_text: str | None = None
 
 
 class AxidevIoKeyboardBackend:
@@ -38,6 +48,75 @@ class AxidevIoKeyboardBackend:
     def permission_setup_text(self) -> str:
         return self._build_permission_setup_text()
 
+    def setup_permissions(self) -> PermissionSetupOutcome:
+        try:
+            from axidev_io import keyboard
+        except Exception as exc:
+            error_text = (
+                f"axidev_io is not available: {exc}. "
+                f"{self._build_install_hint()}"
+            )
+            self._status_text = error_text
+            return PermissionSetupOutcome(
+                already_granted=False,
+                helper_applied=False,
+                requires_logout=False,
+                error_text=error_text,
+            )
+
+        try:
+            setup_permissions = getattr(keyboard, "setup_permissions", None)
+            if callable(setup_permissions):
+                result = setup_permissions()
+                helper_path = getattr(result, "helper_path", None)
+                outcome = PermissionSetupOutcome(
+                    already_granted=bool(getattr(result, "already_granted", False)),
+                    helper_applied=bool(getattr(result, "helper_applied", False)),
+                    requires_logout=bool(getattr(result, "requires_logout", False)),
+                    helper_path=str(helper_path) if helper_path else None,
+                )
+            else:
+                helper_path = self._run_permission_setup_script()
+                outcome = PermissionSetupOutcome(
+                    already_granted=False,
+                    helper_applied=True,
+                    requires_logout=True,
+                    helper_path=helper_path,
+                )
+        except Exception as exc:
+            error_text = f"Linux permission setup failed: {exc}"
+            self._keyboard = None
+            self._ready = False
+            self._needs_permission_setup = True
+            self._status_text = error_text
+            return PermissionSetupOutcome(
+                already_granted=False,
+                helper_applied=False,
+                requires_logout=False,
+                error_text=error_text,
+            )
+
+        if outcome.requires_logout:
+            self._keyboard = None
+            self._ready = False
+            self._needs_permission_setup = True
+            self._status_text = (
+                "Linux permission setup was applied. "
+                "Log out and back in, then relaunch axidev-osk."
+            )
+            return outcome
+
+        if self.initialize():
+            return outcome
+
+        return PermissionSetupOutcome(
+            already_granted=outcome.already_granted,
+            helper_applied=outcome.helper_applied,
+            requires_logout=False,
+            helper_path=outcome.helper_path,
+            error_text=self._status_text,
+        )
+
     def initialize(self) -> bool:
         if self._ready:
             return True
@@ -60,7 +139,8 @@ class AxidevIoKeyboardBackend:
                 self._needs_permission_setup = True
                 self._status_text = (
                     "axidev_io initialization failed: permission_denied. "
-                    "Linux input permissions still need to be configured for this user."
+                    "Linux input permissions still need to be configured for this user, "
+                    "or the current session needs a logout/login refresh after setup."
                 )
             else:
                 self._status_text = f"axidev_io initialization failed: {exc}"
@@ -228,11 +308,13 @@ class AxidevIoKeyboardBackend:
             setup_command = "bash ./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
 
         return (
-            "Linux blocked keyboard output because this user does not have access to /dev/uinput yet.\n\n"
+            "Linux blocked keyboard output because this session does not currently have access to /dev/uinput.\n\n"
             "If you have not configured that permission yet, run:\n"
             f"{setup_command}\n\n"
-            "Then log out and back in before testing again.\n"
-            "If you already ran it in this session, you can also retry from a terminal with:\n"
+            "If the setup step reports that access was applied but a logout is still required, "
+            "log out and back in before testing again.\n"
+            "If you already ran the setup in this session, either log out and back in, then relaunch the app, "
+            "or retry once from a terminal with:\n"
             "sg input -c axidev-osk"
         )
 
@@ -250,6 +332,28 @@ class AxidevIoKeyboardBackend:
         if script_path.is_file():
             return script_path
         return None
+
+    def _run_permission_setup_script(self) -> str:
+        if not sys.platform.startswith("linux"):
+            raise RuntimeError("Automatic permission setup is only supported on Linux.")
+
+        script_path = self._permission_script_path()
+        if script_path is None:
+            raise FileNotFoundError(
+                "Linux permission helper not found at "
+                "./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
+            )
+
+        try:
+            subprocess.run(["bash", str(script_path)], check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Linux permission helper exited with status {exc.returncode}"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        return str(script_path)
 
     def _is_linux_permission_error(self, exc: Exception) -> bool:
         if not sys.platform.startswith("linux"):

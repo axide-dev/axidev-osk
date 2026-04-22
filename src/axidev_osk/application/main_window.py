@@ -20,6 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self._keyboard_backend = AxidevIoKeyboardBackend()
+        self._status_label: QLabel | None = None
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
@@ -56,10 +57,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(keyboard_widget)
 
         if not self._keyboard_backend.ready:
-            status_label = QLabel(self._keyboard_backend.status_text, central)
-            status_label.setObjectName("statusLabel")
-            status_label.setWordWrap(True)
-            footer.addWidget(status_label, 1)
+            self._status_label = QLabel(self._keyboard_backend.status_text, central)
+            self._status_label.setObjectName("statusLabel")
+            self._status_label.setWordWrap(True)
+            footer.addWidget(self._status_label, 1)
         else:
             footer.addStretch(1)
 
@@ -90,17 +91,74 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._show_linux_permission_prompt)
 
     def _show_linux_permission_prompt(self) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Linux Input Permission",
-            (
-                "Keyboard output is blocked by Linux permissions.\n\n"
-                "Have you already configured /dev/uinput access for this user?"
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Linux Input Permission")
+        prompt.setIcon(QMessageBox.Icon.Question)
+        prompt.setText("Keyboard output is blocked by Linux permissions.")
+        prompt.setInformativeText(
+            "Choose Set Up Now to apply the bundled /dev/uinput permission helper. "
+            "If you already ran setup, this session may just need a log out and back in."
         )
-        if answer != QMessageBox.StandardButton.No:
+        setup_button = prompt.addButton("Set Up Now", QMessageBox.ButtonRole.AcceptRole)
+        already_configured_button = prompt.addButton(
+            "Already Configured",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_button = prompt.addButton(QMessageBox.StandardButton.Cancel)
+        prompt.setDefaultButton(setup_button)
+        prompt.exec()
+
+        clicked_button = prompt.clickedButton()
+        if clicked_button is setup_button:
+            self._run_linux_permission_setup()
+            return
+
+        if clicked_button is already_configured_button:
+            QMessageBox.information(
+                self,
+                "Log Out Required",
+                (
+                    "The Linux permission setup may already be applied, but this desktop session "
+                    "does not have the updated group membership yet.\n\n"
+                    "Log out and back in, then relaunch axidev-osk and test keyboard output again."
+                ),
+            )
+            return
+
+        if clicked_button is cancel_button:
+            return
+
+    def _run_linux_permission_setup(self) -> None:
+        outcome = self._keyboard_backend.setup_permissions()
+        self._refresh_status_label()
+
+        if outcome.error_text is not None:
+            QMessageBox.warning(
+                self,
+                "Permission Setup Failed",
+                f"{outcome.error_text}\n\n{self._keyboard_backend.permission_setup_text}",
+            )
+            return
+
+        if outcome.requires_logout:
+            detail = (
+                "Linux permission setup finished, but the new group membership is not active "
+                "in this session yet.\n\n"
+                "Log out and back in, then relaunch axidev-osk and test keyboard output again."
+            )
+            if outcome.helper_path is not None:
+                detail = f"{detail}\n\nHelper: {outcome.helper_path}"
+            QMessageBox.information(self, "Log Out Required", detail)
+            return
+
+        if self._keyboard_backend.ready:
+            detail = "Linux keyboard permissions are available now. Keyboard output is ready."
+            if outcome.already_granted:
+                detail = (
+                    "Linux keyboard permissions were already available in this session. "
+                    "Keyboard output is ready."
+                )
+            QMessageBox.information(self, "Permission Ready", detail)
             return
 
         QMessageBox.information(
@@ -108,3 +166,8 @@ class MainWindow(QMainWindow):
             "Permission Setup",
             self._keyboard_backend.permission_setup_text,
         )
+
+    def _refresh_status_label(self) -> None:
+        if self._status_label is None:
+            return
+        self._status_label.setText(self._keyboard_backend.status_text)
