@@ -160,8 +160,8 @@ def _candidate_plugin_roots() -> list[Path]:
 
 def _runtime_qt_plugin_roots() -> list[Path]:
     roots: list[Path] = []
-    executable_dir = Path(sys.executable).resolve().parent
-    package_root = Path(PySide6.__file__).resolve().parent
+    executable_dir = Path(sys.executable).absolute().parent
+    package_root = Path(PySide6.__file__).absolute().parent
     pyinstaller_root = getattr(sys, "_MEIPASS", "")
 
     roots.extend(
