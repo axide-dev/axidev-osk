@@ -121,7 +121,7 @@ def build_stylesheet() -> str:
             border-radius: 0px;
             padding: 8px 4px;
             text-align: center;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 600;
             color: {text};
         }}

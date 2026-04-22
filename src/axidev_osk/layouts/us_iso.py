@@ -111,6 +111,38 @@ def shifted_key(
     )
 
 
+def letter_key(
+    label: str,
+    *,
+    row: int,
+    column: int,
+    width: float = 1.0,
+    height: int = 1,
+) -> KeySpec:
+    lower_label = label.lower()
+    upper_label = label.upper()
+    return key(
+        lower_label,
+        row=row,
+        column=column,
+        width=width,
+        height=height,
+        io_key=upper_label,
+        display_variants=(
+            KeyDisplay(
+                label=upper_label,
+                requires_modifiers=frozenset({"shift"}),
+                excludes_modifiers=frozenset({"caps"}),
+            ),
+            KeyDisplay(
+                label=upper_label,
+                requires_modifiers=frozenset({"caps"}),
+                excludes_modifiers=frozenset({"shift"}),
+            ),
+        ),
+    )
+
+
 def build_us_iso_layout() -> list[KeySpec]:
     return [
         key("Esc", row=0, column=u(0), io_key="Escape"),
@@ -147,16 +179,16 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("Home", row=1, column=NAV_START + u(1), io_key="Home"),
         key("PgUp", row=1, column=NAV_START + u(2), io_key="PageUp"),
         key("Tab", row=2, column=u(0), width=1.5, io_key="Tab"),
-        key("Q", row=2, column=6),
-        key("W", row=2, column=10),
-        key("E", row=2, column=14),
-        key("R", row=2, column=18),
-        key("T", row=2, column=22),
-        key("Y", row=2, column=26),
-        key("U", row=2, column=30),
-        key("I", row=2, column=34),
-        key("O", row=2, column=38),
-        key("P", row=2, column=42),
+        letter_key("Q", row=2, column=6),
+        letter_key("W", row=2, column=10),
+        letter_key("E", row=2, column=14),
+        letter_key("R", row=2, column=18),
+        letter_key("T", row=2, column=22),
+        letter_key("Y", row=2, column=26),
+        letter_key("U", row=2, column=30),
+        letter_key("I", row=2, column=34),
+        letter_key("O", row=2, column=38),
+        letter_key("P", row=2, column=42),
         shifted_key("[", "{", row=2, column=46),
         shifted_key("]", "}", row=2, column=50),
         key("Del", row=2, column=NAV_START, io_key="Delete"),
@@ -171,15 +203,15 @@ def build_us_iso_layout() -> list[KeySpec]:
             latchable=True,
             io_key="CapsLock",
         ),
-        key("A", row=3, column=7),
-        key("S", row=3, column=11),
-        key("D", row=3, column=15),
-        key("F", row=3, column=19),
-        key("G", row=3, column=23),
-        key("H", row=3, column=27),
-        key("J", row=3, column=31),
-        key("K", row=3, column=35),
-        key("L", row=3, column=39),
+        letter_key("A", row=3, column=7),
+        letter_key("S", row=3, column=11),
+        letter_key("D", row=3, column=15),
+        letter_key("F", row=3, column=19),
+        letter_key("G", row=3, column=23),
+        letter_key("H", row=3, column=27),
+        letter_key("J", row=3, column=31),
+        letter_key("K", row=3, column=35),
+        letter_key("L", row=3, column=39),
         shifted_key(";", ":", row=3, column=43),
         shifted_key("'", '"', row=3, column=47),
         key("Enter", row=3, column=51, width=2.25, io_key="Enter"),
@@ -187,13 +219,13 @@ def build_us_iso_layout() -> list[KeySpec]:
             "Shift", row=4, column=u(0), width=1.25, key_id="shift", io_key="ShiftLeft"
         ),
         shifted_key("\\", "|", row=4, column=5),
-        key("Z", row=4, column=9),
-        key("X", row=4, column=13),
-        key("C", row=4, column=17),
-        key("V", row=4, column=21),
-        key("B", row=4, column=25),
-        key("N", row=4, column=29),
-        key("M", row=4, column=33),
+        letter_key("Z", row=4, column=9),
+        letter_key("X", row=4, column=13),
+        letter_key("C", row=4, column=17),
+        letter_key("V", row=4, column=21),
+        letter_key("B", row=4, column=25),
+        letter_key("N", row=4, column=29),
+        letter_key("M", row=4, column=33),
         shifted_key(",", "<", row=4, column=37),
         shifted_key(".", ">", row=4, column=41),
         shifted_key("/", "?", row=4, column=45),
@@ -206,7 +238,7 @@ def build_us_iso_layout() -> list[KeySpec]:
             io_key="ShiftRight",
             latched_io_key="ShiftLeft",
         ),
-        key("Up", row=4, column=NAV_START + u(1), io_key="Up"),
+        key("↑", row=4, column=NAV_START + u(1), io_key="Up"),
         held_modifier(
             "Ctrl", row=5, column=u(0), width=1.25, key_id="ctrl", io_key="CtrlLeft"
         ),
@@ -239,7 +271,7 @@ def build_us_iso_layout() -> list[KeySpec]:
             io_key="CtrlRight",
             latched_io_key="CtrlLeft",
         ),
-        key("Left", row=5, column=NAV_START, io_key="Left"),
-        key("Down", row=5, column=NAV_START + u(1), io_key="Down"),
-        key("Right", row=5, column=NAV_START + u(2), io_key="Right"),
+        key("←", row=5, column=NAV_START, io_key="Left"),
+        key("↓", row=5, column=NAV_START + u(1), io_key="Down"),
+        key("→", row=5, column=NAV_START + u(2), io_key="Right"),
     ]
