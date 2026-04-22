@@ -43,7 +43,7 @@ class AxidevIoKeyboardBackend:
             return False
 
         try:
-            keyboard.initialize(key_delay_us=2000)
+            keyboard.initialize(key_delay_us=2000, log_level="debug")
         except Exception as exc:
             self._status_text = f"axidev_io initialization failed: {exc}"
             return False
@@ -68,45 +68,60 @@ class AxidevIoKeyboardBackend:
             self._ready = False
             self._held_latched_keys.clear()
 
-    def sync_latched_key(self, spec: KeySpec, latched: bool) -> None:
+    def sync_latched_key(self, spec: KeySpec, latched: bool, active_press: object | None = None) -> object | None:
         if (
             not self._ready
             or self._keyboard is None
             or not spec.holds_when_latched
             or spec.key_id is None
         ):
-            return
+            return active_press
 
+        resolved_active_press = active_press if isinstance(active_press, KeyPressHandle) else None
         try:
             held_press = self._held_latched_keys.get(spec.key_id)
             if latched:
                 if held_press is not None:
-                    return
+                    if resolved_active_press is held_press:
+                        return None
+                    return active_press
+
+                if resolved_active_press is not None:
+                    self._held_latched_keys[spec.key_id] = resolved_active_press
+                    return None
 
                 press = self._resolve_latched_press(spec)
                 if press is None:
-                    return
+                    return active_press
 
                 if press.mods is None:
                     self._keyboard.sender.key_down(press.key_name)
                 else:
                     self._keyboard.sender.key_down(press.key_name, mods=press.mods)
                 self._held_latched_keys[spec.key_id] = press
-                return
+                return active_press
 
             if held_press is None:
-                return
+                return active_press
 
             if held_press.mods is None:
                 self._keyboard.sender.key_up(held_press.key_name)
             else:
                 self._keyboard.sender.key_up(held_press.key_name, mods=held_press.mods)
             del self._held_latched_keys[spec.key_id]
+            if resolved_active_press is held_press:
+                return None
+            return active_press
         except Exception as exc:
             print(f"axidev_io latch sync failed for {spec.label!r}: {exc}", file=sys.stderr)
+            return active_press
 
     def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
-        if spec.latchable or not self._ready or self._keyboard is None:
+        if not self._ready or self._keyboard is None:
+            return None
+        if spec.latchable and not spec.holds_when_latched:
+            return None
+        if spec.holds_when_latched and spec.key_id is not None and spec.key_id in self._held_latched_keys:
             return None
 
         try:

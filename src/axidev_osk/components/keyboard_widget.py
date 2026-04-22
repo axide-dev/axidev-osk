@@ -71,11 +71,12 @@ class KeyboardWidget(QFrame):
 
         if spec.latchable and spec.key_id is not None:
             state_machine.add_listener(
-                lambda change, key_spec=spec, key_id=spec.key_id, machine=state_machine: self._handle_latch_state_change(
+                lambda change, key_spec=spec, key_id=spec.key_id, machine=state_machine, press_ref=active_press: self._handle_latch_state_change(
                     key_spec,
                     key_id,
                     machine,
                     change,
+                    press_ref,
                 )
             )
             self._latch_groups.setdefault(spec.key_id, []).append(state_machine)
@@ -118,6 +119,7 @@ class KeyboardWidget(QFrame):
         key_id: str,
         state_machine: KeyStateMachine,
         change: KeyStateChange,
+        active_press: list[object | None],
     ) -> None:
         previously_latched = change.previous in {
             KeyInteractionState.LATCHED,
@@ -135,7 +137,11 @@ class KeyboardWidget(QFrame):
         if key_id in self._syncing_latch_keys:
             return
 
-        self._keyboard_backend.sync_latched_key(spec, currently_latched)
+        active_press[0] = self._keyboard_backend.sync_latched_key(
+            spec,
+            currently_latched,
+            active_press[0],
+        )
 
         self._syncing_latch_keys.add(key_id)
         try:

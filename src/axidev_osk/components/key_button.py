@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
 from .key_state_machine import KeyStateMachine
@@ -57,7 +57,10 @@ def create_key_button(
     def handle_release() -> None:
         state_machine.release()
         if on_release is not None:
-            on_release()
+            if state_machine.latchable:
+                QTimer.singleShot(0, on_release)
+            else:
+                on_release()
 
     def handle_click() -> None:
         if state_machine.latchable:
