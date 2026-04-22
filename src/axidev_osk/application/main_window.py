@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central.setObjectName("rootSurface")
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         keyboard_widget = KeyboardWidget(self._keyboard_backend)

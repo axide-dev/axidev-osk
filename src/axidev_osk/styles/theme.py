@@ -4,16 +4,18 @@ from PySide6.QtGui import QColor
 
 
 def build_stylesheet() -> str:
-    key_fill = QColor("#232933").name()
-    key_hover = QColor("#2d3642").name()
-    key_pressed = QColor("#1b2129").name()
-    key_edge = QColor("#465364").name()
-    active_fill = QColor("#3c556f").name()
-    active_edge = QColor("#78a6d1").name()
-    text = QColor("#f5f7fa").name()
-    disabled_text = QColor("#96a1af").name()
-    disabled_fill = QColor("#171c23").name()
-    disabled_edge = QColor("#2a323d").name()
+    shell_fill = QColor("#1c1318").name()
+    shell_edge = QColor("#6d4c5b").name()
+    key_fill = QColor("#3f2c35").name()
+    key_hover = QColor("#4b3440").name()
+    key_pressed = QColor("#312129").name()
+    key_edge = QColor("#745261").name()
+    active_fill = QColor("#5b3c49").name()
+    active_edge = QColor("#9d7284").name()
+    text = QColor("#f4e9ee").name()
+    disabled_text = QColor("#b89ba7").name()
+    disabled_fill = QColor("#24191f").name()
+    disabled_edge = QColor("#4f3843").name()
 
     return f"""
         QMainWindow {{
@@ -25,9 +27,9 @@ def build_stylesheet() -> str:
             font-size: 14px;
         }}
         QWidget#rootSurface {{
-            background: rgba(10, 12, 16, 190);
-            border: 1px solid rgba(255, 255, 255, 28);
-            border-radius: 18px;
+            background: {shell_fill};
+            border: 1px solid {shell_edge};
+            border-radius: 0px;
         }}
         QFrame#keyboard {{
             background: transparent;
@@ -36,7 +38,7 @@ def build_stylesheet() -> str:
         QPushButton {{
             background-color: {key_fill};
             border: 1px solid {key_edge};
-            border-radius: 10px;
+            border-radius: 0px;
             padding: 8px 4px;
             text-align: center;
             font-size: 14px;
