@@ -45,7 +45,7 @@ if sys.platform == "win32":
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("AxiDev On-Screen Keyboard")
+        self.setWindowTitle("axidev on-screen keyboard")
         self.resize(1160, 320)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
