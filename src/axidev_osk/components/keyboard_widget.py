@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QVBoxLayout
 
+from ..keyboard_io import AxidevIoKeyboardBackend
 from ..layouts.us_iso import build_us_iso_layout
 from ..models import KeySpec
 from .key_button import create_key_button, refresh_key_button
 
 
 class KeyboardWidget(QFrame):
-    def __init__(self) -> None:
+    def __init__(self, keyboard_backend: AxidevIoKeyboardBackend) -> None:
         super().__init__()
+        self._keyboard_backend = keyboard_backend
         self._latched_keys: dict[str, bool] = {"shift": False, "caps": False}
         self._latch_groups: dict[str, list[QPushButton]] = {"shift": [], "caps": []}
 
@@ -34,6 +36,7 @@ class KeyboardWidget(QFrame):
         on_latch = None
         on_unlatch = None
         latched = False
+        on_press = lambda key_spec=spec: self._handle_key_press(key_spec)
 
         if spec.latchable and spec.key_id is not None:
             on_latch = lambda key_id=spec.key_id: self.set_latched_state(key_id, True)
@@ -47,6 +50,7 @@ class KeyboardWidget(QFrame):
             key_id=spec.key_id,
             latchable=spec.latchable,
             latched=latched,
+            on_press=on_press,
             on_latch=on_latch,
             on_unlatch=on_unlatch,
         )
@@ -60,3 +64,6 @@ class KeyboardWidget(QFrame):
         self._latched_keys[key_id] = latched
         for button in self._latch_groups.get(key_id, []):
             refresh_key_button(button, latched)
+
+    def _handle_key_press(self, spec: KeySpec) -> None:
+        self._keyboard_backend.press_key(spec, self._latched_keys)

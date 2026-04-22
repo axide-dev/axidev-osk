@@ -26,6 +26,18 @@ def build_stylesheet() -> str:
             border: 1px solid #9ca3ad;
             border-radius: 12px;
         }}
+        QLabel#backendStatus {{
+            background: transparent;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 4px 0 4px;
+        }}
+        QLabel#backendStatus[ready="true"] {{
+            color: #355a3a;
+        }}
+        QLabel#backendStatus[ready="false"] {{
+            color: #8b2d2d;
+        }}
         QPushButton {{
             background: {key_fill};
             border: 1px solid {key_edge};
@@ -48,5 +60,11 @@ def build_stylesheet() -> str:
             color: white;
             border-color: {active_edge};
             border-bottom-color: {active_edge};
+        }}
+        QPushButton:disabled {{
+            color: #6f7782;
+            background: #dde2e8;
+            border-color: #aab2bc;
+            border-bottom-color: #bcc3cc;
         }}
         """

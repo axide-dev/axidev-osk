@@ -10,3 +10,5 @@ class KeySpec:
     secondary_label: str | None = None
     key_id: str | None = None
     latchable: bool = False
+    io_key: str | None = None
+    honors_latched_modifiers: bool = True

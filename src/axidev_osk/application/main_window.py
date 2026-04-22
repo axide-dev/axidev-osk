@@ -4,10 +4,11 @@ import ctypes
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtWidgets import QLabel, QMainWindow, QVBoxLayout, QWidget
 
 from ..components.keyboard_widget import KeyboardWidget
+from ..keyboard_io import AxidevIoKeyboardBackend
 from ..styles.theme import build_stylesheet
 
 
@@ -45,6 +46,9 @@ if sys.platform == "win32":
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self._keyboard_backend = AxidevIoKeyboardBackend()
+        self._keyboard_backend.initialize()
+
         self.setWindowTitle("axidev on-screen keyboard")
         self.resize(1160, 320)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -55,11 +59,24 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(0)
-        layout.addWidget(KeyboardWidget())
+        layout.setSpacing(10)
+
+        status_label = QLabel(self._keyboard_backend.status_text)
+        status_label.setObjectName("backendStatus")
+        status_label.setProperty("ready", self._keyboard_backend.ready)
+        status_label.setWordWrap(True)
+        layout.addWidget(status_label)
+
+        keyboard_widget = KeyboardWidget(self._keyboard_backend)
+        keyboard_widget.setEnabled(self._keyboard_backend.ready)
+        layout.addWidget(keyboard_widget)
 
         self.setCentralWidget(central)
         self.setStyleSheet(build_stylesheet())
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._keyboard_backend.shutdown()
+        super().closeEvent(event)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

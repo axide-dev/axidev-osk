@@ -1,0 +1,3 @@
+[submodule "vendor/axidev-io-python"]
+	path = vendor/axidev-io-python
+	url = https://github.com/axide-dev/axidev-io-python
