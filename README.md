@@ -102,6 +102,14 @@ axidev-osk
 
 Linux keyboard injection requires `uinput` access. If permission setup has not been applied yet, the app will explain how to run the bundled setup script.
 
+In standalone Linux bundles, that helper is shipped at the top level of the extracted app folder as `setup_uinput_permissions.sh` so it can be run directly from a terminal:
+
+```bash
+bash ./setup_uinput_permissions.sh
+```
+
+The app also offers an `Open In Terminal` path on Linux so the bundled helper can run in a real terminal window with a normal `sudo` prompt.
+
 For Wayland layer-shell support, install a Qt layer-shell plugin first. On Fedora:
 
 ```bash

@@ -48,6 +48,17 @@ class AxidevIoKeyboardBackend:
     def permission_setup_text(self) -> str:
         return self._build_permission_setup_text()
 
+    @property
+    def permission_setup_script_path(self) -> Path | None:
+        return self._permission_script_path()
+
+    @property
+    def permission_setup_command(self) -> str:
+        script_path = self._permission_script_path()
+        if script_path is not None:
+            return self._permission_setup_command(script_path)
+        return "bash ./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
+
     def setup_permissions(self) -> PermissionSetupOutcome:
         try:
             from axidev_io import keyboard
@@ -65,8 +76,41 @@ class AxidevIoKeyboardBackend:
             )
 
         try:
-            setup_permissions = getattr(keyboard, "setup_permissions", None)
-            if callable(setup_permissions):
+            if sys.platform.startswith("linux"):
+                has_required_permissions = getattr(keyboard, "has_required_permissions", None)
+                if callable(has_required_permissions) and has_required_permissions():
+                    outcome = PermissionSetupOutcome(
+                        already_granted=True,
+                        helper_applied=False,
+                        requires_logout=False,
+                        helper_path=None,
+                    )
+                elif self._permission_script_path() is not None:
+                    helper_path = self._run_permission_setup_script()
+                    outcome = PermissionSetupOutcome(
+                        already_granted=False,
+                        helper_applied=True,
+                        requires_logout=True,
+                        helper_path=helper_path,
+                    )
+                else:
+                    setup_permissions = getattr(keyboard, "setup_permissions", None)
+                    if not callable(setup_permissions):
+                        raise RuntimeError("axidev_io.keyboard.setup_permissions is unavailable.")
+
+                    result = setup_permissions()
+                    helper_path = getattr(result, "helper_path", None)
+                    outcome = PermissionSetupOutcome(
+                        already_granted=bool(getattr(result, "already_granted", False)),
+                        helper_applied=bool(getattr(result, "helper_applied", False)),
+                        requires_logout=bool(getattr(result, "requires_logout", False)),
+                        helper_path=str(helper_path) if helper_path else None,
+                    )
+            else:
+                setup_permissions = getattr(keyboard, "setup_permissions", None)
+                if not callable(setup_permissions):
+                    raise RuntimeError("axidev_io.keyboard.setup_permissions is unavailable.")
+
                 result = setup_permissions()
                 helper_path = getattr(result, "helper_path", None)
                 outcome = PermissionSetupOutcome(
@@ -74,14 +118,6 @@ class AxidevIoKeyboardBackend:
                     helper_applied=bool(getattr(result, "helper_applied", False)),
                     requires_logout=bool(getattr(result, "requires_logout", False)),
                     helper_path=str(helper_path) if helper_path else None,
-                )
-            else:
-                helper_path = self._run_permission_setup_script()
-                outcome = PermissionSetupOutcome(
-                    already_granted=False,
-                    helper_applied=True,
-                    requires_logout=True,
-                    helper_path=helper_path,
                 )
         except Exception as exc:
             error_text = f"Linux permission setup failed: {exc}"
@@ -294,23 +330,18 @@ class AxidevIoKeyboardBackend:
         return "+".join(modifiers)
 
     def _build_install_hint(self) -> str:
-        repo_root = Path(__file__).resolve().parents[2]
+        repo_root = self._repo_root()
         submodule_path = repo_root / "vendor" / "axidev-io-python"
         if submodule_path.is_dir():
             return "Install the submodule package with `python -m pip install -e ./vendor/axidev-io-python`."
         return "Initialize the submodule, then install it with `python -m pip install -e ./vendor/axidev-io-python`."
 
     def _build_permission_setup_text(self) -> str:
-        script_path = self._permission_script_path()
-        if script_path is not None:
-            setup_command = f"bash {script_path}"
-        else:
-            setup_command = "bash ./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
-
         return (
             "Linux blocked keyboard output because this session does not currently have access to /dev/uinput.\n\n"
-            "If you have not configured that permission yet, run:\n"
-            f"{setup_command}\n\n"
+            "The most reliable fix is to open a terminal and run:\n"
+            f"{self.permission_setup_command}\n\n"
+            "Run that command from a real terminal so sudo can prompt there.\n"
             "If the setup step reports that access was applied but a logout is still required, "
             "log out and back in before testing again.\n"
             "If you already ran the setup in this session, either log out and back in, then relaunch the app, "
@@ -318,19 +349,26 @@ class AxidevIoKeyboardBackend:
             "sg input -c axidev-osk"
         )
 
+    def _application_root(self) -> Path:
+        return Path(sys.executable).resolve().parent
+
+    def _repo_root(self) -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def _permission_setup_command(self, script_path: Path) -> str:
+        if script_path.parent == self._application_root():
+            return f"bash ./{script_path.name}"
+        return f"bash {script_path}"
+
     def _permission_script_path(self) -> Path | None:
-        repo_root = Path(__file__).resolve().parents[2]
-        script_path = (
-            repo_root
-            / "vendor"
-            / "axidev-io-python"
-            / "vendor"
-            / "axidev-io"
-            / "scripts"
-            / "setup_uinput_permissions.sh"
-        )
-        if script_path.is_file():
-            return script_path
+        repo_root = self._repo_root()
+        for script_path in (
+            self._application_root() / "setup_uinput_permissions.sh",
+            repo_root / "setup_uinput_permissions.sh",
+            repo_root / "vendor" / "axidev-io-python" / "vendor" / "axidev-io" / "scripts" / "setup_uinput_permissions.sh",
+        ):
+            if script_path.is_file():
+                return script_path
         return None
 
     def _run_permission_setup_script(self) -> str:
@@ -340,8 +378,7 @@ class AxidevIoKeyboardBackend:
         script_path = self._permission_script_path()
         if script_path is None:
             raise FileNotFoundError(
-                "Linux permission helper not found at "
-                "./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
+                "Linux permission helper not found in the app folder or bundled vendor files."
             )
 
         try:

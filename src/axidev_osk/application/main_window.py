@@ -12,6 +12,7 @@ from .overlay_window import (
     OverlayPlacement,
     configure_always_on_top_window,
 )
+from .linux_permissions import launch_permission_script_in_terminal
 from .window_chrome import install_overlay_chrome
 
 
@@ -96,19 +97,25 @@ class MainWindow(QMainWindow):
         prompt.setIcon(QMessageBox.Icon.Question)
         prompt.setText("Keyboard output is blocked by Linux permissions.")
         prompt.setInformativeText(
-            "Choose Set Up Now to apply the bundled /dev/uinput permission helper. "
+            "Choose Open In Terminal to run the bundled helper in a real terminal window so sudo can prompt there. "
+            "Run Setup Here still tries the helper directly from the app, but some desktops do not surface that prompt correctly. "
             "If you already ran setup, this session may just need a log out and back in."
         )
-        setup_button = prompt.addButton("Set Up Now", QMessageBox.ButtonRole.AcceptRole)
+        terminal_button = prompt.addButton("Open In Terminal", QMessageBox.ButtonRole.AcceptRole)
+        setup_button = prompt.addButton("Run Setup Here", QMessageBox.ButtonRole.ActionRole)
         already_configured_button = prompt.addButton(
             "Already Configured",
             QMessageBox.ButtonRole.ActionRole,
         )
         cancel_button = prompt.addButton(QMessageBox.StandardButton.Cancel)
-        prompt.setDefaultButton(setup_button)
+        prompt.setDefaultButton(terminal_button)
         prompt.exec()
 
         clicked_button = prompt.clickedButton()
+        if clicked_button is terminal_button:
+            self._open_linux_permission_terminal()
+            return
+
         if clicked_button is setup_button:
             self._run_linux_permission_setup()
             return
@@ -127,6 +134,34 @@ class MainWindow(QMainWindow):
 
         if clicked_button is cancel_button:
             return
+
+    def _open_linux_permission_terminal(self) -> None:
+        script_path = self._keyboard_backend.permission_setup_script_path
+        if script_path is None:
+            QMessageBox.warning(
+                self,
+                "Permission Helper Missing",
+                self._keyboard_backend.permission_setup_text,
+            )
+            return
+
+        if launch_permission_script_in_terminal(script_path):
+            QMessageBox.information(
+                self,
+                "Terminal Opened",
+                (
+                    "A terminal window was opened for the Linux permission helper.\n\n"
+                    "Complete the sudo prompt there. When the script finishes, log out and back in, "
+                    "then relaunch axidev-osk and test keyboard output again."
+                ),
+            )
+            return
+
+        QMessageBox.warning(
+            self,
+            "No Terminal Launcher Found",
+            self._keyboard_backend.permission_setup_text,
+        )
 
     def _run_linux_permission_setup(self) -> None:
         outcome = self._keyboard_backend.setup_permissions()
@@ -147,7 +182,7 @@ class MainWindow(QMainWindow):
                 "Log out and back in, then relaunch axidev-osk and test keyboard output again."
             )
             if outcome.helper_path is not None:
-                detail = f"{detail}\n\nHelper: {outcome.helper_path}"
+                detail = f"{detail}\n\nHelper script: {outcome.helper_path}"
             QMessageBox.information(self, "Log Out Required", detail)
             return
 

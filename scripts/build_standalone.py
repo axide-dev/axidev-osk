@@ -150,7 +150,7 @@ def populate_bundle_root(source_dir: Path, bundle_root: Path) -> None:
     if os.name != "nt":
         copy_file(
             AXIDEV_IO_DOCS_ROOT / "scripts" / "setup_uinput_permissions.sh",
-            bundle_root / "docs" / "axidev-io" / "setup_uinput_permissions.sh",
+            bundle_root / "setup_uinput_permissions.sh",
         )
 
 
