@@ -51,7 +51,6 @@ class MainWindow(QMainWindow):
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
-
         self._configure_window()
 
         central = QWidget()
@@ -82,15 +81,13 @@ class MainWindow(QMainWindow):
             self._apply_windows_window_styles()
 
         elif platform == "xcb":
-            # Re-apply flags after the native handle exists, which helps
-            # some X11 window managers honor stacking/focus hints more reliably.
+            # Re-assert the flags once the native window exists.
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
             self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
             self.show()
 
         elif platform == "wayland":
-            # Wayland normal toplevel windows are compositor-controlled.
-            # These hints remain best-effort only unless using layer-shell.
+            # Best effort only for regular Wayland toplevel windows.
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
             self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
             self.show()
@@ -98,30 +95,21 @@ class MainWindow(QMainWindow):
     def _configure_window(self) -> None:
         platform = self._qt_platform()
 
-        # Base behavior wanted on every platform:
-        # - visible without activating
-        # - should not take focus
-        # - always-on-top when supported
-        # - frameless floating utility-like window
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowFlag(Qt.WindowType.Tool, True)
+        # Keep native window decorations so the window remains movable/resizable
+        # in the normal way.
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
 
-        # Important: do NOT use WindowTransparentForInput here,
-        # otherwise clicks would pass through the keyboard.
+        # Tool windows are often treated as utility windows, but on some WMs
+        # they may behave too aggressively or oddly. Leave disabled by default.
+        # self.setWindowFlag(Qt.WindowType.Tool, True)
 
         if platform == "xcb":
-            # Under X11, Qt documents that WindowStaysOnTopHint may need
-            # X11BypassWindowManagerHint on some window managers.
             self.setWindowFlag(Qt.WindowType.X11BypassWindowManagerHint, True)
-
-        # On Wayland, keep it standards-compliant and best-effort only.
-        # A fully reliable floating overlay would require layer-shell.
 
     def _apply_windows_window_styles(self) -> None:
         hwnd = int(self.winId())
