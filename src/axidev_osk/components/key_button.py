@@ -56,17 +56,14 @@ def create_key_button(
 
     def handle_release() -> None:
         state_machine.release()
+        if state_machine.latchable:
+            state_machine.toggle_latched()
         if on_release is not None:
             if state_machine.latchable:
                 QTimer.singleShot(0, on_release)
             else:
                 on_release()
 
-    def handle_click() -> None:
-        if state_machine.latchable:
-            state_machine.toggle_latched()
-
     button.pressed.connect(handle_press)
     button.released.connect(handle_release)
-    button.clicked.connect(handle_click)
     return button
