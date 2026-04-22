@@ -5,7 +5,7 @@ import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QShowEvent
-from PySide6.QtWidgets import QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..components.keyboard_widget import KeyboardWidget
 from ..keyboard_io import AxidevIoKeyboardBackend
@@ -53,19 +53,15 @@ class MainWindow(QMainWindow):
         self.resize(1680, 460)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
 
         central = QWidget()
+        central.setObjectName("rootSurface")
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-
-        status_label = QLabel(self._keyboard_backend.status_text)
-        status_label.setObjectName("backendStatus")
-        status_label.setProperty("ready", self._keyboard_backend.ready)
-        status_label.setWordWrap(True)
-        layout.addWidget(status_label)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
 
         keyboard_widget = KeyboardWidget(self._keyboard_backend)
         keyboard_widget.setEnabled(self._keyboard_backend.ready)

@@ -4,67 +4,60 @@ from PySide6.QtGui import QColor
 
 
 def build_stylesheet() -> str:
-    chrome = QColor("#d8dbe0").name()
-    panel = QColor("#c4c9d1").name()
-    surface = QColor("#eef1f4").name()
-    key_fill = QColor("#f7f8fa").name()
-    key_edge = QColor("#8f97a3").name()
-    key_shadow = QColor("#b3b8c0").name()
-    active_fill = QColor("#5d6b7d").name()
-    active_edge = QColor("#445161").name()
-    text = QColor("#1f2329").name()
+    key_fill = QColor("#232933").name()
+    key_hover = QColor("#2d3642").name()
+    key_pressed = QColor("#1b2129").name()
+    key_edge = QColor("#465364").name()
+    active_fill = QColor("#3c556f").name()
+    active_edge = QColor("#78a6d1").name()
+    text = QColor("#f5f7fa").name()
+    disabled_text = QColor("#96a1af").name()
+    disabled_fill = QColor("#171c23").name()
+    disabled_edge = QColor("#2a323d").name()
 
     return f"""
+        QMainWindow {{
+            background: transparent;
+        }}
         QWidget {{
-            background: {chrome};
             color: {text};
             font-family: "Segoe UI";
             font-size: 14px;
         }}
+        QWidget#rootSurface {{
+            background: rgba(10, 12, 16, 190);
+            border: 1px solid rgba(255, 255, 255, 28);
+            border-radius: 18px;
+        }}
         QFrame#keyboard {{
-            background: {panel};
-            border: 1px solid #9ca3ad;
-            border-radius: 12px;
-        }}
-        QLabel#backendStatus {{
             background: transparent;
-            font-size: 12px;
-            font-weight: 600;
-            padding: 2px 4px 0 4px;
-        }}
-        QLabel#backendStatus[ready="true"] {{
-            color: #355a3a;
-        }}
-        QLabel#backendStatus[ready="false"] {{
-            color: #8b2d2d;
+            border: none;
         }}
         QPushButton {{
-            background: {key_fill};
+            background-color: {key_fill};
             border: 1px solid {key_edge};
-            border-bottom: 2px solid {key_shadow};
-            border-radius: 8px;
-            padding: 6px 4px;
+            border-radius: 10px;
+            padding: 8px 4px;
             text-align: center;
             font-size: 14px;
             font-weight: 600;
+            color: {text};
         }}
         QPushButton:hover {{
-            background: {surface};
+            background-color: {key_hover};
         }}
         QPushButton:pressed {{
-            background: #e2e6eb;
-            border-bottom-width: 1px;
+            background-color: {key_pressed};
+            border-color: {active_edge};
         }}
         QPushButton[latched="true"] {{
-            background: {active_fill};
-            color: white;
+            background-color: {active_fill};
+            color: {text};
             border-color: {active_edge};
-            border-bottom-color: {active_edge};
         }}
         QPushButton:disabled {{
-            color: #6f7782;
-            background: #dde2e8;
-            border-color: #aab2bc;
-            border-bottom-color: #bcc3cc;
+            color: {disabled_text};
+            background-color: {disabled_fill};
+            border-color: {disabled_edge};
         }}
         """

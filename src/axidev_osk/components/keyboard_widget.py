@@ -35,9 +35,9 @@ class KeyboardWidget(QFrame):
         self.setFrameShape(QFrame.Shape.NoFrame)
 
         container = QGridLayout(self)
-        container.setContentsMargins(18, 18, 18, 18)
-        container.setHorizontalSpacing(4)
-        container.setVerticalSpacing(8)
+        container.setContentsMargins(0, 0, 0, 0)
+        container.setHorizontalSpacing(6)
+        container.setVerticalSpacing(6)
 
         specs = build_us_iso_layout()
         max_column = 0
@@ -90,7 +90,7 @@ class KeyboardWidget(QFrame):
             on_release=on_release,
         )
         if spec.height > 1:
-            button.setMinimumHeight((56 * spec.height) + (8 * (spec.height - 1)))
+            button.setMinimumHeight((56 * spec.height) + (6 * (spec.height - 1)))
 
         return button
 
