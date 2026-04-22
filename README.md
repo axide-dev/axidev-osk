@@ -1,4 +1,4 @@
-# AxiDev OSK
+# Axidev OSK
 
 A small on-screen keyboard built with PySide6 and Qt.
 
