@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton
 
 from ..keyboard_io import AxidevIoKeyboardBackend
 from ..layouts.us_iso import build_us_iso_layout
@@ -19,6 +19,7 @@ class KeyboardWidget(QFrame):
             "ctrl": False,
             "alt": False,
             "altgr": False,
+            "super": False,
         }
         self._latch_groups: dict[str, list[KeyStateMachine]] = {
             "shift": [],
@@ -26,25 +27,35 @@ class KeyboardWidget(QFrame):
             "ctrl": [],
             "alt": [],
             "altgr": [],
+            "super": [],
         }
         self._syncing_latch_keys: set[str] = set()
 
         self.setObjectName("keyboard")
         self.setFrameShape(QFrame.Shape.NoFrame)
 
-        container = QVBoxLayout(self)
+        container = QGridLayout(self)
         container.setContentsMargins(18, 18, 18, 18)
-        container.setSpacing(10)
+        container.setHorizontalSpacing(4)
+        container.setVerticalSpacing(8)
 
-        for row in build_us_iso_layout():
-            row_layout = QHBoxLayout()
-            row_layout.setSpacing(8)
+        specs = build_us_iso_layout()
+        max_column = 0
+        max_row = 0
 
-            for spec in row:
-                button = self._build_key(spec)
-                row_layout.addWidget(button, int(spec.width * 10))
+        for spec in specs:
+            button = self._build_key(spec)
+            column_span = int(spec.width * 4)
+            container.addWidget(button, spec.row, spec.column, spec.height, column_span)
+            max_column = max(max_column, spec.column + column_span)
+            max_row = max(max_row, spec.row + spec.height)
 
-            container.addLayout(row_layout)
+        for column in range(max_column):
+            container.setColumnStretch(column, 1)
+            container.setColumnMinimumWidth(column, 10)
+
+        for row in range(max_row):
+            container.setRowStretch(row, 1)
 
     def _build_key(self, spec: KeySpec) -> QPushButton:
         active_press: list[object | None] = [None]
@@ -78,6 +89,8 @@ class KeyboardWidget(QFrame):
             on_press=on_press,
             on_release=on_release,
         )
+        if spec.height > 1:
+            button.setMinimumHeight((56 * spec.height) + (8 * (spec.height - 1)))
 
         return button
 

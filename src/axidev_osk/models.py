@@ -6,7 +6,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class KeySpec:
     label: str
+    row: int
+    column: int
     width: float = 1.0
+    height: int = 1
     secondary_label: str | None = None
     key_id: str | None = None
     latchable: bool = False

@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
-        self.resize(1160, 320)
+        self.resize(1680, 460)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
