@@ -19,6 +19,7 @@ class AxidevIoKeyboardBackend:
         self._keyboard: Any | None = None
         self._ready = False
         self._status_text = "Keyboard output is unavailable."
+        self._needs_permission_setup = False
         self._held_latched_keys: dict[str, KeyPressHandle] = {}
 
     @property
@@ -29,9 +30,19 @@ class AxidevIoKeyboardBackend:
     def status_text(self) -> str:
         return self._status_text
 
+    @property
+    def needs_permission_setup(self) -> bool:
+        return self._needs_permission_setup
+
+    @property
+    def permission_setup_text(self) -> str:
+        return self._build_permission_setup_text()
+
     def initialize(self) -> bool:
         if self._ready:
             return True
+
+        self._needs_permission_setup = False
 
         try:
             from axidev_io import keyboard
@@ -45,7 +56,14 @@ class AxidevIoKeyboardBackend:
         try:
             keyboard.initialize(key_delay_us=2000, log_level="debug")
         except Exception as exc:
-            self._status_text = f"axidev_io initialization failed: {exc}"
+            if self._is_linux_permission_error(exc):
+                self._needs_permission_setup = True
+                self._status_text = (
+                    "axidev_io initialization failed: permission_denied. "
+                    "Linux input permissions still need to be configured for this user."
+                )
+            else:
+                self._status_text = f"axidev_io initialization failed: {exc}"
             return False
 
         backend_name = keyboard.status().backend_name
@@ -201,6 +219,42 @@ class AxidevIoKeyboardBackend:
         if submodule_path.is_dir():
             return "Install the submodule package with `python -m pip install -e ./vendor/axidev-io-python`."
         return "Initialize the submodule, then install it with `python -m pip install -e ./vendor/axidev-io-python`."
+
+    def _build_permission_setup_text(self) -> str:
+        script_path = self._permission_script_path()
+        if script_path is not None:
+            setup_command = f"bash {script_path}"
+        else:
+            setup_command = "bash ./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
+
+        return (
+            "Linux blocked keyboard output because this user does not have access to /dev/uinput yet.\n\n"
+            "If you have not configured that permission yet, run:\n"
+            f"{setup_command}\n\n"
+            "Then log out and back in before testing again.\n"
+            "If you already ran it in this session, you can also retry from a terminal with:\n"
+            "sg input -c axidev-osk"
+        )
+
+    def _permission_script_path(self) -> Path | None:
+        repo_root = Path(__file__).resolve().parents[2]
+        script_path = (
+            repo_root
+            / "vendor"
+            / "axidev-io-python"
+            / "vendor"
+            / "axidev-io"
+            / "scripts"
+            / "setup_uinput_permissions.sh"
+        )
+        if script_path.is_file():
+            return script_path
+        return None
+
+    def _is_linux_permission_error(self, exc: Exception) -> bool:
+        if not sys.platform.startswith("linux"):
+            return False
+        return "permission_denied" in str(exc).lower()
 
     def _release_all_latched_keys(self) -> None:
         if self._keyboard is None:

@@ -1,46 +1,18 @@
 from __future__ import annotations
 
-import ctypes
-import sys
-
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QShowEvent
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from ..components.keyboard_widget import KeyboardWidget
 from ..keyboard_io import AxidevIoKeyboardBackend
 from ..styles.theme import build_stylesheet
-
-
-if sys.platform == "win32":
-    _GWL_EXSTYLE = -20
-    _HWND_TOPMOST = -1
-    _SWP_NOMOVE = 0x0002
-    _SWP_NOSIZE = 0x0001
-    _SWP_NOACTIVATE = 0x0010
-    _SWP_FRAMECHANGED = 0x0020
-    _SWP_NOOWNERZORDER = 0x0200
-    _WS_EX_NOACTIVATE = 0x08000000
-
-    _user32 = ctypes.windll.user32
-    _get_window_long_ptr = _user32.GetWindowLongPtrW
-    _set_window_long_ptr = _user32.SetWindowLongPtrW
-    _set_window_pos = _user32.SetWindowPos
-
-    _get_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int]
-    _get_window_long_ptr.restype = ctypes.c_longlong
-    _set_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_longlong]
-    _set_window_long_ptr.restype = ctypes.c_longlong
-    _set_window_pos.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_uint,
-    ]
-    _set_window_pos.restype = ctypes.c_int
+from .overlay_window import (
+    AlwaysOnTopWindowConfig,
+    OverlayPlacement,
+    configure_always_on_top_window,
+)
+from .window_chrome import install_overlay_chrome
 
 
 class MainWindow(QMainWindow):
@@ -51,22 +23,52 @@ class MainWindow(QMainWindow):
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
-        self._configure_window()
+        self._overlay = configure_always_on_top_window(
+            self,
+            config=AlwaysOnTopWindowConfig(
+                placement=OverlayPlacement.TOP_RIGHT,
+                screen_margin=16,
+            ),
+        )
 
         central = QWidget()
         central.setObjectName("rootSurface")
 
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(8)
+
+        if self._overlay.uses_custom_chrome:
+            install_overlay_chrome(
+                layout,
+                footer,
+                title=self.windowTitle(),
+                parent=central,
+                on_move=self._overlay.move_by,
+                on_resize=self._overlay.resize_by,
+            )
 
         keyboard_widget = KeyboardWidget(self._keyboard_backend)
-        keyboard_widget.setEnabled(self._keyboard_backend.ready)
         layout.addWidget(keyboard_widget)
+
+        if not self._keyboard_backend.ready:
+            status_label = QLabel(self._keyboard_backend.status_text, central)
+            status_label.setObjectName("statusLabel")
+            status_label.setWordWrap(True)
+            footer.addWidget(status_label, 1)
+        else:
+            footer.addStretch(1)
+
+        layout.addLayout(footer)
 
         self.setCentralWidget(central)
         self.setStyleSheet(build_stylesheet())
         self._apply_startup_size()
+        self._prompt_for_linux_permissions_if_needed()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._keyboard_backend.shutdown()
@@ -74,63 +76,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-
-        platform = self._qt_platform()
-
-        if sys.platform == "win32":
-            self._apply_windows_window_styles()
-
-        elif platform == "xcb":
-            # Re-assert the flags once the native window exists.
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-            self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
-            self.show()
-
-        elif platform == "wayland":
-            # Best effort only for regular Wayland toplevel windows.
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-            self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
-            self.show()
-
-    def _configure_window(self) -> None:
-        platform = self._qt_platform()
-
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-
-        # Keep native window decorations so the window remains movable/resizable
-        # in the normal way.
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
-
-        # Tool windows are often treated as utility windows, but on some WMs
-        # they may behave too aggressively or oddly. Leave disabled by default.
-        # self.setWindowFlag(Qt.WindowType.Tool, True)
-
-        if platform == "xcb":
-            self.setWindowFlag(Qt.WindowType.X11BypassWindowManagerHint, True)
-
-    def _apply_windows_window_styles(self) -> None:
-        hwnd = int(self.winId())
-        ex_style = _get_window_long_ptr(hwnd, _GWL_EXSTYLE)
-
-        if ex_style & _WS_EX_NOACTIVATE == 0:
-            _set_window_long_ptr(hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE)
-
-        _set_window_pos(
-            hwnd,
-            _HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            _SWP_NOMOVE
-            | _SWP_NOSIZE
-            | _SWP_NOACTIVATE
-            | _SWP_FRAMECHANGED
-            | _SWP_NOOWNERZORDER,
-        )
+        self._overlay.handle_show()
 
     def _apply_startup_size(self) -> None:
         self.ensurePolished()
@@ -138,9 +84,27 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(minimum_size)
         self.resize(minimum_size)
 
-    @staticmethod
-    def _qt_platform() -> str:
-        app = QGuiApplication.instance()
-        if app is None:
-            return ""
-        return QGuiApplication.platformName().lower()
+    def _prompt_for_linux_permissions_if_needed(self) -> None:
+        if not self._keyboard_backend.needs_permission_setup:
+            return
+        QTimer.singleShot(0, self._show_linux_permission_prompt)
+
+    def _show_linux_permission_prompt(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Linux Input Permission",
+            (
+                "Keyboard output is blocked by Linux permissions.\n\n"
+                "Have you already configured /dev/uinput access for this user?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.No:
+            return
+
+        QMessageBox.information(
+            self,
+            "Permission Setup",
+            self._keyboard_backend.permission_setup_text,
+        )

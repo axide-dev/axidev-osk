@@ -6,6 +6,8 @@ from PySide6.QtGui import QColor
 def build_stylesheet() -> str:
     shell_fill = QColor("#1c1318").name()
     shell_edge = QColor("#6d4c5b").name()
+    shell_bar = QColor("#24181f").name()
+    shell_bar_hover = QColor("#2b1d25").name()
     key_fill = QColor("#3f2c35").name()
     key_hover = QColor("#4b3440").name()
     key_pressed = QColor("#312129").name()
@@ -29,7 +31,45 @@ def build_stylesheet() -> str:
         QWidget#rootSurface {{
             background: {shell_fill};
             border: 1px solid {shell_edge};
-            border-radius: 0px;
+            border-radius: 6px;
+        }}
+        QFrame#layerShellTitleBar {{
+            background: {shell_bar};
+            border: 1px solid {shell_edge};
+            border-radius: 4px;
+        }}
+        QFrame#layerShellTitleBar:hover {{
+            background: {shell_bar_hover};
+        }}
+        QLabel#layerShellTitleLabel {{
+            font-size: 13px;
+            font-weight: 700;
+        }}
+        QPushButton#layerShellCloseButton {{
+            background-color: {key_fill};
+            border: 1px solid {key_edge};
+            border-radius: 4px;
+            padding: 0px;
+            font-size: 12px;
+            font-weight: 700;
+            min-width: 28px;
+            max-width: 28px;
+        }}
+        QPushButton#layerShellCloseButton:hover {{
+            background-color: {key_hover};
+        }}
+        QPushButton#layerShellCloseButton:pressed {{
+            background-color: {key_pressed};
+            border-color: {active_edge};
+        }}
+        QLabel#statusLabel {{
+            color: {disabled_text};
+            font-size: 12px;
+        }}
+        QFrame#layerShellResizeHandle {{
+            background: {shell_bar};
+            border: 1px solid {shell_edge};
+            border-radius: 4px;
         }}
         QFrame#keyboard {{
             background: transparent;

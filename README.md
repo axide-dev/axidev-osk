@@ -2,9 +2,9 @@
 
 A small on-screen keyboard built with PySide6 and Qt.
 
-This version now sends key input through `axidev-io-python`. Until that package is released to PyPI, this repo keeps it as a git submodule under `vendor/axidev-io-python`.
+It sends key input through `axidev-io-python`. Until that package is released to PyPI, this repo keeps it as a git submodule under `vendor/axidev-io-python`.
 
-The layout uses US legends on an ISO-style physical arrangement, including the extra `<` / `>` key next to the left Shift key.
+The layout uses US legends on an ISO-style physical arrangement, including the extra `\` / `|` key next to the left Shift key.
 
 ## Run
 
@@ -23,6 +23,21 @@ Or after installation:
 axidev-osk
 ```
 
+## Wayland Layer-Shell
+
+On Fedora, install the Qt layer-shell plugin first:
+
+```bash
+sudo dnf install layer-shell-qt
+```
+
+Then run the app from a real Wayland desktop session:
+
+```bash
+. .venv/bin/activate
+python -m axidev_osk
+```
+
 ## Releases
 
 Published releases now ship a single stand-alone archive per platform:
@@ -33,25 +48,9 @@ Published releases now ship a single stand-alone archive per platform:
 Each archive contains the runnable app plus the bundled Python runtime and the
 required license/compliance files. Linux builds still rely on the system
 `libinput`, `libudev`, and `xkbcommon` shared libraries at runtime.
+Wayland layer-shell support also requires a Qt `layer-shell` shell-integration
+plugin such as KDE's `layer-shell-qt`.
 
 ## License
 
 This project is licensed under GPLv3. See `LICENSE`.
-
-## Notes
-
-- The app initializes `axidev_io.keyboard` on startup and sends key events to the currently active window.
-- `Shift`, `Ctrl`, `Alt`, and `AltGr` are sticky in the UI and stay physically held through `key_down` until you unlatch them.
-- `Caps` remains latchable in the UI and still participates in printable letter casing.
-- If `axidev-io-python` is not installed yet, the window stays open but the keyboard is disabled and the status line explains how to install the submodule package.
-
-## Structure
-
-- `src/axidev_osk/layouts/us_iso.py`: the US ISO keyboard layout definition.
-- `src/axidev_osk/components/key_state_machine.py`: the button interaction state machine and transition notifications.
-- `src/axidev_osk/components/key_button.py`: the reusable key button factory and latch helpers.
-- `src/axidev_osk/components/keyboard_widget.py`: the keyboard container that renders rows from the layout.
-- `src/axidev_osk/keyboard_io.py`: the `axidev_io` bridge that initializes the backend and dispatches key presses.
-- `src/axidev_osk/application/main_window.py`: the main Qt window.
-- `src/axidev_osk/styles/theme.py`: the utilitarian stylesheet.
-- `src/axidev_osk/app.py`: the application entrypoint.
