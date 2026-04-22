@@ -4,11 +4,15 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen
+from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen, QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .overlay_window import AlwaysOnTopWindowConfig, configure_always_on_top_window
+from .overlay_window import (
+    AlwaysOnTopWindowConfig,
+    OverlayBackend,
+    configure_always_on_top_window,
+)
 from ..styles.theme import ThemePalette, build_theme_palette
 
 
@@ -26,6 +30,14 @@ class ScreenCorner(str, Enum):
     TOP_RIGHT = "top-right"
     BOTTOM_LEFT = "bottom-left"
     BOTTOM_RIGHT = "bottom-right"
+
+
+@dataclass(slots=True)
+class HotCornerSensorHandle:
+    corner: ScreenCorner
+    screen: QScreen
+    window: "HotCornerSensorWindow"
+    overlay: object
 
 
 class HotCornerIndicator(QWidget):
@@ -91,6 +103,32 @@ class HotCornerIndicator(QWidget):
         painter.drawEllipse(center_bounds)
 
 
+class HotCornerSensorWindow(QWidget):
+    entered = Signal()
+    left = Signal()
+
+    def __init__(self, *, size_px: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(QSize(size_px, size_px))
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowFlag(Qt.WindowType.Tool, True)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+
+    def enterEvent(self, event: object) -> None:
+        del event
+        self.entered.emit()
+
+    def leaveEvent(self, event: object) -> None:
+        del event
+        self.left.emit()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        del event
+
+
 class HotCornerWindowToggleController(QObject):
     def __init__(
         self,
@@ -103,6 +141,7 @@ class HotCornerWindowToggleController(QObject):
         self._app = app
         self._config = config or HotCornerConfig()
         self._active_corner: ScreenCorner | None = None
+        self._active_screen: QScreen | None = None
         self._entered_at = 0.0
         self._triggered_corner: ScreenCorner | None = None
         self._hidden_windows: list[QWidget] = []
@@ -114,18 +153,34 @@ class HotCornerWindowToggleController(QObject):
             self._indicator,
             config=AlwaysOnTopWindowConfig(manage_position=False),
         )
+        self._sensor_handles: list[HotCornerSensorHandle] = []
+        self._use_sensor_windows = self._indicator_overlay.backend in {
+            OverlayBackend.WAYLAND_BEST_EFFORT,
+            OverlayBackend.WAYLAND_LAYER_SHELL,
+            OverlayBackend.X11_UTILITY_BRIDGE,
+        }
+        if self._use_sensor_windows:
+            self._sensor_handles = self._create_sensor_handles()
 
         self._timer = QTimer(self)
         self._timer.setInterval(self._config.poll_interval_ms)
-        self._timer.timeout.connect(self._poll_cursor)
+        self._timer.timeout.connect(self._poll)
 
     def start(self) -> None:
+        self._show_sensor_windows()
         self._timer.start()
 
     def stop(self) -> None:
         self._timer.stop()
         self._indicator.hide()
+        self._hide_sensor_windows()
         self._reset_corner_tracking()
+
+    def _poll(self) -> None:
+        if self._use_sensor_windows:
+            self._poll_active_sensor()
+            return
+        self._poll_cursor()
 
     def _poll_cursor(self) -> None:
         cursor_pos = QCursor.pos()
@@ -157,8 +212,29 @@ class HotCornerWindowToggleController(QObject):
         self._indicator.hide()
         self._toggle_app_windows()
 
+    def _poll_active_sensor(self) -> None:
+        if self._active_corner is None or self._active_screen is None:
+            self._indicator.hide()
+            return
+
+        now = time.monotonic()
+        if self._triggered_corner == self._active_corner:
+            self._indicator.hide()
+            return
+
+        elapsed_ms = (now - self._entered_at) * 1000
+        progress = elapsed_ms / max(1, self._config.dwell_ms)
+        self._show_indicator_for_screen(self._active_corner, self._active_screen, progress)
+        if elapsed_ms < self._config.dwell_ms:
+            return
+
+        self._triggered_corner = self._active_corner
+        self._indicator.hide()
+        self._toggle_app_windows()
+
     def _reset_corner_tracking(self) -> None:
         self._active_corner = None
+        self._active_screen = None
         self._entered_at = 0.0
         self._triggered_corner = None
 
@@ -225,9 +301,18 @@ class HotCornerWindowToggleController(QObject):
             self._indicator.hide()
             return
 
+        self._show_indicator_for_screen(corner, screen, progress)
+
+    def _show_indicator_for_screen(
+        self,
+        corner: ScreenCorner,
+        screen: QScreen,
+        progress: float,
+    ) -> None:
+        geometry = screen.geometry()
         self._indicator_overlay.move_to(
-            self._indicator_position(screen.geometry(), corner),
-            screen_geometry=screen.geometry(),
+            self._indicator_position(geometry, corner),
+            screen_geometry=geometry,
         )
         self._indicator.set_progress(progress)
         if not self._indicator.isVisible():
@@ -246,7 +331,75 @@ class HotCornerWindowToggleController(QObject):
             return QPoint(geometry.left() + margin, geometry.bottom() - size - margin + 1)
         return QPoint(geometry.right() - size - margin + 1, geometry.bottom() - size - margin + 1)
 
+    def _sensor_position(self, geometry: QRect, corner: ScreenCorner) -> QPoint:
+        size = max(1, self._config.corner_size_px)
+
+        if corner == ScreenCorner.TOP_LEFT:
+            return QPoint(geometry.left(), geometry.top())
+        if corner == ScreenCorner.TOP_RIGHT:
+            return QPoint(geometry.right() - size + 1, geometry.top())
+        if corner == ScreenCorner.BOTTOM_LEFT:
+            return QPoint(geometry.left(), geometry.bottom() - size + 1)
+        return QPoint(geometry.right() - size + 1, geometry.bottom() - size + 1)
+
+    def _create_sensor_handles(self) -> list[HotCornerSensorHandle]:
+        handles: list[HotCornerSensorHandle] = []
+        for screen in self._app.screens():
+            for corner in ScreenCorner:
+                sensor_window = HotCornerSensorWindow(size_px=self._config.corner_size_px)
+                overlay = configure_always_on_top_window(
+                    sensor_window,
+                    config=AlwaysOnTopWindowConfig(manage_position=False),
+                )
+                handle = HotCornerSensorHandle(
+                    corner=corner,
+                    screen=screen,
+                    window=sensor_window,
+                    overlay=overlay,
+                )
+                sensor_window.entered.connect(lambda handle=handle: self._sensor_entered(handle))
+                sensor_window.left.connect(lambda handle=handle: self._sensor_left(handle))
+                screen.geometryChanged.connect(lambda _geometry, handle=handle: self._position_sensor_window(handle))
+                self._position_sensor_window(handle)
+                handles.append(handle)
+        return handles
+
+    def _show_sensor_windows(self) -> None:
+        for handle in self._sensor_handles:
+            self._position_sensor_window(handle)
+            if not handle.window.isVisible():
+                handle.window.show()
+            handle.overlay.handle_show()
+
+    def _hide_sensor_windows(self) -> None:
+        for handle in self._sensor_handles:
+            handle.window.hide()
+
+    def _position_sensor_window(self, handle: HotCornerSensorHandle) -> None:
+        geometry = handle.screen.geometry()
+        handle.overlay.move_to(
+            self._sensor_position(geometry, handle.corner),
+            screen_geometry=geometry,
+        )
+
+    def _sensor_entered(self, handle: HotCornerSensorHandle) -> None:
+        if self._triggered_corner == handle.corner and self._active_screen is handle.screen:
+            return
+
+        self._active_corner = handle.corner
+        self._active_screen = handle.screen
+        self._entered_at = time.monotonic()
+        self._triggered_corner = None
+        self._show_indicator_for_screen(handle.corner, handle.screen, 0.0)
+
+    def _sensor_left(self, handle: HotCornerSensorHandle) -> None:
+        if self._active_corner != handle.corner or self._active_screen is not handle.screen:
+            return
+        self._indicator.hide()
+        self._reset_corner_tracking()
+
     def _visible_top_level_windows(self) -> list[QWidget]:
+        sensor_windows = {handle.window for handle in self._sensor_handles}
         visible_windows: list[QWidget] = []
         for window in self._app.topLevelWidgets():
             if not window.isWindow():
@@ -254,6 +407,8 @@ class HotCornerWindowToggleController(QObject):
             if not window.isVisible():
                 continue
             if window is self._indicator:
+                continue
+            if window in sensor_windows:
                 continue
             if window.windowType() == Qt.WindowType.ToolTip:
                 continue

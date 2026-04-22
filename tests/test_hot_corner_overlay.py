@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from axidev_osk.application.hot_corner import HotCornerConfig, HotCornerWindowToggleController, ScreenCorner
+from axidev_osk.application import layer_shell
 from axidev_osk.application.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
 from axidev_osk.application.overlay_window import (
     AlwaysOnTopWindowConfig,
@@ -83,9 +86,10 @@ class FakeWindow:
 
 
 class FakeOverlayController:
-    def __init__(self) -> None:
+    def __init__(self, backend: OverlayBackend = OverlayBackend.X11_UTILITY) -> None:
         self.moves: list[tuple[QPoint, QRect]] = []
         self.handle_show_calls = 0
+        self.backend = backend
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         geometry = QRect(screen_geometry) if screen_geometry is not None else QRect()
@@ -154,6 +158,31 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(margins, QMargins(10, 20, 0, 0))
 
 
+class LayerShellPluginDiscoveryTests(unittest.TestCase):
+    def test_find_qt_platform_plugin_root_detects_pyinstaller_bundle_plugins(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            bundle_root = Path(temp_dir)
+            plugin_root = bundle_root / "_internal" / "PySide6" / "Qt" / "plugins"
+            platform_dir = plugin_root / "platforms"
+            platform_dir.mkdir(parents=True)
+            (platform_dir / "libqxcb.so").write_bytes(b"")
+
+            with patch.object(layer_shell.QLibraryInfo, "path", return_value=""), patch.dict(
+                "os.environ",
+                {},
+                clear=True,
+            ), patch.object(
+                layer_shell,
+                "_COMMON_QT_PLUGIN_ROOTS",
+                (),
+            ), patch.object(
+                layer_shell.sys,
+                "executable",
+                str(bundle_root / "axidev-osk"),
+            ):
+                self.assertEqual(layer_shell.find_qt_platform_plugin_root(), plugin_root)
+
+
 class HotCornerControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -211,6 +240,31 @@ class HotCornerControllerTests(unittest.TestCase):
             controller.stop()
             controller._indicator.close()
             self.app.processEvents()
+
+    def test_sensor_position_uses_corner_size(self) -> None:
+        overlay = FakeOverlayController()
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(
+                self.app,
+                config=HotCornerConfig(corner_size_px=24),
+            )
+
+        try:
+            geometry = QRect(100, 200, 800, 600)
+            self.assertEqual(
+                controller._sensor_position(geometry, ScreenCorner.TOP_RIGHT),
+                QPoint(876, 200),
+            )
+            self.assertEqual(
+                controller._sensor_position(geometry, ScreenCorner.BOTTOM_LEFT),
+                QPoint(100, 776),
+            )
+        finally:
+            controller.stop()
+            controller._indicator.close()
 
 
 if __name__ == "__main__":

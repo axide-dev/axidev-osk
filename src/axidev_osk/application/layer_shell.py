@@ -7,6 +7,7 @@ import sys
 from collections import deque
 from pathlib import Path
 
+import PySide6
 from PySide6.QtCore import QMargins, QObject, QLibraryInfo
 from PySide6.QtWidgets import QWidget
 
@@ -139,6 +140,8 @@ def find_qt_platform_plugin_root() -> Path | None:
 def _candidate_plugin_roots() -> list[Path]:
     plugin_roots: list[Path] = []
 
+    plugin_roots.extend(_runtime_qt_plugin_roots())
+
     qt_plugin_path = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
     if qt_plugin_path:
         plugin_roots.append(Path(qt_plugin_path))
@@ -153,6 +156,32 @@ def _candidate_plugin_roots() -> list[Path]:
 
     plugin_roots.extend(_COMMON_QT_PLUGIN_ROOTS)
     return plugin_roots
+
+
+def _runtime_qt_plugin_roots() -> list[Path]:
+    roots: list[Path] = []
+    executable_dir = Path(sys.executable).resolve().parent
+    package_root = Path(PySide6.__file__).resolve().parent
+    pyinstaller_root = getattr(sys, "_MEIPASS", "")
+
+    roots.extend(
+        (
+            executable_dir / "_internal" / "PySide6" / "Qt" / "plugins",
+            executable_dir / "PySide6" / "Qt" / "plugins",
+            package_root / "Qt" / "plugins",
+        )
+    )
+
+    if pyinstaller_root:
+        frozen_root = Path(pyinstaller_root)
+        roots.extend(
+            (
+                frozen_root / "PySide6" / "Qt" / "plugins",
+                frozen_root / "qt6_plugins",
+            )
+        )
+
+    return roots
 
 
 def prepend_plugin_root(plugin_root: Path) -> None:
