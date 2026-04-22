@@ -16,6 +16,7 @@ def key(
     column: int,
     width: float = 1.0,
     height: int = 1,
+    is_spacer: bool = False,
     secondary_label: str | None = None,
     key_id: str | None = None,
     latchable: bool = False,
@@ -31,6 +32,7 @@ def key(
         column=column,
         width=width,
         height=height,
+        is_spacer=is_spacer,
         secondary_label=secondary_label,
         key_id=key_id,
         latchable=latchable,
@@ -64,6 +66,10 @@ def held_modifier(
         holds_when_latched=True,
         honors_latched_modifiers=False,
     )
+
+
+def spacer(*, row: int, column: int, width: float = 1.0, height: int = 1) -> KeySpec:
+    return key("", row=row, column=column, width=width, height=height, is_spacer=True)
 
 
 def u(value: int) -> int:
@@ -124,7 +130,6 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("PrtSc", row=0, column=NAV_START, io_key="PrintScreen"),
         key("ScrLk", row=0, column=NAV_START + u(1), io_key="ScrollLock"),
         key("Pause", row=0, column=NAV_START + u(2), io_key="Pause"),
-
         shifted_key("`", "~", row=1, column=u(0)),
         shifted_key("1", "!", row=1, column=u(1)),
         shifted_key("2", "@", row=1, column=u(2)),
@@ -146,7 +151,6 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("/", row=1, column=NUMPAD_START + u(1), io_key="NumpadDivide"),
         key("*", row=1, column=NUMPAD_START + u(2), io_key="NumpadMultiply"),
         key("-", row=1, column=NUMPAD_START + u(3), io_key="NumpadMinus"),
-
         key("Tab", row=2, column=u(0), width=1.5, io_key="Tab"),
         key("Q", row=2, column=6),
         key("W", row=2, column=10),
@@ -164,11 +168,30 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("End", row=2, column=NAV_START + u(1), io_key="End"),
         key("PgDn", row=2, column=NAV_START + u(2), io_key="PageDown"),
         key("7", row=2, column=NUMPAD_START, secondary_label="Home", io_key="Numpad7"),
-        key("8", row=2, column=NUMPAD_START + u(1), secondary_label="Up", io_key="Numpad8"),
-        key("9", row=2, column=NUMPAD_START + u(2), secondary_label="PgUp", io_key="Numpad9"),
+        key(
+            "8",
+            row=2,
+            column=NUMPAD_START + u(1),
+            secondary_label="Up",
+            io_key="Numpad8",
+        ),
+        key(
+            "9",
+            row=2,
+            column=NUMPAD_START + u(2),
+            secondary_label="PgUp",
+            io_key="Numpad9",
+        ),
         key("+", row=2, column=NUMPAD_START + u(3), io_key="NumpadPlus", height=2),
-
-        key("Caps", row=3, column=u(0), width=1.75, key_id="caps", latchable=True, io_key="CapsLock"),
+        key(
+            "Caps",
+            row=3,
+            column=u(0),
+            width=1.75,
+            key_id="caps",
+            latchable=True,
+            io_key="CapsLock",
+        ),
         key("A", row=3, column=7),
         key("S", row=3, column=11),
         key("D", row=3, column=15),
@@ -183,9 +206,16 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("Enter", row=3, column=51, width=2.25, io_key="Enter"),
         key("4", row=3, column=NUMPAD_START, secondary_label="Left", io_key="Numpad4"),
         key("5", row=3, column=NUMPAD_START + u(1), io_key="Numpad5"),
-        key("6", row=3, column=NUMPAD_START + u(2), secondary_label="Right", io_key="Numpad6"),
-
-        held_modifier("Shift", row=4, column=u(0), width=1.25, key_id="shift", io_key="ShiftLeft"),
+        key(
+            "6",
+            row=3,
+            column=NUMPAD_START + u(2),
+            secondary_label="Right",
+            io_key="Numpad6",
+        ),
+        held_modifier(
+            "Shift", row=4, column=u(0), width=1.25, key_id="shift", io_key="ShiftLeft"
+        ),
         shifted_key("\\", "|", row=4, column=5),
         key("Z", row=4, column=9),
         key("X", row=4, column=13),
@@ -208,15 +238,34 @@ def build_us_iso_layout() -> list[KeySpec]:
         ),
         key("Up", row=4, column=NAV_START + u(1), io_key="Up"),
         key("1", row=4, column=NUMPAD_START, secondary_label="End", io_key="Numpad1"),
-        key("2", row=4, column=NUMPAD_START + u(1), secondary_label="Down", io_key="Numpad2"),
-        key("3", row=4, column=NUMPAD_START + u(2), secondary_label="PgDn", io_key="Numpad3"),
+        key(
+            "2",
+            row=4,
+            column=NUMPAD_START + u(1),
+            secondary_label="Down",
+            io_key="Numpad2",
+        ),
+        key(
+            "3",
+            row=4,
+            column=NUMPAD_START + u(2),
+            secondary_label="PgDn",
+            io_key="Numpad3",
+        ),
         key("Enter", row=4, column=NUMPAD_START + u(3), io_key="NumpadEnter", height=2),
-
-        held_modifier("Ctrl", row=5, column=u(0), width=1.25, key_id="ctrl", io_key="CtrlLeft"),
-        held_modifier("Win", row=5, column=5, width=1.25, key_id="super", io_key="SuperLeft"),
-        held_modifier("Alt", row=5, column=10, width=1.25, key_id="alt", io_key="AltLeft"),
+        held_modifier(
+            "Ctrl", row=5, column=u(0), width=1.25, key_id="ctrl", io_key="CtrlLeft"
+        ),
+        held_modifier(
+            "Win", row=5, column=5, width=1.25, key_id="super", io_key="SuperLeft"
+        ),
+        held_modifier(
+            "Alt", row=5, column=10, width=1.25, key_id="alt", io_key="AltLeft"
+        ),
         key("Space", row=5, column=15, width=6.25, io_key="Space"),
-        held_modifier("AltGr", row=5, column=40, width=1.25, key_id="altgr", io_key="AltRight"),
+        held_modifier(
+            "AltGr", row=5, column=40, width=1.25, key_id="altgr", io_key="AltRight"
+        ),
         held_modifier(
             "Win",
             row=5,
@@ -239,6 +288,19 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("Left", row=5, column=NAV_START, io_key="Left"),
         key("Down", row=5, column=NAV_START + u(1), io_key="Down"),
         key("Right", row=5, column=NAV_START + u(2), io_key="Right"),
-        key("0", row=5, column=NUMPAD_START, width=2.0, secondary_label="Ins", io_key="Numpad0"),
-        key(".", row=5, column=NUMPAD_START + u(2), secondary_label="Del", io_key="NumpadDecimal"),
+        key(
+            "0",
+            row=5,
+            column=NUMPAD_START,
+            width=2.0,
+            secondary_label="Ins",
+            io_key="Numpad0",
+        ),
+        key(
+            ".",
+            row=5,
+            column=NUMPAD_START + u(2),
+            secondary_label="Del",
+            io_key="NumpadDecimal",
+        ),
     ]

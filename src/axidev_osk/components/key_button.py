@@ -49,6 +49,7 @@ def create_key_button(
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setCheckable(state_machine.latchable)
     button.setMinimumHeight(56)
+    button.setMinimumWidth(max(56, round(56 * width)))
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     refresh_key_button(button, state_machine)
 

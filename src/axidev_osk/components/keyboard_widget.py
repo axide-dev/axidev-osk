@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QSizePolicy, QWidget
 
 from ..keyboard_io import AxidevIoKeyboardBackend
-from ..layouts.us_iso import build_us_iso_layout
+from ..layouts.us_iso import NAV_START, build_us_iso_layout
 from ..models import KeySpec
 from .key_button import create_key_button, set_key_button_label
 from .key_state_machine import KeyInteractionState, KeyStateChange, KeyStateMachine
@@ -42,24 +43,72 @@ class KeyboardWidget(QFrame):
         container.setVerticalSpacing(6)
 
         specs = build_us_iso_layout()
-        max_column = 0
-        max_row = 0
+        function_row_specs = [spec for spec in specs if spec.row == 0]
+        body_specs = [spec for spec in specs if spec.row > 0]
+        body_column_map = self._build_dense_column_map(body_specs)
+        body_column_count = self._count_occupied_columns(body_specs)
+        self._add_function_row(
+            container,
+            function_row_specs,
+            body_column_map=body_column_map,
+        )
+        self._add_body_grid(container, body_specs)
 
-        for spec in specs:
-            button = self._build_key(spec)
-            column_span = int(spec.width * 4)
-            container.addWidget(button, spec.row, spec.column, spec.height, column_span)
-            max_column = max(max_column, spec.column + column_span)
-            max_row = max(max_row, spec.row + spec.height)
-
-        for column in range(max_column):
+        for column in range(body_column_count):
             container.setColumnStretch(column, 1)
-            container.setColumnMinimumWidth(column, 10)
 
-        for row in range(max_row):
+        for row in range(6):
             container.setRowStretch(row, 1)
 
         self._refresh_key_legends()
+
+    def _build_dense_column_map(self, specs: list[KeySpec]) -> dict[int, int]:
+        occupied_columns: set[int] = set()
+        for spec in specs:
+            column_span = int(spec.width * 4)
+            occupied_columns.update(range(spec.column, spec.column + column_span))
+        return {
+            column: dense_index for dense_index, column in enumerate(sorted(occupied_columns))
+        }
+
+    def _count_occupied_columns(self, specs: list[KeySpec]) -> int:
+        return len(self._build_dense_column_map(specs))
+
+    def _add_function_row(
+        self,
+        container: QGridLayout,
+        specs: list[KeySpec],
+        *,
+        body_column_map: dict[int, int],
+    ) -> None:
+        left_block_specs = [spec for spec in specs if spec.column < NAV_START]
+        left_column_map = self._build_dense_column_map(left_block_specs)
+
+        for spec in specs:
+            column_span = int(spec.width * 4)
+            dense_column = (
+                body_column_map[spec.column]
+                if spec.column >= NAV_START
+                else left_column_map[spec.column]
+            )
+            container.addWidget(self._build_item(spec), 0, dense_column, spec.height, column_span)
+
+    def _add_body_grid(self, container: QGridLayout, specs: list[KeySpec]) -> None:
+        column_map = self._build_dense_column_map(specs)
+        for spec in specs:
+            column_span = int(spec.width * 4)
+            dense_column = column_map[spec.column]
+            container.addWidget(self._build_item(spec), spec.row, dense_column, spec.height, column_span)
+
+    def _build_item(self, spec: KeySpec) -> QWidget:
+        if spec.is_spacer:
+            spacer = QWidget(self)
+            spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            spacer.setMinimumWidth(max(56, round(56 * spec.width)))
+            spacer.setMinimumHeight((56 * spec.height) + (6 * (spec.height - 1)))
+            spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            return spacer
+        return self._build_key(spec)
 
     def _build_key(self, spec: KeySpec) -> QPushButton:
         active_press: list[object | None] = [None]

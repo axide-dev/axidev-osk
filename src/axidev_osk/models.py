@@ -18,6 +18,7 @@ class KeySpec:
     column: int
     width: float = 1.0
     height: int = 1
+    is_spacer: bool = False
     secondary_label: str | None = None
     key_id: str | None = None
     latchable: bool = False
