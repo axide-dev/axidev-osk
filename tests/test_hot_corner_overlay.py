@@ -180,13 +180,17 @@ class OverlayWindowControllerTests(unittest.TestCase):
             return_value=OverlayBackend.WINDOWS_NATIVE,
         ), patch(
             "axidev_osk.application.overlay_window._get_window_long_ptr",
+            create=True,
             return_value=0,
         ), patch(
             "axidev_osk.application.overlay_window._set_window_long_ptr",
+            create=True,
         ), patch(
             "axidev_osk.application.overlay_window._set_window_pos",
+            create=True,
         ), patch(
             "axidev_osk.application.overlay_window._dwm_set_window_attribute",
+            create=True,
         ) as set_dwm_attribute:
             controller = AlwaysOnTopWindowController(
                 window,
