@@ -122,6 +122,13 @@ def build_stylesheet() -> str:
         QMessageBox {{
             background-color: {shell_fill};
         }}
+        QMessageBox {{
+            border: 1px solid {shell_edge};
+            border-radius: 14px;
+        }}
+        QMessageBox QWidget {{
+            background-color: transparent;
+        }}
         QWidget {{
             color: {text};
             font-size: 14px;
@@ -268,8 +275,32 @@ def build_stylesheet() -> str:
             background-color: {disabled_fill};
             border-color: {disabled_edge};
         }}
+        QMessageBox QLabel#qt_msgbox_label {{
+            color: {text};
+            font-size: 15px;
+            font-weight: 600;
+            min-width: 360px;
+        }}
+        QMessageBox QLabel#qt_msgbox_informativelabel {{
+            color: {disabled_text};
+            font-size: 13px;
+            line-height: 1.45;
+        }}
         QMessageBox QLabel {{
             color: {text};
+        }}
+        QMessageBox QDialogButtonBox {{
+            background-color: {shell_bar};
+            border-top: 1px solid {shell_edge};
+            padding-top: 12px;
+            margin-top: 8px;
+        }}
+        QMessageBox QPushButton {{
+            min-width: 124px;
+            padding: 10px 12px;
+        }}
+        QMessageBox QPushButton:hover {{
+            border-color: {active_edge};
         }}
         QToolTip {{
             color: {text};
