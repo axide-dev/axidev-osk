@@ -40,14 +40,9 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        footer = QHBoxLayout()
-        footer.setContentsMargins(0, 0, 0, 0)
-        footer.setSpacing(8)
-
         if self._overlay.uses_custom_chrome:
             install_overlay_chrome(
                 layout,
-                footer,
                 title=self.windowTitle(),
                 parent=central,
                 on_move=self._overlay.move_by,
@@ -58,14 +53,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(keyboard_widget)
 
         if not self._keyboard_backend.ready:
+            footer = QHBoxLayout()
+            footer.setContentsMargins(0, 0, 0, 0)
+            footer.setSpacing(8)
             self._status_label = QLabel(self._keyboard_backend.status_text, central)
             self._status_label.setObjectName("statusLabel")
             self._status_label.setWordWrap(True)
             footer.addWidget(self._status_label, 1)
-        else:
-            footer.addStretch(1)
-
-        layout.addLayout(footer)
+            layout.addLayout(footer)
 
         self.setCentralWidget(central)
         self.setStyleSheet(build_stylesheet())

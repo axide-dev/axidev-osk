@@ -28,6 +28,7 @@ class OverlayTitleBar(QFrame):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
         layout = QHBoxLayout(self)
+        self._layout = layout
         layout.setContentsMargins(10, 8, 8, 8)
         layout.setSpacing(8)
 
@@ -38,11 +39,15 @@ class OverlayTitleBar(QFrame):
         layout.addStretch(1)
 
         close_button = QPushButton("x", self)
+        self._close_button = close_button
         close_button.setObjectName("layerShellCloseButton")
         close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         close_button.setFixedSize(28, 24)
         close_button.clicked.connect(self._close_window)
         layout.addWidget(close_button)
+
+    def add_control(self, widget: QWidget) -> None:
+        self._layout.insertWidget(self._layout.indexOf(self._close_button), widget)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -115,7 +120,6 @@ class OverlayResizeHandle(QFrame):
 
 def install_overlay_chrome(
     layout: QVBoxLayout,
-    footer: QHBoxLayout,
     *,
     title: str,
     parent: QWidget,
@@ -126,9 +130,9 @@ def install_overlay_chrome(
     title_bar.dragDelta.connect(on_move)
     layout.addWidget(title_bar)
 
-    resize_handle = OverlayResizeHandle(parent)
+    resize_handle = OverlayResizeHandle(title_bar)
     resize_handle.resizeDelta.connect(on_resize)
-    footer.addWidget(resize_handle, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+    title_bar.add_control(resize_handle)
 
     return OverlayChromeWidgets(
         title_bar=title_bar,
