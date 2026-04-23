@@ -243,7 +243,7 @@ def build_us_iso_layout() -> list[KeySpec]:
             "Ctrl", row=5, column=u(0), width=1.25, key_id="ctrl", io_key="CtrlLeft"
         ),
         held_modifier(
-            "Win", row=5, column=5, width=1.25, key_id="super", io_key="SuperLeft"
+            "Super", row=5, column=5, width=1.25, key_id="super", io_key="SuperLeft"
         ),
         held_modifier(
             "Alt", row=5, column=10, width=1.25, key_id="alt", io_key="AltLeft"
@@ -253,7 +253,7 @@ def build_us_iso_layout() -> list[KeySpec]:
             "AltGr", row=5, column=40, width=1.25, key_id="altgr", io_key="AltRight"
         ),
         held_modifier(
-            "Win",
+            "Super",
             row=5,
             column=45,
             width=1.25,
