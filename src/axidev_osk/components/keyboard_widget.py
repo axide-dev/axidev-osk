@@ -7,12 +7,14 @@ from ..keyboard_io import AxidevIoKeyboardBackend
 from ..layouts.us_iso import NAV_START, build_us_iso_layout
 from ..models import KeySpec
 from .key_button import create_key_button, set_key_button_label
+from .keyboard_metrics import DEFAULT_KEYBOARD_METRICS
 from .key_state_machine import KeyInteractionState, KeyStateChange, KeyStateMachine
 
 
 class KeyboardWidget(QFrame):
     def __init__(self, keyboard_backend: AxidevIoKeyboardBackend) -> None:
         super().__init__()
+        self._metrics = DEFAULT_KEYBOARD_METRICS
         self._keyboard_backend = keyboard_backend
         self._latched_keys: dict[str, bool] = {
             "shift": False,
@@ -39,8 +41,8 @@ class KeyboardWidget(QFrame):
 
         container = QGridLayout(self)
         container.setContentsMargins(0, 0, 0, 0)
-        container.setHorizontalSpacing(6)
-        container.setVerticalSpacing(6)
+        container.setHorizontalSpacing(self._metrics.grid_gap_px)
+        container.setVerticalSpacing(self._metrics.grid_gap_px)
 
         specs = build_us_iso_layout()
         function_row_specs = [spec for spec in specs if spec.row == 0]
@@ -104,8 +106,8 @@ class KeyboardWidget(QFrame):
         if spec.is_spacer:
             spacer = QWidget(self)
             spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            spacer.setMinimumWidth(max(56, round(56 * spec.width)))
-            spacer.setMinimumHeight((56 * spec.height) + (6 * (spec.height - 1)))
+            spacer.setMinimumWidth(self._metrics.span_width(spec.width))
+            spacer.setMinimumHeight(self._metrics.span_height(spec.height))
             spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             return spacer
         return self._build_key(spec)
@@ -147,7 +149,7 @@ class KeyboardWidget(QFrame):
             on_release=on_release,
         )
         if spec.height > 1:
-            button.setMinimumHeight((56 * spec.height) + (6 * (spec.height - 1)))
+            button.setMinimumHeight(self._metrics.span_height(spec.height))
 
         self._buttons_by_spec.append((button, spec))
         return button

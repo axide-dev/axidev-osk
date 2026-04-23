@@ -5,6 +5,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
+from .keyboard_metrics import DEFAULT_KEYBOARD_METRICS
 from .key_state_machine import KeyStateMachine
 
 VoidCallback = Callable[[], None]
@@ -40,6 +41,7 @@ def create_key_button(
     on_release: VoidCallback | None = None,
 ) -> QPushButton:
     button = QPushButton()
+    metrics = DEFAULT_KEYBOARD_METRICS
     set_key_button_label(button, label, secondary_label)
     button.setProperty("keyId", key_id or label)
     button.setProperty("keyWidth", width)
@@ -48,8 +50,8 @@ def create_key_button(
     button.setProperty("interactionState", state_machine.state.value)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setCheckable(state_machine.latchable)
-    button.setMinimumHeight(56)
-    button.setMinimumWidth(max(56, round(56 * width)))
+    button.setMinimumHeight(metrics.span_height(1))
+    button.setMinimumWidth(metrics.span_width(width))
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     refresh_key_button(button, state_machine)
 
