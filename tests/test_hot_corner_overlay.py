@@ -179,6 +179,54 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WINDOWS_NATIVE,
         ), patch(
+            "axidev_osk.application.overlay_window._GWL_EXSTYLE",
+            create=True,
+            new=-20,
+        ), patch(
+            "axidev_osk.application.overlay_window._HWND_TOPMOST",
+            create=True,
+            new=-1,
+        ), patch(
+            "axidev_osk.application.overlay_window._SWP_NOMOVE",
+            create=True,
+            new=0x0002,
+        ), patch(
+            "axidev_osk.application.overlay_window._SWP_NOSIZE",
+            create=True,
+            new=0x0001,
+        ), patch(
+            "axidev_osk.application.overlay_window._SWP_NOACTIVATE",
+            create=True,
+            new=0x0010,
+        ), patch(
+            "axidev_osk.application.overlay_window._SWP_FRAMECHANGED",
+            create=True,
+            new=0x0020,
+        ), patch(
+            "axidev_osk.application.overlay_window._SWP_NOOWNERZORDER",
+            create=True,
+            new=0x0200,
+        ), patch(
+            "axidev_osk.application.overlay_window._WS_EX_NOACTIVATE",
+            create=True,
+            new=0x08000000,
+        ), patch(
+            "axidev_osk.application.overlay_window._DWMWA_WINDOW_CORNER_PREFERENCE",
+            create=True,
+            new=33,
+        ), patch(
+            "axidev_osk.application.overlay_window._DWMWA_BORDER_COLOR",
+            create=True,
+            new=34,
+        ), patch(
+            "axidev_osk.application.overlay_window._DWMWCP_DONOTROUND",
+            create=True,
+            new=1,
+        ), patch(
+            "axidev_osk.application.overlay_window._DWMWA_COLOR_NONE",
+            create=True,
+            new=0xFFFFFFFE,
+        ), patch(
             "axidev_osk.application.overlay_window._get_window_long_ptr",
             create=True,
             return_value=0,
