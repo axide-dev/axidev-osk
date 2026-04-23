@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
 from axidev_osk.application.hot_corner import (
     _configure_hot_corner_window,
@@ -229,6 +229,13 @@ class HotCornerControllerTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.app.closeAllWindows()
+        cls.app.processEvents()
+        cls.app.quit()
+        cls.app.processEvents()
+
     def test_show_indicator_uses_overlay_controller_for_manual_position(self) -> None:
         overlay = FakeOverlayController()
         with patch(
@@ -267,17 +274,33 @@ class HotCornerControllerTests(unittest.TestCase):
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
 
-        window = QWidget()
-        window.show()
-        controller._indicator.show()
-        self.app.processEvents()
+        class FakeTopLevelWindow:
+            def __init__(self, *, is_indicator: bool = False) -> None:
+                self._is_indicator = is_indicator
+
+            def isWindow(self) -> bool:
+                return True
+
+            def isVisible(self) -> bool:
+                return True
+
+            def windowType(self) -> Qt.WindowType:
+                return Qt.WindowType.Tool if self._is_indicator else Qt.WindowType.Window
+
+        window = FakeTopLevelWindow()
+        indicator = controller._indicator
+        controller._indicator.hide()
 
         try:
-            visible_windows = controller._visible_top_level_windows()
+            with patch.object(
+                controller._app,
+                "topLevelWidgets",
+                return_value=[window, indicator],
+            ):
+                visible_windows = controller._visible_top_level_windows()
             self.assertIn(window, visible_windows)
-            self.assertNotIn(controller._indicator, visible_windows)
+            self.assertNotIn(indicator, visible_windows)
         finally:
-            window.close()
             controller.stop()
             controller._indicator.close()
             self.app.processEvents()

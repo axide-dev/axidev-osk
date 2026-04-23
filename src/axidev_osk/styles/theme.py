@@ -98,7 +98,6 @@ def build_stylesheet() -> str:
     shell_edge = palette.shell_edge.name()
     shell_bar = palette.shell_bar.name()
     shell_bar_hover = palette.shell_bar_hover.name()
-    accent = palette.accent.name()
     accent_wash = _rgba(palette.accent, 32)
     accent_wash_hover = _rgba(palette.accent, 48)
     accent_edge = _rgba(palette.accent, 110)
