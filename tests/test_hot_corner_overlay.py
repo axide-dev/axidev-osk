@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from axidev_osk.application.hot_corner import (
     _configure_hot_corner_window,
+    HiddenWindowState,
     HotCornerConfig,
     HotCornerWindowToggleController,
     ScreenCorner,
@@ -29,18 +30,25 @@ class FakeWindow:
         self.flags: list[tuple[Qt.WindowType, bool]] = []
         self.focus_policies: list[Qt.FocusPolicy] = []
         self.moves: list[tuple[int, int]] = []
+        self.opacity_changes: list[float] = []
         self._visible = False
         self._x = 0
         self._y = 0
         self._width = 100
         self._height = 60
+        self._opacity = 1.0
         self._window_flags = Qt.WindowType.Widget
+        self._attributes_enabled: set[Qt.WidgetAttribute] = set()
 
     def setFocusPolicy(self, policy: Qt.FocusPolicy) -> None:
         self.focus_policies.append(policy)
 
     def setAttribute(self, attribute: Qt.WidgetAttribute, enabled: bool = True) -> None:
         self.attributes.append((attribute, enabled))
+        if enabled:
+            self._attributes_enabled.add(attribute)
+            return
+        self._attributes_enabled.discard(attribute)
 
     def setWindowFlag(self, flag: Qt.WindowType, enabled: bool = True) -> None:
         self.flags.append((flag, enabled))
@@ -91,8 +99,21 @@ class FakeWindow:
     def show(self) -> None:
         self._visible = True
 
+    def hide(self) -> None:
+        self._visible = False
+
     def isVisible(self) -> bool:
         return self._visible
+
+    def setWindowOpacity(self, opacity: float) -> None:
+        self._opacity = opacity
+        self.opacity_changes.append(opacity)
+
+    def windowOpacity(self) -> float:
+        return self._opacity
+
+    def testAttribute(self, attribute: Qt.WidgetAttribute) -> bool:
+        return attribute in self._attributes_enabled
 
     def winId(self) -> int:
         return 1
@@ -122,6 +143,19 @@ class FakeScreen:
 
 
 class OverlayWindowControllerTests(unittest.TestCase):
+    def test_configure_window_disables_system_background_erase(self) -> None:
+        window = FakeWindow()
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WINDOWS_NATIVE,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+
+        controller.configure_window()
+
+        self.assertIn((Qt.WidgetAttribute.WA_NoSystemBackground, True), window.attributes)
+
     def test_x11_manual_move_keeps_indicator_position(self) -> None:
         window = FakeWindow()
         with patch.object(
@@ -352,6 +386,59 @@ class HotCornerControllerTests(unittest.TestCase):
                 visible_windows = controller._visible_top_level_windows()
             self.assertIn(window, visible_windows)
             self.assertNotIn(indicator, visible_windows)
+        finally:
+            controller.stop()
+            controller._indicator.close()
+            self.app.processEvents()
+
+    def test_restore_windows_reveals_existing_windows_after_one_tick(self) -> None:
+        overlay = FakeOverlayController()
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        window = FakeWindow()
+        window.hide()
+        controller._hidden_windows = [HiddenWindowState(window=window, opacity=0.65)]
+
+        try:
+            controller._restore_windows()
+
+            self.assertTrue(window.isVisible())
+            self.assertEqual(window.windowOpacity(), 0.0)
+            self.assertEqual(controller._hidden_windows, [])
+            self.assertEqual(len(controller._pending_restore_windows), 1)
+
+            controller._finalize_restored_windows()
+
+            self.assertEqual(window.windowOpacity(), 0.65)
+            self.assertEqual(controller._pending_restore_windows, [])
+        finally:
+            controller.stop()
+            controller._indicator.close()
+            self.app.processEvents()
+
+    def test_toggle_rehides_pending_restore_windows(self) -> None:
+        overlay = FakeOverlayController()
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        window = FakeWindow()
+        window.hide()
+        state = HiddenWindowState(window=window, opacity=1.0)
+        controller._pending_restore_windows = [state]
+
+        try:
+            controller._toggle_app_windows()
+
+            self.assertFalse(window.isVisible())
+            self.assertEqual(controller._pending_restore_windows, [])
+            self.assertEqual(controller._hidden_windows, [state])
         finally:
             controller.stop()
             controller._indicator.close()

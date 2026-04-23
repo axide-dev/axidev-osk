@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.application import OverlayResizeHandle, OverlayTitleBar
@@ -99,6 +100,27 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.assertEqual(central_layout.count(), 3)
         self.assertIsNotNone(window.findChild(QPushButton, "layerShellCloseButton"))
         self.assertIsNotNone(window.findChild(QLabel, "statusLabel"))
+
+    def test_root_surface_uses_styled_background(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with (
+            patch(
+                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
+                return_value=FakeKeyboardBackend(ready=True),
+            ),
+            patch(
+                "axidev_osk.application.main_window.configure_always_on_top_window",
+                return_value=overlay,
+            ),
+        ):
+            window = MainWindow()
+
+        self.addCleanup(window.close)
+
+        central = window.centralWidget()
+        self.assertTrue(central.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
 
 
 if __name__ == "__main__":

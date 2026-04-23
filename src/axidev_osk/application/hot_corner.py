@@ -53,6 +53,12 @@ class HotCornerSensorHandle:
     overlay: object
 
 
+@dataclass(slots=True)
+class HiddenWindowState:
+    window: QWidget
+    opacity: float
+
+
 class HotCornerIndicator(QWidget):
     def __init__(
         self,
@@ -133,6 +139,8 @@ class HotCornerSensorWindow(QWidget):
 
 
 class HotCornerWindowToggleController(QObject):
+    _WINDOW_REVEAL_DELAY_MS = 16
+
     def __init__(
         self,
         app: QApplication,
@@ -147,7 +155,8 @@ class HotCornerWindowToggleController(QObject):
         self._active_screen: QScreen | None = None
         self._entered_at = 0.0
         self._triggered_corner: ScreenCorner | None = None
-        self._hidden_windows: list[QWidget] = []
+        self._hidden_windows: list[HiddenWindowState] = []
+        self._pending_restore_windows: list[HiddenWindowState] = []
         self._indicator = HotCornerIndicator(
             size_px=self._config.indicator_size_px,
             palette=build_theme_palette(),
@@ -168,6 +177,9 @@ class HotCornerWindowToggleController(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(self._config.poll_interval_ms)
         self._timer.timeout.connect(self._poll)
+        self._restore_timer = QTimer(self)
+        self._restore_timer.setSingleShot(True)
+        self._restore_timer.timeout.connect(self._finalize_restored_windows)
 
     def start(self) -> None:
         self._show_sensor_windows()
@@ -175,6 +187,7 @@ class HotCornerWindowToggleController(QObject):
 
     def stop(self) -> None:
         self._timer.stop()
+        self._restore_timer.stop()
         self._indicator.hide()
         self._hide_sensor_windows()
         self._reset_corner_tracking()
@@ -273,22 +286,57 @@ class HotCornerWindowToggleController(QObject):
         if self._hidden_windows:
             self._restore_windows()
             return
+        if self._pending_restore_windows:
+            self._rehide_pending_restore_windows()
+            return
 
         visible_windows = self._visible_top_level_windows()
         if not visible_windows:
             return
 
-        self._hidden_windows = visible_windows
+        self._hidden_windows = [
+            HiddenWindowState(window=window, opacity=window.windowOpacity())
+            for window in visible_windows
+        ]
         for window in visible_windows:
             window.hide()
 
     def _restore_windows(self) -> None:
-        windows_to_restore = [window for window in self._hidden_windows if window is not None]
+        windows_to_restore = [state for state in self._hidden_windows if state.window is not None]
         self._hidden_windows = []
-        for window in windows_to_restore:
+        self._pending_restore_windows = []
+        for state in windows_to_restore:
+            window = state.window
             if window.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose):
                 continue
+            window.setWindowOpacity(0.0)
             window.show()
+            self._pending_restore_windows.append(state)
+        if self._pending_restore_windows:
+            self._restore_timer.start(self._WINDOW_REVEAL_DELAY_MS)
+
+    def _finalize_restored_windows(self) -> None:
+        windows_to_finalize = self._pending_restore_windows
+        self._pending_restore_windows = []
+        for state in windows_to_finalize:
+            window = state.window
+            if window.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose):
+                continue
+            if not window.isVisible():
+                continue
+            window.setWindowOpacity(state.opacity)
+
+    def _rehide_pending_restore_windows(self) -> None:
+        self._restore_timer.stop()
+        windows_to_hide = self._pending_restore_windows
+        self._pending_restore_windows = []
+        self._hidden_windows = []
+        for state in windows_to_hide:
+            window = state.window
+            if window.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose):
+                continue
+            window.hide()
+            self._hidden_windows.append(state)
 
     def _show_indicator(
         self,

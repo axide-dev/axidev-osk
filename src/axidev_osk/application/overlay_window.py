@@ -188,6 +188,7 @@ class AlwaysOnTopWindowController:
     def configure_window(self) -> None:
         self._window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
