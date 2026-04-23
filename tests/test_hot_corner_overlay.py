@@ -8,7 +8,12 @@ from unittest.mock import patch
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
-from axidev_osk.application.hot_corner import HotCornerConfig, HotCornerWindowToggleController, ScreenCorner
+from axidev_osk.application.hot_corner import (
+    _configure_hot_corner_window,
+    HotCornerConfig,
+    HotCornerWindowToggleController,
+    ScreenCorner,
+)
 from axidev_osk.application import layer_shell
 from axidev_osk.application.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
 from axidev_osk.application.overlay_window import (
@@ -29,6 +34,7 @@ class FakeWindow:
         self._y = 0
         self._width = 100
         self._height = 60
+        self._window_flags = Qt.WindowType.Widget
 
     def setFocusPolicy(self, policy: Qt.FocusPolicy) -> None:
         self.focus_policies.append(policy)
@@ -38,6 +44,13 @@ class FakeWindow:
 
     def setWindowFlag(self, flag: Qt.WindowType, enabled: bool = True) -> None:
         self.flags.append((flag, enabled))
+        if enabled:
+            self._window_flags |= flag
+            return
+        self._window_flags &= ~flag
+
+    def windowFlags(self) -> Qt.WindowType:
+        return self._window_flags
 
     def move(self, *args: object) -> None:
         if len(args) == 1 and isinstance(args[0], QPoint):
@@ -157,6 +170,34 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(anchors, ANCHOR_LEFT | ANCHOR_TOP)
         self.assertEqual(margins, QMargins(10, 20, 0, 0))
 
+    def test_windows_native_frameless_overlay_disables_dwm_border(self) -> None:
+        window = FakeWindow()
+        window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WINDOWS_NATIVE,
+        ), patch(
+            "axidev_osk.application.overlay_window._get_window_long_ptr",
+            return_value=0,
+        ), patch(
+            "axidev_osk.application.overlay_window._set_window_long_ptr",
+        ), patch(
+            "axidev_osk.application.overlay_window._set_window_pos",
+        ), patch(
+            "axidev_osk.application.overlay_window._dwm_set_window_attribute",
+        ) as set_dwm_attribute:
+            controller = AlwaysOnTopWindowController(
+                window,
+                config=AlwaysOnTopWindowConfig(manage_position=False),
+            )
+            controller.configure_window()
+            controller.handle_show()
+
+        requested_attributes = [call.args[1] for call in set_dwm_attribute.call_args_list]
+        self.assertEqual(requested_attributes, [33, 34])
+
 
 class LayerShellPluginDiscoveryTests(unittest.TestCase):
     def test_find_qt_platform_plugin_root_detects_pyinstaller_bundle_plugins(self) -> None:
@@ -265,6 +306,21 @@ class HotCornerControllerTests(unittest.TestCase):
         finally:
             controller.stop()
             controller._indicator.close()
+
+    def test_configure_hot_corner_window_requests_shadowless_flags(self) -> None:
+        indicator_window = FakeWindow()
+        sensor_window = FakeWindow()
+
+        _configure_hot_corner_window(indicator_window, accepts_input=False)
+        _configure_hot_corner_window(sensor_window, accepts_input=True)
+
+        self.assertIn((Qt.WindowType.FramelessWindowHint, True), indicator_window.flags)
+        self.assertIn((Qt.WindowType.NoDropShadowWindowHint, True), indicator_window.flags)
+        self.assertIn((Qt.WindowType.WindowTransparentForInput, True), indicator_window.flags)
+
+        self.assertIn((Qt.WindowType.FramelessWindowHint, True), sensor_window.flags)
+        self.assertIn((Qt.WindowType.NoDropShadowWindowHint, True), sensor_window.flags)
+        self.assertNotIn((Qt.WindowType.WindowTransparentForInput, True), sensor_window.flags)
 
 
 if __name__ == "__main__":

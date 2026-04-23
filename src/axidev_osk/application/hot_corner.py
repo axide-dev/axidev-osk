@@ -16,6 +16,19 @@ from .overlay_window import (
 from ..styles.theme import ThemePalette, build_theme_palette
 
 
+def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
+    window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+    window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    window.setWindowFlag(Qt.WindowType.Tool, True)
+    window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    window.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+    window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+    if not accepts_input:
+        window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, True)
+
+
 @dataclass(slots=True)
 class HotCornerConfig:
     dwell_ms: int = 450
@@ -53,12 +66,7 @@ class HotCornerIndicator(QWidget):
         self._palette = palette
 
         self.setFixedSize(QSize(size_px, size_px))
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setWindowFlag(Qt.WindowType.Tool, True)
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+        _configure_hot_corner_window(self, accepts_input=False)
 
     def set_progress(self, progress: float) -> None:
         clamped_progress = max(0.0, min(progress, 1.0))
@@ -110,12 +118,7 @@ class HotCornerSensorWindow(QWidget):
     def __init__(self, *, size_px: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(QSize(size_px, size_px))
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setWindowFlag(Qt.WindowType.Tool, True)
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+        _configure_hot_corner_window(self, accepts_input=True)
 
     def enterEvent(self, event: object) -> None:
         del event

@@ -60,11 +60,17 @@ if sys.platform == "win32":
     _SWP_FRAMECHANGED = 0x0020
     _SWP_NOOWNERZORDER = 0x0200
     _WS_EX_NOACTIVATE = 0x08000000
+    _DWMWA_WINDOW_CORNER_PREFERENCE = 33
+    _DWMWA_BORDER_COLOR = 34
+    _DWMWCP_DONOTROUND = 1
+    _DWMWA_COLOR_NONE = 0xFFFFFFFE
 
     _user32 = ctypes.windll.user32
+    _dwmapi = ctypes.windll.dwmapi
     _get_window_long_ptr = _user32.GetWindowLongPtrW
     _set_window_long_ptr = _user32.SetWindowLongPtrW
     _set_window_pos = _user32.SetWindowPos
+    _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
 
     _get_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int]
     _get_window_long_ptr.restype = ctypes.c_longlong
@@ -80,6 +86,15 @@ if sys.platform == "win32":
         ctypes.c_uint,
     ]
     _set_window_pos.restype = ctypes.c_int
+    _dwm_set_window_attribute.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_uint,
+    ]
+    _dwm_set_window_attribute.restype = ctypes.c_long
+else:
+    _dwm_set_window_attribute = None
 
 
 def prepare_always_on_top_window_environment(
@@ -411,6 +426,28 @@ class AlwaysOnTopWindowController:
             | _SWP_NOACTIVATE
             | _SWP_FRAMECHANGED
             | _SWP_NOOWNERZORDER,
+        )
+        self._apply_windows_frameless_chrome(hwnd)
+
+    def _apply_windows_frameless_chrome(self, hwnd: int) -> None:
+        if _dwm_set_window_attribute is None:
+            return
+        if not bool(self._window.windowFlags() & Qt.WindowType.FramelessWindowHint):
+            return
+
+        corner_preference = ctypes.c_uint(_DWMWCP_DONOTROUND)
+        border_color = ctypes.c_uint(_DWMWA_COLOR_NONE)
+        _dwm_set_window_attribute(
+            hwnd,
+            _DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(corner_preference),
+            ctypes.sizeof(corner_preference),
+        )
+        _dwm_set_window_attribute(
+            hwnd,
+            _DWMWA_BORDER_COLOR,
+            ctypes.byref(border_color),
+            ctypes.sizeof(border_color),
         )
 
     @staticmethod
