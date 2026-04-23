@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, QTimer
 from PySide6.QtGui import QCloseEvent, QShowEvent
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from ..components.keyboard_widget import KeyboardWidget
 from ..keyboard_io import AxidevIoKeyboardBackend
-from ..styles.theme import build_stylesheet
+from ..styles.theme import apply_theme
 from .overlay_window import (
     AlwaysOnTopWindowConfig,
     OverlayPlacement,
@@ -63,7 +63,9 @@ class MainWindow(QMainWindow):
             layout.addLayout(footer)
 
         self.setCentralWidget(central)
-        self.setStyleSheet(build_stylesheet())
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app)
         self._apply_startup_size()
         self._prompt_for_linux_permissions_if_needed()
 
