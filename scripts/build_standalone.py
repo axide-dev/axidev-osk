@@ -5,6 +5,7 @@ import argparse
 import os
 import platform
 import shutil
+import stat
 import subprocess
 import sys
 import zipfile
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_ROOT = ROOT / "build" / "standalone"
 PACKAGES_DIR = ROOT / "packages"
 APP_NAME = "axidev-osk"
+LINUX_PERMISSION_HELPER_NAME = "setup_uinput_permissions.sh"
 TOP_LEVEL_LICENSE = ROOT / "LICENSE"
 TOP_LEVEL_README = ROOT / "README.md"
 AXIDEV_IO_PYTHON_ROOT = ROOT / "vendor" / "axidev-io-python"
@@ -27,6 +29,7 @@ AXIDEV_IO_DOCS_ROOT = (
     / "vendor"
     / "axidev-io"
 )
+EXECUTABLE_PERMISSION_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
 
 def detect_arch() -> str:
@@ -59,6 +62,16 @@ def copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def make_file_executable(path: Path) -> None:
+    mode = path.stat().st_mode
+    path.chmod(mode | EXECUTABLE_PERMISSION_BITS)
+
+
+def copy_executable_file(source: Path, destination: Path) -> None:
+    copy_file(source, destination)
+    make_file_executable(destination)
+
+
 def copy_tree(source_dir: Path, destination_dir: Path) -> None:
     shutil.copytree(source_dir, destination_dir, dirs_exist_ok=True)
 
@@ -72,7 +85,10 @@ def write_zip_tree(archive_path: Path, source_dir: Path) -> None:
             archive_name = file_path.relative_to(source_dir).as_posix()
             info = zipfile.ZipInfo.from_file(file_path, archive_name)
             info.create_system = 3
-            info.external_attr = (file_path.stat().st_mode & 0xFFFF) << 16
+            file_mode = file_path.stat().st_mode
+            if file_path.name == LINUX_PERMISSION_HELPER_NAME:
+                file_mode |= EXECUTABLE_PERMISSION_BITS
+            info.external_attr = (file_mode & 0xFFFF) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
 
             with file_path.open("rb") as handle:
@@ -148,9 +164,9 @@ def populate_bundle_root(source_dir: Path, bundle_root: Path) -> None:
     )
 
     if os.name != "nt":
-        copy_file(
+        copy_executable_file(
             AXIDEV_IO_DOCS_ROOT / "scripts" / "setup_uinput_permissions.sh",
-            bundle_root / "setup_uinput_permissions.sh",
+            bundle_root / LINUX_PERMISSION_HELPER_NAME,
         )
 
 
