@@ -26,6 +26,7 @@ class KeySpec:
     latched_io_key: str | None = None
     holds_when_latched: bool = False
     honors_latched_modifiers: bool = True
+    repeats: bool = True
     display_variants: tuple[KeyDisplay, ...] = ()
 
     def resolve_display(self, active_modifiers: frozenset[str]) -> KeyDisplay:

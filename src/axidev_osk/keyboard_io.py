@@ -18,6 +18,7 @@ Unsubscribe = Callable[[], None]
 class KeyPressHandle:
     key_name: str
     mods: str | None = None
+    repeats: bool = True
 
 
 @dataclass(frozen=True)
@@ -272,10 +273,7 @@ class AxidevIoKeyboardBackend:
                 if press is None:
                     return active_press
 
-                if press.mods is None:
-                    self._keyboard.sender.key_down(press.key_name)
-                else:
-                    self._keyboard.sender.key_down(press.key_name, mods=press.mods)
+                self._send_key_down(press)
                 self._held_latched_keys[spec.key_id] = press
                 return active_press
 
@@ -307,10 +305,7 @@ class AxidevIoKeyboardBackend:
             if press is None:
                 return None
 
-            if press.mods is None:
-                self._keyboard.sender.key_down(press.key_name)
-            else:
-                self._keyboard.sender.key_down(press.key_name, mods=press.mods)
+            self._send_key_down(press)
             return press
         except Exception as exc:
             print(f"axidev_io key_down failed for {spec.label!r}: {exc}", file=sys.stderr)
@@ -334,13 +329,25 @@ class AxidevIoKeyboardBackend:
             return None
 
         mods = self._resolve_sender_modifiers(spec, latched_keys)
-        return KeyPressHandle(key_name=key_name, mods=mods)
+        return KeyPressHandle(key_name=key_name, mods=mods, repeats=spec.repeats)
 
     def _resolve_latched_press(self, spec: KeySpec) -> KeyPressHandle | None:
         key_name = spec.latched_io_key or spec.io_key
         if key_name is None:
             return None
-        return KeyPressHandle(key_name=key_name)
+        return KeyPressHandle(key_name=key_name, repeats=False)
+
+    def _send_key_down(self, press: KeyPressHandle) -> None:
+        if self._keyboard is None:
+            return
+        if press.mods is None:
+            self._keyboard.sender.key_down(press.key_name, repeat=press.repeats)
+        else:
+            self._keyboard.sender.key_down(
+                press.key_name,
+                mods=press.mods,
+                repeat=press.repeats,
+            )
 
     def _resolve_key_name(self, spec: KeySpec) -> str | None:
         if spec.io_key is not None:

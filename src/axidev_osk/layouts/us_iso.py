@@ -23,6 +23,7 @@ def key(
     latched_io_key: str | None = None,
     holds_when_latched: bool = False,
     honors_latched_modifiers: bool = True,
+    repeats: bool = True,
     display_variants: tuple[KeyDisplay, ...] = (),
 ) -> KeySpec:
     return KeySpec(
@@ -39,6 +40,7 @@ def key(
         latched_io_key=latched_io_key,
         holds_when_latched=holds_when_latched,
         honors_latched_modifiers=honors_latched_modifiers,
+        repeats=repeats,
         display_variants=display_variants,
     )
 
@@ -64,6 +66,7 @@ def held_modifier(
         latched_io_key=latched_io_key or io_key,
         holds_when_latched=True,
         honors_latched_modifiers=False,
+        repeats=False,
     )
 
 
@@ -89,6 +92,7 @@ def shifted_key(
     latched_io_key: str | None = None,
     holds_when_latched: bool = False,
     honors_latched_modifiers: bool = True,
+    repeats: bool = True,
 ) -> KeySpec:
     return key(
         label,
@@ -102,6 +106,7 @@ def shifted_key(
         latched_io_key=latched_io_key,
         holds_when_latched=holds_when_latched,
         honors_latched_modifiers=honors_latched_modifiers,
+        repeats=repeats,
         display_variants=(
             KeyDisplay(
                 label=shifted_label,
@@ -118,6 +123,7 @@ def letter_key(
     column: int,
     width: float = 1.0,
     height: int = 1,
+    repeats: bool = True,
 ) -> KeySpec:
     lower_label = label.lower()
     upper_label = label.upper()
@@ -128,6 +134,7 @@ def letter_key(
         width=width,
         height=height,
         io_key=upper_label,
+        repeats=repeats,
         display_variants=(
             KeyDisplay(
                 label=upper_label,
