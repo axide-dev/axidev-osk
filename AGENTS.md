@@ -106,7 +106,6 @@ type(scope): short imperative summary
 
 Examples from current history:
 
-- `fix(ui): add hot-corner window toggle and shared theme palette`
 - `feat(release): add standalone app packaging`
 - `refactor(ci): bump workflows to Python 3.14`
 
