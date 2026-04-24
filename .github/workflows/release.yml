@@ -12,29 +12,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ubuntu:
-    uses: ./.github/workflows/reusable-standalone-ubuntu.yml
-    with:
-      version-label: ${{ github.event.release.tag_name }}
-      artifact-name: standalone-app-Ubuntu
-
-  windows:
-    uses: ./.github/workflows/reusable-standalone-windows.yml
-    with:
-      version-label: ${{ github.event.release.tag_name }}
-      artifact-name: standalone-app-Windows
-
-  publish:
-    name: Upload Release Assets
+  source-archive:
+    name: Build And Upload Source Archive
     runs-on: ubuntu-latest
-    needs: [ubuntu, windows]
     steps:
-      - name: Download built artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          path: artifacts
+          submodules: recursive
 
-      - name: Collect release assets
+      - name: Build source archive
         shell: bash
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -42,27 +29,24 @@ jobs:
           set -euo pipefail
 
           mkdir -p release-assets
+          stage_dir="$(mktemp -d)"
+          bundle_root="${stage_dir}/axidev-osk"
 
-          copy_one() {
-            local pattern="$1"
-            local mode="${2:-single}"
-            mapfile -t matches < <(find artifacts -type f | grep -E "/${pattern}$" || true)
-            if [ "${#matches[@]}" -eq 0 ]; then
-              echo "::error::Missing expected release asset pattern: ${pattern}"
-              exit 1
-            fi
-            if [ "$mode" = "single" ] && [ "${#matches[@]}" -ne 1 ]; then
-              echo "::error::Expected exactly one match for ${pattern}, found ${#matches[@]}"
-              printf '%s\n' "${matches[@]}"
-              exit 1
-            fi
-            for src in "${matches[@]}"; do
-              cp "$src" "release-assets/$(basename "$src")"
-            done
-          }
+          mkdir -p "${bundle_root}"
 
-          copy_one "axidev-osk-${TAG}-linux-x64\\.zip"
-          copy_one "axidev-osk-${TAG}-windows-x64\\.zip"
+          # Copy the working tree into the bundle while stripping every
+          # nested .git directory/file. This gives users a clean, installable
+          # source tree without any repository metadata.
+          tar --exclude-vcs -cf - . | tar -xf - -C "${bundle_root}"
+
+          # Ship both a versioned archive (for traceability) and a stable
+          # filename so README install commands can curl the latest release
+          # without templating a version into the URL.
+          versioned_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-${TAG}-source.zip"
+          stable_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-source.zip"
+
+          (cd "${stage_dir}" && zip -r "${versioned_archive}" axidev-osk) > /dev/null
+          cp "${versioned_archive}" "${stable_archive}"
 
           ls -la release-assets
 

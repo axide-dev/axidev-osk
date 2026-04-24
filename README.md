@@ -11,47 +11,18 @@ Axidev OSK gives you a clean, always-on-top keyboard overlay you can pop up when
 - Real key emission, so it works in any app that accepts keyboard input
 - Modifier latching for comfortable one-finger typing
 - Runs on Windows, X11, and Wayland
-- Standalone bundles available, no Python setup needed
 
 ## Install
 
-The easiest way to try Axidev OSK is to grab a prebuilt bundle from the [Releases page](https://github.com/axide-dev/axidev-osk/releases).
-
-- **Windows:** download `axidev-osk-<version>-windows-x64.zip`, extract it, and run `axidev-osk.exe`.
-- **Linux:** download `axidev-osk-<version>-linux-x64.zip`, extract it, and run `axidev-osk`.
-
-### Linux: one-time setup
-
-Linux needs permission to emit keystrokes through `uinput`. The first time you run the app, it will tell you if permissions are missing and point you at a helper script.
-
-You can also run the helper directly from the extracted bundle:
-
-```bash
-bash ./setup_uinput_permissions.sh
-```
-
-The app also offers an **Open In Terminal** option so the helper can run in a real terminal with a normal `sudo` prompt.
-
-### Linux: runtime dependencies
-
-Standalone Linux bundles need these libraries present on your system:
-
-- `libinput`
-- `libudev` (usually shipped as part of `systemd`)
-- `xkbcommon`
-
-Most modern Linux distributions already have these installed.
-
-## Install From Source
-
-If you want to hack on Axidev OSK or run the latest development version, you can install it from source.
+Axidev OSK is installed from source into a Python virtual environment. The commands below download the latest release source archive (no `git` required) and install from it. The archive already bundles the vendored `axidev-io-python` sources.
 
 ### Windows
 
 Requirements: Python 3.10+
 
 ```powershell
-git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
+Expand-Archive -Path axidev-osk-source.zip -DestinationPath .
 cd axidev-osk
 python -m venv .venv
 .venv\Scripts\Activate.ps1
@@ -67,7 +38,8 @@ sudo dnf install python3-pyside6 qt6-qtwayland layer-shell-qt \
     libinput-devel systemd-devel systemd-libs \
     libxkbcommon-devel python3-devel
 
-git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
+unzip axidev-osk-source.zip
 cd axidev-osk
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -82,7 +54,8 @@ axidev-osk
 sudo pacman -S --needed python python-pyside6 qt6-wayland layer-shell-qt \
     libinput systemd libxkbcommon
 
-git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
+unzip axidev-osk-source.zip
 cd axidev-osk
 python -m venv --system-site-packages .venv
 source .venv/bin/activate
@@ -90,6 +63,18 @@ python -m pip install -e ./vendor/axidev-io-python --no-deps
 python -m pip install -e . --no-deps
 axidev-osk
 ```
+
+### Linux: one-time uinput setup
+
+Linux needs permission to emit keystrokes through `uinput`. The first time you run the app, it will tell you if permissions are missing and point you at a helper script.
+
+You can also run the helper directly from the vendored sources:
+
+```bash
+bash ./vendor/axidev-io-python/src/axidev_io/vendor/axidev-io/scripts/setup_uinput_permissions.sh
+```
+
+The app also offers an **Open In Terminal** option so the helper can run in a real terminal with a normal `sudo` prompt.
 
 ## Wayland Notes
 
@@ -102,7 +87,7 @@ The overlay works best on compositors that support the layer-shell protocol, suc
 
 On GNOME/Mutter the app falls back to its X11/XWayland overlay backend, since GNOME does not currently expose the layer-shell behavior the overlay wants.
 
-Linux standalone bundles ship the matching Qt layer-shell plugin, so you don't need to install `layer-shell-qt` separately just to get overlay support.
+On Linux, install the matching Qt layer-shell plugin (`layer-shell-qt` on most distributions) alongside the packages listed above to get proper overlay support.
 
 ## Project Status
 
@@ -114,7 +99,6 @@ What works now:
 - US legends on an ISO-style physical arrangement
 - modifier latch behavior
 - always-on-top overlay behavior across Windows, X11, and supported Wayland compositors
-- standalone packaging for Windows and Linux
 
 What's planned:
 
@@ -126,6 +110,15 @@ What's planned:
 ## Contributing
 
 Contributions are welcome. Changes should land through pull requests rather than direct pushes to `main`, even for small cleanups.
+
+To work on the project, clone the repository with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+cd axidev-osk
+```
+
+From there, follow the platform-specific venv and `pip install -e` steps in the [Install](#install) section, skipping the `curl` and `unzip`/`Expand-Archive` commands.
 
 Before making structural changes, please read [`AGENTS.md`](./AGENTS.md). It describes the modular architecture rules the project is following while the Lua configuration layer is being built.
 
