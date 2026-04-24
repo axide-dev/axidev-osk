@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Mapping
 
 from .models import KeySpec
+
+KeyStateListener = Callable[[str, bool], None]
+Unsubscribe = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,10 @@ class AxidevIoKeyboardBackend:
         self._status_text = "Keyboard output is unavailable."
         self._needs_permission_setup = False
         self._held_latched_keys: dict[str, KeyPressHandle] = {}
+        self._pressed_key_names: set[str] = set()
+        self._key_state_listeners: list[KeyStateListener] = []
+        self._listener_unsubscribe: Unsubscribe | None = None
+        self._key_state_lock = RLock()
 
     @property
     def ready(self) -> bool:
@@ -186,6 +195,7 @@ class AxidevIoKeyboardBackend:
         self._keyboard = keyboard
         self._ready = True
         self._status_text = f"Keyboard output ready via axidev_io ({backend_name})."
+        self._start_key_state_listener()
         return True
 
     def shutdown(self) -> None:
@@ -194,6 +204,7 @@ class AxidevIoKeyboardBackend:
 
         try:
             self._release_all_latched_keys()
+            self._stop_key_state_listener()
             self._keyboard.shutdown()
         except Exception as exc:
             print(f"axidev_io shutdown failed: {exc}", file=sys.stderr)
@@ -201,6 +212,39 @@ class AxidevIoKeyboardBackend:
             self._keyboard = None
             self._ready = False
             self._held_latched_keys.clear()
+            self._clear_pressed_key_names()
+
+    def add_key_state_listener(self, listener: KeyStateListener) -> Unsubscribe:
+        with self._key_state_lock:
+            self._key_state_listeners.append(listener)
+        active = True
+
+        def unsubscribe() -> None:
+            nonlocal active
+            if not active:
+                return
+            active = False
+            with self._key_state_lock:
+                try:
+                    self._key_state_listeners.remove(listener)
+                except ValueError:
+                    return
+
+        return unsubscribe
+
+    def is_key_down(self, key_name: str) -> bool:
+        canonical_name = self._canonical_key_name(key_name)
+        if canonical_name is None:
+            return False
+
+        with self._key_state_lock:
+            return canonical_name in self._pressed_key_names
+
+    def key_name_for_spec(self, spec: KeySpec) -> str | None:
+        key_name = self._resolve_key_name(spec)
+        if key_name is None:
+            return None
+        return self._canonical_key_name(key_name)
 
     def sync_latched_key(self, spec: KeySpec, latched: bool, active_press: object | None = None) -> object | None:
         if (
@@ -305,6 +349,17 @@ class AxidevIoKeyboardBackend:
             return spec.label
         return None
 
+    def _canonical_key_name(self, key_name: str) -> str | None:
+        if self._keyboard is None:
+            return key_name
+
+        try:
+            parsed_key = self._keyboard.keys.parse(key_name)
+            formatted_key = self._keyboard.keys.format(parsed_key)
+            return formatted_key or key_name
+        except Exception:
+            return key_name
+
     def _resolve_sender_modifiers(
         self,
         spec: KeySpec,
@@ -396,6 +451,66 @@ class AxidevIoKeyboardBackend:
         if not sys.platform.startswith("linux"):
             return False
         return "permission_denied" in str(exc).lower()
+
+    def _start_key_state_listener(self) -> None:
+        if self._keyboard is None or self._listener_unsubscribe is not None:
+            return
+
+        try:
+            self._listener_unsubscribe = self._keyboard.listener.start(self._handle_key_event)
+        except Exception as exc:
+            print(f"axidev_io listener startup failed: {exc}", file=sys.stderr)
+
+    def _stop_key_state_listener(self) -> None:
+        if self._listener_unsubscribe is None:
+            return
+
+        try:
+            self._listener_unsubscribe()
+        except Exception as exc:
+            print(f"axidev_io listener shutdown failed: {exc}", file=sys.stderr)
+        finally:
+            self._listener_unsubscribe = None
+
+    def _handle_key_event(self, event: object) -> None:
+        key_name = getattr(event, "key_name", None)
+        if not isinstance(key_name, str) or not key_name:
+            return
+        self._set_key_down(key_name, bool(getattr(event, "pressed", False)))
+
+    def _set_key_down(self, key_name: str, pressed: bool) -> None:
+        canonical_name = self._canonical_key_name(key_name)
+        if canonical_name is None:
+            return
+
+        with self._key_state_lock:
+            was_pressed = canonical_name in self._pressed_key_names
+            if pressed == was_pressed:
+                return
+            if pressed:
+                self._pressed_key_names.add(canonical_name)
+            else:
+                self._pressed_key_names.discard(canonical_name)
+
+        self._notify_key_state_listeners(canonical_name, pressed)
+
+    def _clear_pressed_key_names(self) -> None:
+        with self._key_state_lock:
+            pressed_key_names = tuple(self._pressed_key_names)
+            self._pressed_key_names.clear()
+
+        for key_name in pressed_key_names:
+            self._notify_key_state_listeners(key_name, False)
+
+    def _notify_key_state_listeners(self, key_name: str, pressed: bool) -> None:
+        with self._key_state_lock:
+            listeners = tuple(self._key_state_listeners)
+
+        for listener in listeners:
+            try:
+                listener(key_name, pressed)
+            except Exception as exc:
+                print(f"axidev_io key state listener failed for {key_name!r}: {exc}", file=sys.stderr)
 
     def _release_all_latched_keys(self) -> None:
         if self._keyboard is None:

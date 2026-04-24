@@ -54,10 +54,13 @@ class KeyStateMachine:
         self._listeners.append(listener)
 
     def press(self) -> None:
-        self._transition_to(self._compose_state(pressed=True, latched=self.is_latched), "press")
+        self.set_pressed(True, reason="press")
 
     def release(self) -> None:
-        self._transition_to(self._compose_state(pressed=False, latched=self.is_latched), "release")
+        self.set_pressed(False, reason="release")
+
+    def set_pressed(self, pressed: bool, *, reason: str = "set_pressed") -> None:
+        self._transition_to(self._compose_state(pressed=pressed, latched=self.is_latched), reason)
 
     def toggle_latched(self) -> None:
         if not self._latchable:

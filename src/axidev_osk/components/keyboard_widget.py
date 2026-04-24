@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from collections.abc import Callable
+
+from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QSizePolicy, QWidget
 
 from ..keyboard_io import AxidevIoKeyboardBackend
@@ -9,6 +11,12 @@ from ..models import KeySpec
 from .key_button import create_key_button, set_key_button_label
 from .keyboard_metrics import DEFAULT_KEYBOARD_METRICS
 from .key_state_machine import KeyInteractionState, KeyStateChange, KeyStateMachine
+
+Unsubscribe = Callable[[], None]
+
+
+class _KeyStateBridge(QObject):
+    key_state_changed = Signal(str, bool)
 
 
 class KeyboardWidget(QFrame):
@@ -35,9 +43,13 @@ class KeyboardWidget(QFrame):
         self._syncing_latch_keys: set[str] = set()
         self._hold_visual_modifiers: set[str] = set()
         self._buttons_by_spec: list[tuple[QPushButton, KeySpec]] = []
+        self._state_machines_by_key_name: dict[str, list[KeyStateMachine]] = {}
+        self._key_state_bridge = _KeyStateBridge(self)
+        self._key_state_unsubscribe: Unsubscribe | None = None
 
         self.setObjectName("keyboard")
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self._subscribe_to_backend_key_state()
 
         container = QGridLayout(self)
         container.setContentsMargins(0, 0, 0, 0)
@@ -63,6 +75,7 @@ class KeyboardWidget(QFrame):
             container.setRowStretch(row, 1)
 
         self._refresh_key_legends()
+        self.destroyed.connect(lambda _object=None: self._unsubscribe_from_backend_key_state())
 
     def _build_dense_column_map(self, specs: list[KeySpec]) -> dict[int, int]:
         occupied_columns: set[int] = set()
@@ -116,6 +129,11 @@ class KeyboardWidget(QFrame):
         active_press: list[object | None] = [None]
         latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
         state_machine = KeyStateMachine(latchable=spec.latchable, initial_latched=latched)
+        listened_key_name = self._listened_key_name(spec)
+        if listened_key_name is not None:
+            self._state_machines_by_key_name.setdefault(listened_key_name, []).append(state_machine)
+            if self._keyboard_backend.is_key_down(listened_key_name):
+                state_machine.set_pressed(True, reason="listener_snapshot")
 
         def on_press(key_spec: KeySpec = spec) -> None:
             active_press[0] = self._handle_key_press(key_spec)
@@ -148,6 +166,8 @@ class KeyboardWidget(QFrame):
             on_press=on_press,
             on_release=on_release,
         )
+        if listened_key_name is not None:
+            button.setProperty("ioKeyName", listened_key_name)
         if spec.height > 1:
             button.setMinimumHeight(self._metrics.span_height(spec.height))
 
@@ -172,6 +192,25 @@ class KeyboardWidget(QFrame):
 
     def _handle_key_release(self, active_press: object | None) -> None:
         self._keyboard_backend.key_up(active_press)
+
+    def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
+        for state_machine in self._state_machines_by_key_name.get(key_name, []):
+            state_machine.set_pressed(pressed, reason="listener")
+
+    def _listened_key_name(self, spec: KeySpec) -> str | None:
+        return self._keyboard_backend.key_name_for_spec(spec)
+
+    def _subscribe_to_backend_key_state(self) -> None:
+        self._key_state_bridge.key_state_changed.connect(self._handle_backend_key_state_change)
+        self._key_state_unsubscribe = self._keyboard_backend.add_key_state_listener(
+            self._key_state_bridge.key_state_changed.emit
+        )
+
+    def _unsubscribe_from_backend_key_state(self) -> None:
+        if self._key_state_unsubscribe is None:
+            return
+        self._key_state_unsubscribe()
+        self._key_state_unsubscribe = None
 
     def _handle_latch_state_change(
         self,

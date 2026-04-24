@@ -247,6 +247,11 @@ def build_stylesheet() -> str:
             background-color: {key_pressed};
             border-color: {active_edge};
         }}
+        QPushButton[interactionState="pressed"],
+        QPushButton[interactionState="latched_pressed"] {{
+            background-color: {key_pressed};
+            border-color: {active_edge};
+        }}
         QPushButton[latched="true"] {{
             background-color: qlineargradient(
                 x1: 0,

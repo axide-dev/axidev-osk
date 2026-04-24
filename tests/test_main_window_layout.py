@@ -22,6 +22,15 @@ class FakeKeyboardBackend:
     def shutdown(self) -> None:
         return None
 
+    def add_key_state_listener(self, listener):
+        return lambda: None
+
+    def is_key_down(self, key_name: str) -> bool:
+        return False
+
+    def key_name_for_spec(self, spec):
+        return spec.io_key or (spec.label if len(spec.label) == 1 else None)
+
 
 class FakeOverlayController:
     def __init__(self, *, uses_custom_chrome: bool = True) -> None:
