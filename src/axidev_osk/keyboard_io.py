@@ -274,6 +274,7 @@ class AxidevIoKeyboardBackend:
                     return active_press
 
                 self._send_key_down(press)
+                self._set_key_down(press.key_name, True)
                 self._held_latched_keys[spec.key_id] = press
                 return active_press
 
@@ -284,6 +285,7 @@ class AxidevIoKeyboardBackend:
                 self._keyboard.sender.key_up(held_press.key_name)
             else:
                 self._keyboard.sender.key_up(held_press.key_name, mods=held_press.mods)
+            self._set_key_down(held_press.key_name, False)
             del self._held_latched_keys[spec.key_id]
             if resolved_active_press is held_press:
                 return None
@@ -306,6 +308,7 @@ class AxidevIoKeyboardBackend:
                 return None
 
             self._send_key_down(press)
+            self._set_key_down(press.key_name, True)
             return press
         except Exception as exc:
             print(f"axidev_io key_down failed for {spec.label!r}: {exc}", file=sys.stderr)
@@ -320,6 +323,7 @@ class AxidevIoKeyboardBackend:
                 self._keyboard.sender.key_up(press.key_name)
             else:
                 self._keyboard.sender.key_up(press.key_name, mods=press.mods)
+            self._set_key_down(press.key_name, False)
         except Exception as exc:
             print(f"axidev_io key_up failed for {press.key_name!r}: {exc}", file=sys.stderr)
 
@@ -529,6 +533,7 @@ class AxidevIoKeyboardBackend:
                     self._keyboard.sender.key_up(press.key_name)
                 else:
                     self._keyboard.sender.key_up(press.key_name, mods=press.mods)
+                self._set_key_down(press.key_name, False)
             except Exception as exc:
                 print(f"axidev_io key_up failed for latched key {key_id!r}: {exc}", file=sys.stderr)
         self._held_latched_keys.clear()

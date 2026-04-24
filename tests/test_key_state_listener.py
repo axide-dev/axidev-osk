@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from axidev_osk.components.key_button import create_key_button
+from axidev_osk.components.key_state_machine import KeyStateMachine
 from axidev_osk.components.keyboard_widget import KeyboardWidget
 from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
@@ -36,6 +38,12 @@ class FakeNativeListener:
         return self.stop
 
 
+class FakeSender:
+    def __init__(self) -> None:
+        self.key_down = Mock()
+        self.key_up = Mock()
+
+
 class FakeWidgetKeyboardBackend:
     def __init__(self, pressed_key_names: set[str] | None = None) -> None:
         self._pressed_key_names = pressed_key_names or set()
@@ -56,7 +64,7 @@ class FakeWidgetKeyboardBackend:
         return spec.io_key or (spec.label if len(spec.label) == 1 else None)
 
     def key_down(self, spec: KeySpec, latched_keys):
-        return None
+        return SimpleNamespace(spec=spec)
 
     def key_up(self, active_press) -> None:
         return None
@@ -104,6 +112,44 @@ class KeyStateListenerTests(unittest.TestCase):
         self.assertFalse(backend.is_key_down("A"))
         self.assertEqual(events, [("A", True), ("A", False)])
 
+    def test_sent_key_updates_registry_immediately_before_listener_echo(self) -> None:
+        backend = AxidevIoKeyboardBackend()
+        fake_listener = FakeNativeListener()
+        fake_sender = FakeSender()
+        fake_keyboard = SimpleNamespace(
+            initialize=Mock(),
+            status=Mock(return_value=SimpleNamespace(backend_name="fake")),
+            keys=FakeKeys(),
+            listener=fake_listener,
+            sender=fake_sender,
+        )
+        fake_module = ModuleType("axidev_io")
+        fake_module.keyboard = fake_keyboard
+        spec = KeySpec(label="A", row=0, column=0)
+        events: list[tuple[str, bool]] = []
+
+        with patch.dict("sys.modules", {"axidev_io": fake_module}):
+            self.assertTrue(backend.initialize())
+
+        backend.add_key_state_listener(
+            lambda key_name, pressed: events.append((key_name, pressed))
+        )
+
+        press = backend.key_down(spec, {})
+        self.assertIsNotNone(press)
+        self.assertTrue(backend.is_key_down("A"))
+        self.assertEqual(events, [("A", True)])
+
+        fake_listener.callback(SimpleNamespace(key_name="A", pressed=True))
+        self.assertEqual(events, [("A", True)])
+
+        backend.key_up(press)
+        self.assertFalse(backend.is_key_down("A"))
+        self.assertEqual(events, [("A", True), ("A", False)])
+
+        fake_listener.callback(SimpleNamespace(key_name="A", pressed=False))
+        self.assertEqual(events, [("A", True), ("A", False)])
+
     def test_keyboard_widget_reflects_backend_key_state_for_sent_io_key(self) -> None:
         _app()
         backend = FakeWidgetKeyboardBackend(pressed_key_names={"A"})
@@ -120,6 +166,23 @@ class KeyStateListenerTests(unittest.TestCase):
         backend.emit_key_state("A", True)
         QApplication.processEvents()
         self.assertEqual(button.property("interactionState"), "pressed")
+
+    def test_key_button_runs_release_callback_immediately(self) -> None:
+        _app()
+        calls: list[str] = []
+        state_machine = KeyStateMachine()
+        button = create_key_button(
+            "A",
+            state_machine=state_machine,
+            on_release=lambda: calls.append("released"),
+        )
+        self.addCleanup(button.close)
+
+        button.pressed.emit()
+        button.released.emit()
+
+        self.assertEqual(button.property("interactionState"), "idle")
+        self.assertEqual(calls, ["released"])
 
     def _button_for_io_key(self, widget: KeyboardWidget, io_key_name: str) -> QPushButton:
         for button in widget.findChildren(QPushButton):

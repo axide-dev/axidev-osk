@@ -31,6 +31,15 @@ class FakeKeyboardBackend:
     def key_name_for_spec(self, spec):
         return spec.io_key or (spec.label if len(spec.label) == 1 else None)
 
+    def key_down(self, spec, latched_keys):
+        return None
+
+    def key_up(self, active_press) -> None:
+        return None
+
+    def sync_latched_key(self, spec, latched: bool, active_press=None):
+        return active_press
+
 
 class FakeOverlayController:
     def __init__(self, *, uses_custom_chrome: bool = True) -> None:
