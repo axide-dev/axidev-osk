@@ -1,260 +1,156 @@
 # Axidev OSK
 
-Axidev OSK is a PySide6-based on-screen keyboard intended to become a modular desktop input surface rather than a single hardcoded keyboard window.
+An on-screen keyboard for Windows and Linux that stays out of your way.
 
-Today the project ships a working keyboard overlay with:
+Axidev OSK gives you a clean, always-on-top keyboard overlay you can pop up when you need it and hide when you don't. It works on Windows, KDE Plasma Wayland, wlroots-based compositors like `niri` and `Hyprland`, and X11.
 
-- a reusable `KeySpec` model for describing keys
-- a grid-based `KeyboardWidget` that renders from layout data
-- `axidev-io-python` integration for real key emission
-- overlay/window placement support for Windows, X11, and Wayland
-- a hot-corner controller to hide and restore visible app windows
+## Features
 
-The long-term direction is larger than the current implementation: windows should be composable, grids should be reusable building blocks, and one main process should orchestrate multiple surfaces that will eventually be described by a Lua config.
-
-## Why This Project Exists
-
-Most on-screen keyboards are delivered as one fixed application with one fixed layout. This project is aiming for a different model:
-
-- UI pieces should be reusable components
-- keyboard layouts should be data, not hardcoded widget trees
-- windows should be swappable and composable
-- the app should support multiple windows, not just one
-- future user customization should come from configuration instead of code edits
-
-That configuration layer is not implemented yet, but the codebase should keep moving in that direction.
-
-## Current Architecture
-
-The repository already has a useful split between data, UI components, and application shell:
-
-- `src/axidev_osk/models.py`
-  Defines `KeySpec` and `KeyDisplay`, the data model used to describe keys and display variants.
-- `src/axidev_osk/layouts/`
-  Holds layout builders such as `build_us_iso_layout()`, which returns structured key definitions.
-- `src/axidev_osk/components/`
-  Contains reusable UI pieces such as `KeyboardWidget`, `KeyButton`, and the key interaction state machine.
-- `src/axidev_osk/application/`
-  Contains windowing and shell concerns such as overlay behavior, chrome, layer-shell support, and hot-corner toggling.
-- `src/axidev_osk/keyboard_io.py`
-  Adapts UI key events to `axidev_io` so input emission stays separate from presentation.
-- `src/axidev_osk/app.py`
-  Wires the application together and launches the current main window.
-
-This is the base we should keep extending instead of collapsing back into one monolithic window class.
-
-## Target Architecture
-
-The intended architecture is:
-
-1. One main process owns the application lifecycle and window orchestration.
-2. Windows are reusable surfaces, not special-case one-off screens.
-3. Grids are reusable composition units that can host buttons or other controls.
-4. Buttons and controls are componentized so they can be reused across layouts and windows.
-5. Layouts are defined as data and can later be produced from Lua configuration.
-6. Multiple windows and multiple layouts must be considered a first-class use case.
-
-In practice, that means new work should prefer:
-
-- data-driven definitions over hardcoded widget placement
-- composition over subclass sprawl
-- isolated controllers/services over window-owned business logic
-- APIs that can support more than one window instance
-
-## Project Status
-
-Implemented now:
-
-- single main keyboard window
-- US legends on an ISO-style physical arrangement
-- modifier latch behavior
-- always-on-top overlay behavior across major desktop environments
-- stand-alone packaging script
-
-Planned direction:
-
-- multiple independent windows/surfaces
-- config-driven composition
-- Lua-based user customization
-- more reusable grid/container primitives
-- layouts that are selected and assembled at runtime
+- Always-on-top overlay that floats above your other windows
+- Hot-corner gesture to quickly show or hide the keyboard
+- Real key emission, so it works in any app that accepts keyboard input
+- Modifier latching for comfortable one-finger typing
+- Runs on Windows, X11, and Wayland
+- Standalone bundles available, no Python setup needed
 
 ## Install
 
-### Windows
+The easiest way to try Axidev OSK is to grab a prebuilt bundle from the [Releases page](https://github.com/axide-dev/axidev-osk/releases).
 
-Requirements:
+- **Windows:** download `axidev-osk-<version>-windows-x64.zip`, extract it, and run `axidev-osk.exe`.
+- **Linux:** download `axidev-osk-<version>-linux-x64.zip`, extract it, and run `axidev-osk`.
 
-- Python 3.10+
+### Linux: one-time setup
 
-Install:
+Linux needs permission to emit keystrokes through `uinput`. The first time you run the app, it will tell you if permissions are missing and point you at a helper script.
 
-```powershell
-git submodule update --init --recursive
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .\vendor\axidev-io-python
-python -m pip install -e .
-python -m axidev_osk
-```
-
-You can also run:
-
-```powershell
-axidev-osk
-```
-
-### Linux Source Install
-
-#### Fedora Wayland (real layer-shell)
-
-Requirements:
-
-- `python3-pyside6`
-- `qt6-qtwayland`
-- `layer-shell-qt`
-- `libinput-devel`
-- `systemd-devel`
-- `libxkbcommon-devel`
-- `python3-devel`
-
-Install:
-
-```bash
-git submodule update --init --recursive
-sudo dnf install python3-pyside6 qt6-qtwayland layer-shell-qt libinput-devel systemd-devel libxkbcommon-devel python3-devel
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python --no-deps
-python -m pip install -e . --no-deps
-python -m axidev_osk
-```
-
-Use `--system-site-packages` and `--no-deps` so the app stays on Fedora's Qt/PySide build and matches the system layer-shell plugin.
-
-#### Linux Wayland on GNOME and similar desktops
-
-GNOME/Mutter does not properly support the layer-shell path this app wants for the overlay. In those environments the app falls back to the X11/XWayland overlay backend.
-
-Requirements:
-
-- `python3-pyside6`
-- `qt6-qtwayland`
-- XWayland available in the desktop session
-- `libinput-devel`
-- `systemd-devel`
-- `libxkbcommon-devel`
-- `python3-devel`
-
-Install:
-
-```bash
-git submodule update --init --recursive
-sudo dnf install python3-pyside6 qt6-qtwayland libinput-devel systemd-devel libxkbcommon-devel python3-devel
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python --no-deps
-python -m pip install -e . --no-deps
-python -m axidev_osk
-```
-
-#### Linux X11
-
-Requirements:
-
-- Python 3.10+
-- Qt/PySide6 available
-- `libinput-devel`
-- `systemd-devel`
-- `libxkbcommon-devel`
-- `python3-devel`
-
-Install:
-
-```bash
-git submodule update --init --recursive
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python
-python -m pip install -e .
-python -m axidev_osk
-```
-
-### Linux Standalone Bundle
-
-Requirements:
-
-- `libinput`
-- `libudev`
-- `xkbcommon`
-
-The Linux bundle ships the matching Qt layer-shell plugin when built on Linux, so bundle users should not need to install `layer-shell-qt` separately.
-
-### Linux Notes
-
-Linux keyboard injection requires `uinput` access. If permission setup has not been applied yet, the app will explain how to run the bundled setup script.
-
-In standalone Linux bundles, that helper is shipped at the top level of the extracted app folder as `setup_uinput_permissions.sh` so it can be run directly from a terminal:
+You can also run the helper directly from the extracted bundle:
 
 ```bash
 bash ./setup_uinput_permissions.sh
 ```
 
-The app also offers an `Open In Terminal` path on Linux so the bundled helper can run in a real terminal window with a normal `sudo` prompt.
+The app also offers an **Open In Terminal** option so the helper can run in a real terminal with a normal `sudo` prompt.
 
-If layer-shell cannot be enabled in a Wayland session, the app falls back to the X11/XWayland overlay backend and logs a warning explaining that the Wayland layer-shell path was unavailable.
+### Linux: runtime dependencies
 
-Linux standalone bundles are built to include the matching Qt layer-shell plugin, so bundle users should not need to install `layer-shell-qt` separately just to get layer-shell overlay support.
+Standalone Linux bundles need these libraries present on your system:
 
-## Packaging
+- `libinput`
+- `libudev` (usually shipped as part of `systemd`)
+- `xkbcommon`
 
-Standalone builds are produced by [`scripts/build_standalone.py`](/C:/Users/ziede/code/axidev-osk/scripts/build_standalone.py).
+Most modern Linux distributions already have these installed.
 
-Published archives follow this naming pattern:
+## Install From Source
 
-- `axidev-osk-<version>-windows-x64.zip`
-- `axidev-osk-<version>-linux-x64.zip`
+If you want to hack on Axidev OSK or run the latest development version, you can install it from source.
 
-Linux bundles still depend on system `libinput`, `libudev`, and `xkbcommon` at runtime. Linux source installs on Wayland also depend on a compatible shell-integration plugin such as KDE's `layer-shell-qt`, while Linux standalone bundles ship the matching layer-shell plugin when built on Linux.
+### Windows
 
-## Contributor Guidance
+Requirements: Python 3.10+
 
-Before changing structure-heavy code, read [`AGENTS.md`](/C:/Users/ziede/code/axidev-osk/AGENTS.md). It records the modular architecture rules this project is supposed to follow while the Lua configuration layer is still being built.
+```powershell
+git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+cd axidev-osk
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e .\vendor\axidev-io-python
+python -m pip install -e .
+axidev-osk
+```
+
+### Fedora (Wayland)
+
+```bash
+sudo dnf install python3-pyside6 qt6-qtwayland layer-shell-qt \
+    libinput-devel systemd-devel systemd-libs \
+    libxkbcommon-devel python3-devel
+
+git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+cd axidev-osk
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install -e ./vendor/axidev-io-python --no-deps
+python -m pip install -e . --no-deps
+axidev-osk
+```
+
+### Arch (Wayland)
+
+```bash
+sudo pacman -S --needed python python-pyside6 qt6-wayland layer-shell-qt \
+    libinput systemd libxkbcommon
+
+git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
+cd axidev-osk
+python -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install -e ./vendor/axidev-io-python --no-deps
+python -m pip install -e . --no-deps
+axidev-osk
+```
+
+## Wayland Notes
+
+The overlay works best on compositors that support the layer-shell protocol, such as:
+
+- KDE Plasma Wayland
+- `niri`
+- `Hyprland`
+- other wlroots-based compositors
+
+On GNOME/Mutter the app falls back to its X11/XWayland overlay backend, since GNOME does not currently expose the layer-shell behavior the overlay wants.
+
+Linux standalone bundles ship the matching Qt layer-shell plugin, so you don't need to install `layer-shell-qt` separately just to get overlay support.
+
+## Project Status
+
+Axidev OSK is usable today as a keyboard overlay, but the project is aimed at something bigger: a modular composition system for on-screen input surfaces, with multiple windows, reusable grids, and user-defined layouts driven by a Lua config.
+
+What works now:
+
+- a single main keyboard window
+- US legends on an ISO-style physical arrangement
+- modifier latch behavior
+- always-on-top overlay behavior across Windows, X11, and supported Wayland compositors
+- standalone packaging for Windows and Linux
+
+What's planned:
+
+- multiple independent windows and surfaces
+- Lua-based user customization
+- config-driven composition of grids and layouts
+- more reusable grid and container primitives
 
 ## Contributing
 
-This project is in a relatively stable state now, so changes should preferably land through pull requests rather than direct pushes.
+Contributions are welcome. Changes should land through pull requests rather than direct pushes to `main`, even for small cleanups.
 
-Preferred workflow:
+Before making structural changes, please read [`AGENTS.md`](./AGENTS.md). It describes the modular architecture rules the project is following while the Lua configuration layer is being built.
 
-- create a focused branch for each change
-- open a PR for review, even for small cleanups
-- keep PRs scoped to one concern when possible
-- avoid mixing architecture changes, UI changes, and packaging changes in one PR unless they are tightly coupled
+PR guidance:
+
+- keep each PR focused on one concern
+- call out architectural impact when touching windows, grids, layouts, or orchestration
+- note platform-specific behavior clearly when Windows, X11, or Wayland behavior changes
 
 ### Commit Style
 
-The existing history is mostly following a Conventional Commit-style subject line, and new commits should keep that format.
-
-Preferred pattern:
+Commits follow Conventional Commit-style subjects:
 
 ```text
 type(scope): short imperative summary
 ```
 
-Examples already used in this repository:
+Examples from the existing history:
 
 - `fix(ui): add hot-corner window toggle and shared theme palette`
 - `feat(release): add standalone app packaging`
 - `refactor(ci): bump workflows to Python 3.14`
 
-Guidelines:
-
-- use lowercase `type` and `scope`
-- keep the summary short and specific
-- prefer scopes such as `ui`, `release`, `ci`, or another concrete subsystem
-- use imperative phrasing like `add`, `remove`, `refactor`, `fix`
+Use lowercase `type` and `scope`, keep the summary short, and prefer imperative phrasing (`add`, `fix`, `refactor`, `remove`).
 
 ## License
 
-This project is licensed under GPLv3. See [`LICENSE`](/C:/Users/ziede/code/axidev-osk/LICENSE).
+Axidev OSK is licensed under GPLv3. See [`LICENSE`](./LICENSE).
