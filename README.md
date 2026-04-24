@@ -79,9 +79,15 @@ Planned direction:
 - more reusable grid/container primitives
 - layouts that are selected and assembled at runtime
 
-## Getting Started
+## Install
 
-### Development install
+### Windows
+
+Requirements:
+
+- Python 3.10+
+
+Install:
 
 ```powershell
 git submodule update --init --recursive
@@ -92,13 +98,99 @@ python -m pip install -e .
 python -m axidev_osk
 ```
 
-After installation, you can also run:
+You can also run:
 
 ```powershell
 axidev-osk
 ```
 
-### Linux and Wayland notes
+### Linux Source Install
+
+#### Fedora Wayland (real layer-shell)
+
+Requirements:
+
+- `python3-pyside6`
+- `qt6-qtwayland`
+- `layer-shell-qt`
+- `libinput-devel`
+- `systemd-devel`
+- `libxkbcommon-devel`
+- `python3-devel`
+
+Install:
+
+```bash
+git submodule update --init --recursive
+sudo dnf install python3-pyside6 qt6-qtwayland layer-shell-qt libinput-devel systemd-devel libxkbcommon-devel python3-devel
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install -e ./vendor/axidev-io-python --no-deps
+python -m pip install -e . --no-deps
+python -m axidev_osk
+```
+
+Use `--system-site-packages` and `--no-deps` so the app stays on Fedora's Qt/PySide build and matches the system layer-shell plugin.
+
+#### Linux Wayland on GNOME and similar desktops
+
+GNOME/Mutter does not properly support the layer-shell path this app wants for the overlay. In those environments the app falls back to the X11/XWayland overlay backend.
+
+Requirements:
+
+- `python3-pyside6`
+- `qt6-qtwayland`
+- XWayland available in the desktop session
+- `libinput-devel`
+- `systemd-devel`
+- `libxkbcommon-devel`
+- `python3-devel`
+
+Install:
+
+```bash
+git submodule update --init --recursive
+sudo dnf install python3-pyside6 qt6-qtwayland libinput-devel systemd-devel libxkbcommon-devel python3-devel
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install -e ./vendor/axidev-io-python --no-deps
+python -m pip install -e . --no-deps
+python -m axidev_osk
+```
+
+#### Linux X11
+
+Requirements:
+
+- Python 3.10+
+- Qt/PySide6 available
+- `libinput-devel`
+- `systemd-devel`
+- `libxkbcommon-devel`
+- `python3-devel`
+
+Install:
+
+```bash
+git submodule update --init --recursive
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ./vendor/axidev-io-python
+python -m pip install -e .
+python -m axidev_osk
+```
+
+### Linux Standalone Bundle
+
+Requirements:
+
+- `libinput`
+- `libudev`
+- `xkbcommon`
+
+The Linux bundle ships the matching Qt layer-shell plugin when built on Linux, so bundle users should not need to install `layer-shell-qt` separately.
+
+### Linux Notes
 
 Linux keyboard injection requires `uinput` access. If permission setup has not been applied yet, the app will explain how to run the bundled setup script.
 
@@ -110,13 +202,9 @@ bash ./setup_uinput_permissions.sh
 
 The app also offers an `Open In Terminal` path on Linux so the bundled helper can run in a real terminal window with a normal `sudo` prompt.
 
-For Wayland layer-shell support, install a Qt layer-shell plugin first. On Fedora:
+If layer-shell cannot be enabled in a Wayland session, the app falls back to the X11/XWayland overlay backend and logs a warning explaining that the Wayland layer-shell path was unavailable.
 
-```bash
-sudo dnf install layer-shell-qt
-```
-
-Then launch from a real Wayland session.
+Linux standalone bundles are built to include the matching Qt layer-shell plugin, so bundle users should not need to install `layer-shell-qt` separately just to get layer-shell overlay support.
 
 ## Packaging
 
@@ -127,7 +215,7 @@ Published archives follow this naming pattern:
 - `axidev-osk-<version>-windows-x64.zip`
 - `axidev-osk-<version>-linux-x64.zip`
 
-Linux bundles still depend on system `libinput`, `libudev`, and `xkbcommon` at runtime. Wayland layer-shell behavior also depends on a compatible shell-integration plugin such as KDE's `layer-shell-qt`.
+Linux bundles still depend on system `libinput`, `libudev`, and `xkbcommon` at runtime. Linux source installs on Wayland also depend on a compatible shell-integration plugin such as KDE's `layer-shell-qt`, while Linux standalone bundles ship the matching layer-shell plugin when built on Linux.
 
 ## Contributor Guidance
 

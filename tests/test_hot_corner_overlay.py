@@ -21,6 +21,7 @@ from axidev_osk.application.overlay_window import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,
     OverlayBackend,
+    prepare_always_on_top_window_environment,
 )
 
 
@@ -204,6 +205,93 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(anchors, ANCHOR_LEFT | ANCHOR_TOP)
         self.assertEqual(margins, QMargins(10, 20, 0, 0))
 
+    def test_wayland_layer_shell_move_to_allows_negative_margins(self) -> None:
+        window = FakeWindow()
+        calls: list[tuple[int, QMargins]] = []
+
+        def record_apply_wayland_layer_shell(*args: object, **kwargs: object) -> bool:
+            del args
+            calls.append((int(kwargs["anchors"]), kwargs["margins"]))
+            return True
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch(
+            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            side_effect=record_apply_wayland_layer_shell,
+        ):
+            controller = AlwaysOnTopWindowController(
+                window,
+                config=AlwaysOnTopWindowConfig(manage_position=False),
+            )
+            controller.move_to(QPoint(90, 180), screen_geometry=QRect(100, 200, 800, 600))
+
+        self.assertGreaterEqual(len(calls), 1)
+        anchors, margins = calls[-1]
+        self.assertEqual(anchors, ANCHOR_LEFT | ANCHOR_TOP)
+        self.assertEqual(margins, QMargins(-10, -20, 0, 0))
+
+    def test_wayland_layer_shell_move_by_preserves_negative_margins(self) -> None:
+        window = FakeWindow()
+        calls: list[tuple[int, QMargins]] = []
+
+        def record_apply_wayland_layer_shell(*args: object, **kwargs: object) -> bool:
+            del args
+            calls.append((int(kwargs["anchors"]), kwargs["margins"]))
+            return True
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch(
+            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            side_effect=record_apply_wayland_layer_shell,
+        ):
+            controller = AlwaysOnTopWindowController(
+                window,
+                config=AlwaysOnTopWindowConfig(manage_position=False),
+            )
+            controller.move_to(QPoint(100, 200), screen_geometry=QRect(100, 200, 800, 600))
+            controller.move_by(-25, 30)
+
+        self.assertGreaterEqual(len(calls), 2)
+        anchors, margins = calls[-1]
+        self.assertEqual(anchors, layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM)
+        self.assertEqual(margins, QMargins(-25, 0, 0, -30))
+
+    def test_wayland_layer_shell_uses_full_screen_geometry_for_initial_position(self) -> None:
+        window = FakeWindow()
+        window.resize(100, 60)
+
+        calls: list[tuple[int, QMargins]] = []
+
+        def record_apply_wayland_layer_shell(*args: object, **kwargs: object) -> bool:
+            del args
+            calls.append((int(kwargs["anchors"]), kwargs["margins"]))
+            return True
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch(
+            "axidev_osk.application.overlay_window.AlwaysOnTopWindowController._current_screen_geometry",
+            return_value=QRect(0, 0, 1920, 1080),
+        ) as current_screen_geometry, patch(
+            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            side_effect=record_apply_wayland_layer_shell,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+            controller.handle_show()
+
+        self.assertTrue(any(call.kwargs.get("for_layer_shell") is True for call in current_screen_geometry.call_args_list))
+        anchors, margins = calls[-1]
+        self.assertEqual(anchors, layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM)
+        self.assertEqual(margins, QMargins(1804, 0, 0, 1004))
+
     def test_windows_native_frameless_overlay_disables_dwm_border(self) -> None:
         window = FakeWindow()
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
@@ -308,6 +396,78 @@ class LayerShellPluginDiscoveryTests(unittest.TestCase):
                 str(bundle_root / "axidev-osk"),
             ):
                 self.assertEqual(layer_shell.find_qt_platform_plugin_root(), plugin_root)
+
+
+class OverlayBackendSelectionTests(unittest.TestCase):
+    def test_wayland_without_layer_shell_falls_back_to_x11_bridge_with_warning(self) -> None:
+        with patch(
+            "axidev_osk.application.overlay_window.sys.platform",
+            "linux",
+        ), patch(
+            "axidev_osk.application.overlay_window.is_wayland_session",
+            return_value=True,
+        ), patch.dict(
+            "os.environ",
+            {},
+            clear=True,
+        ), patch(
+            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            return_value=False,
+        ), patch(
+            "axidev_osk.application.overlay_window._configure_x11_bridge_environment",
+            return_value=True,
+        ), patch(
+            "axidev_osk.application.overlay_window._warn_wayland_fallback",
+        ) as warn_wayland_fallback:
+            backend = prepare_always_on_top_window_environment()
+
+        self.assertEqual(backend, OverlayBackend.X11_UTILITY_BRIDGE)
+        warn_wayland_fallback.assert_called_once()
+
+    def test_wayland_without_layer_shell_raises_if_x11_bridge_unavailable(self) -> None:
+        with patch(
+            "axidev_osk.application.overlay_window.sys.platform",
+            "linux",
+        ), patch(
+            "axidev_osk.application.overlay_window.is_wayland_session",
+            return_value=True,
+        ), patch.dict(
+            "os.environ",
+            {},
+            clear=True,
+        ), patch(
+            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            return_value=False,
+        ):
+            with patch(
+                "axidev_osk.application.overlay_window._configure_x11_bridge_environment",
+                return_value=False,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "X11/XWayland fallback backend could not be enabled"):
+                    prepare_always_on_top_window_environment()
+
+    def test_wayland_controller_accepts_x11_bridge_backend(self) -> None:
+        window = FakeWindow()
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.X11_UTILITY_BRIDGE,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+
+        self.assertEqual(controller.backend, OverlayBackend.X11_UTILITY_BRIDGE)
+
+    def test_wayland_controller_rejects_non_layer_shell_backend(self) -> None:
+        window = FakeWindow()
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            side_effect=RuntimeError("Wayland overlay backend was initialized without layer-shell support."),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "without layer-shell support"):
+                AlwaysOnTopWindowController(window)
 
 
 class HotCornerControllerTests(unittest.TestCase):

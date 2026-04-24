@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -27,13 +28,16 @@ from .layer_shell import (
 
 
 OVERLAY_BACKEND_ENV = "AXIDEV_OSK_OVERLAY_BACKEND"
+OVERLAY_DEBUG_ENV = "AXIDEV_OSK_OVERLAY_DEBUG"
 TWindow = TypeVar("TWindow", bound=QWidget)
+
+
+_logger = logging.getLogger(__name__)
 
 
 class OverlayBackend(str, Enum):
     NATIVE = "native"
     WINDOWS_NATIVE = "windows-native"
-    WAYLAND_BEST_EFFORT = "wayland-best-effort"
     WAYLAND_LAYER_SHELL = "wayland-layer-shell"
     X11_UTILITY = "x11-utility"
     X11_UTILITY_BRIDGE = "x11-utility-bridge"
@@ -129,9 +133,14 @@ def prepare_always_on_top_window_environment(
         return _set_overlay_backend(OverlayBackend.WAYLAND_LAYER_SHELL)
 
     if prefer_x11_bridge and _configure_x11_bridge_environment():
+        _warn_wayland_fallback(
+            "Wayland layer-shell support is unavailable; falling back to the X11/XWayland overlay backend."
+        )
         return _set_overlay_backend(OverlayBackend.X11_UTILITY_BRIDGE)
 
-    return _set_overlay_backend(OverlayBackend.WAYLAND_BEST_EFFORT)
+    raise RuntimeError(
+        "Wayland overlay support requires a compatible Qt layer-shell plugin, and the X11/XWayland fallback backend could not be enabled."
+    )
 
 
 def configure_always_on_top_window(
@@ -200,6 +209,14 @@ class AlwaysOnTopWindowController:
             self._window.setWindowFlag(Qt.WindowType.Tool, True)
             self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
 
+        self._debug_log(
+            "configure-window",
+            backend=self._backend.value,
+            manage_position=self._config.manage_position,
+            placement=self._config.placement.value,
+            screen_margin=self._config.screen_margin,
+        )
+
     def handle_show(self) -> bool:
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             self._apply_windows_window_styles()
@@ -227,18 +244,25 @@ class AlwaysOnTopWindowController:
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         target = QPoint(position)
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
-            geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry()
-            self._layer_shell_left_margin = max(0, target.x() - geometry.x())
+            geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry(for_layer_shell=True)
+            self._layer_shell_left_margin = target.x() - geometry.x()
             self._layer_shell_bottom_margin = 0
             self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_TOP
             self._layer_shell_margins = QMargins(
                 self._layer_shell_left_margin,
-                max(0, target.y() - geometry.y()),
+                target.y() - geometry.y(),
                 0,
                 0,
             )
             self._layer_shell_position_initialized = True
             self._window.move(target)
+            self._debug_log(
+                "move-to-layer-shell",
+                target=target,
+                screen_geometry=geometry,
+                anchors=self._layer_shell_anchors,
+                margins=self._layer_shell_margins,
+            )
             self._sync_wayland_layer_shell_with(
                 anchors=self._layer_shell_anchors,
                 margins=self._layer_shell_margins,
@@ -253,9 +277,6 @@ class AlwaysOnTopWindowController:
             self._move_layer_shell_by(dx, dy)
             return
 
-        if self._backend == OverlayBackend.WAYLAND_BEST_EFFORT:
-            return
-
         geometry = self._current_screen_geometry()
         max_x = geometry.x() + max(0, geometry.width() - self._window.width())
         max_y = geometry.y() + max(0, geometry.height() - self._window.height())
@@ -268,9 +289,6 @@ class AlwaysOnTopWindowController:
     def resize_by(self, dx: int, dy: int) -> None:
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._resize_layer_shell_by(dx, dy)
-            return
-
-        if self._backend == OverlayBackend.WAYLAND_BEST_EFFORT:
             return
 
         geometry = self._current_screen_geometry()
@@ -291,7 +309,9 @@ class AlwaysOnTopWindowController:
             selected = _read_selected_backend()
             if selected == OverlayBackend.WAYLAND_LAYER_SHELL:
                 return selected
-            return OverlayBackend.WAYLAND_BEST_EFFORT
+            raise RuntimeError(
+                "Wayland overlay backend was initialized without layer-shell support."
+            )
 
         if platform == "xcb":
             selected = _read_selected_backend()
@@ -324,6 +344,13 @@ class AlwaysOnTopWindowController:
         )
 
     def _sync_wayland_layer_shell_with(self, *, anchors: int, margins: QMargins) -> bool:
+        self._debug_log(
+            "apply-layer-shell",
+            anchors=anchors,
+            margins=margins,
+            window_size=(self._window.width(), self._window.height()),
+            screen_geometry=self._current_screen_geometry(for_layer_shell=True),
+        )
         return apply_wayland_layer_shell(
             self._window,
             anchors=anchors,
@@ -336,19 +363,21 @@ class AlwaysOnTopWindowController:
         )
 
     def _move_layer_shell_by(self, dx: int, dy: int) -> None:
-        screen_size = self._current_screen_geometry().size()
-        max_left = max(0, screen_size.width() - self._window.width())
-        max_bottom = max(0, screen_size.height() - self._window.height())
-
-        self._layer_shell_left_margin = max(0, min(self._layer_shell_left_margin + dx, max_left))
-        self._layer_shell_bottom_margin = max(0, min(self._layer_shell_bottom_margin - dy, max_bottom))
+        self._layer_shell_left_margin += dx
+        self._layer_shell_bottom_margin -= dy
         self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
         self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
+        self._debug_log(
+            "move-by-layer-shell",
+            delta=(dx, dy),
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+        )
         self._sync_wayland_layer_shell()
 
     def _resize_layer_shell_by(self, dx: int, dy: int) -> None:
-        screen_size = self._current_screen_geometry().size()
+        screen_size = self._current_screen_geometry(for_layer_shell=True).size()
         top_offset = max(0, screen_size.height() - self._layer_shell_bottom_margin - self._window.height())
         max_width = max(self._window.minimumWidth(), screen_size.width() - self._layer_shell_left_margin)
         max_height = max(self._window.minimumHeight(), screen_size.height() - top_offset)
@@ -363,22 +392,35 @@ class AlwaysOnTopWindowController:
         self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
         self._window.resize(next_width, next_height)
+        self._debug_log(
+            "resize-layer-shell",
+            delta=(dx, dy),
+            window_size=(next_width, next_height),
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+        )
         self._sync_wayland_layer_shell()
 
     def _initialize_layer_shell_position(self) -> None:
-        screen_size = self._current_screen_geometry().size()
+        screen_size = self._current_screen_geometry(for_layer_shell=True).size()
 
         if self._config.placement == OverlayPlacement.CENTER:
-            self._layer_shell_left_margin = max(0, (screen_size.width() - self._window.width()) // 2)
-            self._layer_shell_bottom_margin = max(0, (screen_size.height() - self._window.height()) // 2)
+            self._layer_shell_left_margin = (screen_size.width() - self._window.width()) // 2
+            self._layer_shell_bottom_margin = (screen_size.height() - self._window.height()) // 2
         else:
             margin = self._config.screen_margin
-            self._layer_shell_left_margin = max(0, screen_size.width() - self._window.width() - margin)
-            self._layer_shell_bottom_margin = max(0, screen_size.height() - self._window.height() - margin)
+            self._layer_shell_left_margin = screen_size.width() - self._window.width() - margin
+            self._layer_shell_bottom_margin = screen_size.height() - self._window.height() - margin
 
         self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
         self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
+        self._debug_log(
+            "initialize-layer-shell-position",
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+            screen_size=(screen_size.width(), screen_size.height()),
+        )
 
     def _position_floating_window_if_needed(self) -> None:
         if self._floating_position_initialized:
@@ -398,15 +440,26 @@ class AlwaysOnTopWindowController:
         self._window.move(target_x, target_y)
         self._floating_position_initialized = True
 
-    def _current_screen_geometry(self) -> QRect:
+    def _current_screen_geometry(self, *, for_layer_shell: bool = False) -> QRect:
         screen = self._window.screen()
         if screen is None:
             app = QGuiApplication.instance()
             screen = app.primaryScreen() if app is not None else None
-        geometry = screen.availableGeometry() if screen is not None else None
+        if screen is None:
+            geometry = None
+        elif for_layer_shell:
+            geometry = screen.geometry()
+        else:
+            geometry = screen.availableGeometry()
         if geometry is None:
             return QRect(0, 0, 1920, 1080)
         return geometry
+
+    def _debug_log(self, message: str, **context: object) -> None:
+        if not _overlay_debug_enabled():
+            return
+        details = ", ".join(f"{key}={value!r}" for key, value in context.items())
+        _logger.warning("overlay %s: %s", message, details)
 
     def _apply_windows_window_styles(self) -> None:
         hwnd = int(self._window.winId())
@@ -486,3 +539,11 @@ def _read_selected_backend() -> OverlayBackend | None:
         return OverlayBackend(raw_value)
     except ValueError:
         return None
+
+
+def _overlay_debug_enabled() -> bool:
+    return os.environ.get(OVERLAY_DEBUG_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _warn_wayland_fallback(message: str) -> None:
+    _logger.warning(message)

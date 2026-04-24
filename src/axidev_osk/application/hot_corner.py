@@ -167,7 +167,6 @@ class HotCornerWindowToggleController(QObject):
         )
         self._sensor_handles: list[HotCornerSensorHandle] = []
         self._use_sensor_windows = self._indicator_overlay.backend in {
-            OverlayBackend.WAYLAND_BEST_EFFORT,
             OverlayBackend.WAYLAND_LAYER_SHELL,
             OverlayBackend.X11_UTILITY_BRIDGE,
         }

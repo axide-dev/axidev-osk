@@ -6,8 +6,9 @@ import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from scripts.build_standalone import copy_executable_file, write_zip_tree
+from scripts.build_standalone import copy_executable_file, copy_linux_layer_shell_plugin, write_zip_tree
 
 
 class StandaloneBuildTests(unittest.TestCase):
@@ -55,6 +56,32 @@ class StandaloneBuildTests(unittest.TestCase):
         self.assertTrue(mode & stat.S_IXUSR)
         self.assertTrue(mode & stat.S_IXGRP)
         self.assertTrue(mode & stat.S_IXOTH)
+
+    def test_copy_linux_layer_shell_plugin_copies_plugin_when_present(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_source = root / "system-plugins" / "wayland-shell-integration" / "liblayer-shell.so"
+            bundle_root = root / "bundle"
+            plugin_source.parent.mkdir(parents=True)
+            plugin_source.write_bytes(b"layer-shell-plugin")
+
+            with patch("scripts.build_standalone.QT_LAYER_SHELL_PLUGIN_SYSTEM_PATH", plugin_source):
+                copy_linux_layer_shell_plugin(bundle_root)
+
+            copied_plugin = bundle_root / "_internal" / "PySide6" / "Qt" / "plugins" / "wayland-shell-integration" / "liblayer-shell.so"
+            self.assertEqual(copied_plugin.read_bytes(), b"layer-shell-plugin")
+
+    def test_copy_linux_layer_shell_plugin_skips_missing_plugin(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bundle_root = root / "bundle"
+            missing_plugin = root / "missing" / "liblayer-shell.so"
+
+            with patch("scripts.build_standalone.QT_LAYER_SHELL_PLUGIN_SYSTEM_PATH", missing_plugin):
+                copy_linux_layer_shell_plugin(bundle_root)
+
+            copied_plugin = bundle_root / "_internal" / "PySide6" / "Qt" / "plugins" / "wayland-shell-integration" / "liblayer-shell.so"
+            self.assertFalse(copied_plugin.exists())
 
 
 if __name__ == "__main__":

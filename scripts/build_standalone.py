@@ -29,6 +29,7 @@ AXIDEV_IO_DOCS_ROOT = (
     / "vendor"
     / "axidev-io"
 )
+QT_LAYER_SHELL_PLUGIN_SYSTEM_PATH = Path("/usr/lib64/qt6/plugins/wayland-shell-integration/liblayer-shell.so")
 EXECUTABLE_PERMISSION_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
 
@@ -164,10 +165,23 @@ def populate_bundle_root(source_dir: Path, bundle_root: Path) -> None:
     )
 
     if os.name != "nt":
+        copy_linux_layer_shell_plugin(bundle_root)
         copy_executable_file(
             AXIDEV_IO_DOCS_ROOT / "scripts" / "setup_uinput_permissions.sh",
             bundle_root / LINUX_PERMISSION_HELPER_NAME,
         )
+
+
+def copy_linux_layer_shell_plugin(bundle_root: Path) -> None:
+    plugin_root = bundle_root / "_internal" / "PySide6" / "Qt" / "plugins"
+    destination = plugin_root / "wayland-shell-integration" / "liblayer-shell.so"
+
+    source = QT_LAYER_SHELL_PLUGIN_SYSTEM_PATH
+    if not source.is_file():
+        print(f"Skipping Linux layer-shell plugin copy; not found at {source}")
+        return
+
+    copy_file(source, destination)
 
 
 def build_archive(version: str, arch: str) -> Path:
