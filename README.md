@@ -120,6 +120,18 @@ cd axidev-osk
 
 From there, follow the platform-specific venv and `pip install -e` steps in the [Install](#install) section, skipping the `curl` and `unzip`/`Expand-Archive` commands.
 
+To install dependencies only inside this checkout, use:
+
+```bash
+python -m venv .venv && .venv/bin/python -m pip install -e ./vendor/axidev-io-python -e .
+```
+
+To start the app from the checkout without changing anything outside this folder, use:
+
+```bash
+.venv/bin/python -m axidev_osk
+```
+
 Before making structural changes, please read [`AGENTS.md`](./AGENTS.md). It describes the modular architecture rules the project is following while the Lua configuration layer is being built.
 
 PR guidance:
