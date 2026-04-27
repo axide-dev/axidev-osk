@@ -21,5 +21,6 @@ def main() -> int:
     )
     window = MainWindow()
     hot_corner.start()
+    window.prepare_overlay_show()
     window.show()
     return app.exec()

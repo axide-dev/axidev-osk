@@ -181,6 +181,7 @@ class AlwaysOnTopWindowController:
         self._layer_shell_position_initialized = False
         self._floating_position_initialized = False
         self._show_adjustments_applied = False
+        self._layer_shell_startup_refresh_applied = False
 
     @property
     def backend(self) -> OverlayBackend:
@@ -224,7 +225,9 @@ class AlwaysOnTopWindowController:
             return True
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
-            return self._apply_wayland_layer_shell_if_needed()
+            applied = self._apply_wayland_layer_shell_if_needed()
+            self._refresh_wayland_layer_shell_surface_after_startup()
+            return applied
 
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
             self._position_floating_window_if_needed()
@@ -239,6 +242,14 @@ class AlwaysOnTopWindowController:
             self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
             self._window.show()
 
+        return False
+
+    def prepare_show(self) -> bool:
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            return self._sync_wayland_layer_shell()
+        if self._backend in {OverlayBackend.WINDOWS_NATIVE, OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
+            self._position_floating_window_if_needed()
+            return True
         return False
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
@@ -334,6 +345,21 @@ class AlwaysOnTopWindowController:
 
         return False
 
+    def _refresh_wayland_layer_shell_surface_after_startup(self) -> None:
+        if self._layer_shell_startup_refresh_applied:
+            return
+        self._layer_shell_startup_refresh_applied = True
+        QTimer.singleShot(0, self._refresh_wayland_layer_shell_surface)
+
+    def _refresh_wayland_layer_shell_surface(self) -> None:
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
+            return
+        if not self._window.isVisible():
+            return
+        self._window.hide()
+        self._sync_wayland_layer_shell()
+        self._window.show()
+
     def _sync_wayland_layer_shell(self) -> bool:
         if not self._layer_shell_position_initialized:
             self._initialize_layer_shell_position()
@@ -363,6 +389,9 @@ class AlwaysOnTopWindowController:
         )
 
     def _move_layer_shell_by(self, dx: int, dy: int) -> None:
+        if not self._layer_shell_position_initialized:
+            self._initialize_layer_shell_position()
+
         self._layer_shell_left_margin += dx
         self._layer_shell_bottom_margin -= dy
         self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
@@ -377,6 +406,9 @@ class AlwaysOnTopWindowController:
         self._sync_wayland_layer_shell()
 
     def _resize_layer_shell_by(self, dx: int, dy: int) -> None:
+        if not self._layer_shell_position_initialized:
+            self._initialize_layer_shell_position()
+
         screen_size = self._current_screen_geometry(for_layer_shell=True).size()
         top_offset = max(0, screen_size.height() - self._layer_shell_bottom_margin - self._window.height())
         max_width = max(self._window.minimumWidth(), screen_size.width() - self._layer_shell_left_margin)

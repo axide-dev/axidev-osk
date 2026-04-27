@@ -45,6 +45,9 @@ class FakeOverlayController:
     def __init__(self, *, uses_custom_chrome: bool = True) -> None:
         self.uses_custom_chrome = uses_custom_chrome
 
+    def prepare_show(self) -> bool:
+        return True
+
     def move_by(self, dx: int, dy: int) -> None:
         return None
 
@@ -139,6 +142,26 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         central = window.centralWidget()
         self.assertTrue(central.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
+
+    def test_startup_size_uses_composed_size_hint(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with (
+            patch(
+                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
+                return_value=FakeKeyboardBackend(ready=True),
+            ),
+            patch(
+                "axidev_osk.application.main_window.configure_always_on_top_window",
+                return_value=overlay,
+            ),
+        ):
+            window = MainWindow()
+
+        self.addCleanup(window.close)
+
+        self.assertEqual(window.size(), window.sizeHint().expandedTo(window.minimumSize()))
 
 
 if __name__ == "__main__":
