@@ -360,14 +360,12 @@ class HotCornerWindowToggleController(QObject):
         progress: float,
     ) -> None:
         geometry = screen.geometry()
-        _assign_window_to_screen(self._indicator, screen)
         self._indicator_overlay.move_to(
             self._indicator_position(geometry, corner),
             screen_geometry=geometry,
         )
         self._indicator.set_progress(progress)
         if not self._indicator.isVisible():
-            self._indicator_overlay.prepare_show()
             self._indicator.show()
         self._indicator_overlay.handle_show()
 
@@ -420,7 +418,6 @@ class HotCornerWindowToggleController(QObject):
         for handle in self._sensor_handles:
             self._position_sensor_window(handle)
             if not handle.window.isVisible():
-                handle.overlay.prepare_show()
                 handle.window.show()
             handle.overlay.handle_show()
 
@@ -430,7 +427,6 @@ class HotCornerWindowToggleController(QObject):
 
     def _position_sensor_window(self, handle: HotCornerSensorHandle) -> None:
         geometry = handle.screen.geometry()
-        _assign_window_to_screen(handle.window, handle.screen)
         handle.overlay.move_to(
             self._sensor_position(geometry, handle.corner),
             screen_geometry=geometry,
@@ -468,14 +464,3 @@ class HotCornerWindowToggleController(QObject):
                 continue
             visible_windows.append(window)
         return visible_windows
-
-
-def _assign_window_to_screen(window: QWidget, screen: QScreen) -> None:
-    if not isinstance(screen, QScreen):
-        return
-    handle = window.windowHandle()
-    if handle is None:
-        window.winId()
-        handle = window.windowHandle()
-    if handle is not None and handle.screen() is not screen:
-        handle.setScreen(screen)

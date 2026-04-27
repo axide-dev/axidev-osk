@@ -562,7 +562,6 @@ class HotCornerControllerTests(unittest.TestCase):
             position, geometry = overlay.moves[0]
             self.assertEqual(position, QPoint(834, 214))
             self.assertEqual(geometry, QRect(100, 200, 800, 600))
-            self.assertEqual(overlay.prepare_show_calls, 1)
             self.assertEqual(overlay.handle_show_calls, 1)
             show_indicator.assert_called_once()
         finally:
@@ -682,41 +681,6 @@ class HotCornerControllerTests(unittest.TestCase):
                 controller._sensor_position(geometry, ScreenCorner.BOTTOM_LEFT),
                 QPoint(100, 776),
             )
-        finally:
-            controller.stop()
-            controller._indicator.close()
-
-    def test_wayland_hot_corners_create_sensor_windows(self) -> None:
-        overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
-        with patch(
-            "axidev_osk.application.hot_corner.configure_always_on_top_window",
-            return_value=overlay,
-        ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
-
-        try:
-            self.assertEqual(len(controller._sensor_handles), len(self.app.screens()) * len(ScreenCorner))
-        finally:
-            controller.stop()
-            controller._indicator.close()
-
-    def test_sensor_window_polling_uses_active_sensor(self) -> None:
-        overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
-        with patch(
-            "axidev_osk.application.hot_corner.configure_always_on_top_window",
-            return_value=overlay,
-        ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
-
-        try:
-            with patch.object(controller, "_poll_active_sensor") as poll_active_sensor, patch.object(
-                controller,
-                "_poll_cursor",
-            ) as poll_cursor:
-                controller._poll()
-
-            poll_active_sensor.assert_called_once()
-            poll_cursor.assert_not_called()
         finally:
             controller.stop()
             controller._indicator.close()

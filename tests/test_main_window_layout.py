@@ -162,6 +162,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.addCleanup(window.close)
 
         self.assertEqual(window.size(), window.sizeHint().expandedTo(window.minimumSize()))
+        self.assertEqual(window.minimumSize(), window.size())
 
 
 if __name__ == "__main__":

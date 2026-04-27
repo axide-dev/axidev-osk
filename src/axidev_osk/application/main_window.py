@@ -83,9 +83,15 @@ class MainWindow(QMainWindow):
 
     def _apply_startup_size(self) -> None:
         self.ensurePolished()
-        minimum_size = self.minimumSizeHint().expandedTo(QSize(0, 0))
-        startup_size = self.sizeHint().expandedTo(minimum_size)
-        self.setMinimumSize(minimum_size)
+        central_widget = self.centralWidget()
+        if central_widget is not None:
+            central_widget.ensurePolished()
+            central_layout = central_widget.layout()
+            if central_layout is not None:
+                central_layout.activate()
+
+        startup_size = self.sizeHint().expandedTo(self.minimumSizeHint()).expandedTo(QSize(0, 0))
+        self.setMinimumSize(startup_size)
         self.resize(startup_size)
 
     def _prompt_for_linux_permissions_if_needed(self) -> None:
