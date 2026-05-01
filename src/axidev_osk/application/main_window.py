@@ -28,7 +28,7 @@ class MainWindow(QMainWindow):
         self._overlay = configure_always_on_top_window(
             self,
             config=AlwaysOnTopWindowConfig(
-                placement=OverlayPlacement.TOP_RIGHT,
+                placement=OverlayPlacement.CENTER,
                 screen_margin=16,
             ),
         )
@@ -90,8 +90,9 @@ class MainWindow(QMainWindow):
             if central_layout is not None:
                 central_layout.activate()
 
-        startup_size = self.sizeHint().expandedTo(self.minimumSizeHint()).expandedTo(QSize(0, 0))
-        self.setMinimumSize(startup_size)
+        minimum_size = self.minimumSizeHint().expandedTo(QSize(0, 0))
+        startup_size = self.sizeHint().expandedTo(minimum_size)
+        self.setMinimumSize(minimum_size)
         self.resize(startup_size)
 
     def _prompt_for_linux_permissions_if_needed(self) -> None:

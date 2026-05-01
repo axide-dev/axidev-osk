@@ -16,7 +16,7 @@ from axidev_osk.application.hot_corner import (
     ScreenCorner,
 )
 from axidev_osk.application import layer_shell
-from axidev_osk.application.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
+from axidev_osk.application.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
 from axidev_osk.application.overlay_window import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,
@@ -123,6 +123,7 @@ class FakeWindow:
 class FakeOverlayController:
     def __init__(self, backend: OverlayBackend = OverlayBackend.X11_UTILITY) -> None:
         self.moves: list[tuple[QPoint, QRect]] = []
+        self.anchored_moves: list[tuple[QPoint, int, QRect]] = []
         self.prepare_show_calls = 0
         self.handle_show_calls = 0
         self.backend = backend
@@ -130,6 +131,11 @@ class FakeOverlayController:
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         geometry = QRect(screen_geometry) if screen_geometry is not None else QRect()
         self.moves.append((QPoint(position), geometry))
+
+    def move_to_anchored(self, position: QPoint, *, anchors: int, screen_geometry: QRect | None = None) -> None:
+        geometry = QRect(screen_geometry) if screen_geometry is not None else QRect()
+        self.anchored_moves.append((QPoint(position), anchors, geometry))
+        self.move_to(position, screen_geometry=screen_geometry)
 
     def prepare_show(self) -> bool:
         self.prepare_show_calls += 1
@@ -562,6 +568,7 @@ class HotCornerControllerTests(unittest.TestCase):
             position, geometry = overlay.moves[0]
             self.assertEqual(position, QPoint(834, 214))
             self.assertEqual(geometry, QRect(100, 200, 800, 600))
+            self.assertEqual(overlay.prepare_show_calls, 1)
             self.assertEqual(overlay.handle_show_calls, 1)
             show_indicator.assert_called_once()
         finally:
@@ -685,6 +692,74 @@ class HotCornerControllerTests(unittest.TestCase):
             controller.stop()
             controller._indicator.close()
 
+    def test_wayland_hot_corners_create_sensor_windows(self) -> None:
+        overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        try:
+            self.assertEqual(len(controller._sensor_handles), len(self.app.screens()) * len(ScreenCorner))
+            self.assertTrue(controller._use_sensor_windows)
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
+    def test_sensor_windows_use_corner_anchors(self) -> None:
+        overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        try:
+            anchored_moves = {anchors for _position, anchors, _geometry in overlay.anchored_moves}
+            self.assertIn(ANCHOR_LEFT | ANCHOR_TOP, anchored_moves)
+            self.assertIn(ANCHOR_RIGHT | ANCHOR_TOP, anchored_moves)
+            self.assertIn(ANCHOR_LEFT | ANCHOR_BOTTOM, anchored_moves)
+            self.assertIn(ANCHOR_RIGHT | ANCHOR_BOTTOM, anchored_moves)
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
+    def test_x11_bridge_hot_corners_create_sensor_windows(self) -> None:
+        overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        try:
+            self.assertEqual(len(controller._sensor_handles), len(self.app.screens()) * len(ScreenCorner))
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
+    def test_sensor_window_polling_uses_active_sensor(self) -> None:
+        overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
+        with patch(
+            "axidev_osk.application.hot_corner.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+
+        try:
+            with patch.object(controller, "_poll_active_sensor") as poll_active_sensor, patch.object(
+                controller,
+                "_poll_cursor",
+            ) as poll_cursor:
+                controller._poll()
+
+            poll_active_sensor.assert_called_once()
+            poll_cursor.assert_not_called()
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
     def test_configure_hot_corner_window_requests_shadowless_flags(self) -> None:
         indicator_window = FakeWindow()
         sensor_window = FakeWindow()
@@ -694,10 +769,12 @@ class HotCornerControllerTests(unittest.TestCase):
 
         self.assertIn((Qt.WindowType.FramelessWindowHint, True), indicator_window.flags)
         self.assertIn((Qt.WindowType.NoDropShadowWindowHint, True), indicator_window.flags)
+        self.assertIn((Qt.WidgetAttribute.WA_TransparentForMouseEvents, True), indicator_window.attributes)
         self.assertIn((Qt.WindowType.WindowTransparentForInput, True), indicator_window.flags)
 
         self.assertIn((Qt.WindowType.FramelessWindowHint, True), sensor_window.flags)
         self.assertIn((Qt.WindowType.NoDropShadowWindowHint, True), sensor_window.flags)
+        self.assertIn((Qt.WidgetAttribute.WA_TransparentForMouseEvents, False), sensor_window.attributes)
         self.assertNotIn((Qt.WindowType.WindowTransparentForInput, True), sensor_window.flags)
 
 

@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Si
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen, QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
 from .overlay_window import (
     AlwaysOnTopWindowConfig,
     OverlayBackend,
@@ -18,6 +19,7 @@ from ..styles.theme import ThemePalette, build_theme_palette
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
     window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    window.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, not accepts_input)
     window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
     window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     window.setWindowFlag(Qt.WindowType.Tool, True)
@@ -25,8 +27,7 @@ def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> Non
     window.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
     window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
-    if not accepts_input:
-        window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, True)
+    window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, not accepts_input)
 
 
 @dataclass(slots=True)
@@ -365,6 +366,7 @@ class HotCornerWindowToggleController(QObject):
             screen_geometry=geometry,
         )
         self._indicator.set_progress(progress)
+        self._indicator_overlay.prepare_show()
         if not self._indicator.isVisible():
             self._indicator.show()
         self._indicator_overlay.handle_show()
@@ -427,10 +429,20 @@ class HotCornerWindowToggleController(QObject):
 
     def _position_sensor_window(self, handle: HotCornerSensorHandle) -> None:
         geometry = handle.screen.geometry()
-        handle.overlay.move_to(
+        handle.overlay.move_to_anchored(
             self._sensor_position(geometry, handle.corner),
+            anchors=self._sensor_anchors(handle.corner),
             screen_geometry=geometry,
         )
+
+    def _sensor_anchors(self, corner: ScreenCorner) -> int:
+        if corner == ScreenCorner.TOP_LEFT:
+            return ANCHOR_LEFT | ANCHOR_TOP
+        if corner == ScreenCorner.TOP_RIGHT:
+            return ANCHOR_RIGHT | ANCHOR_TOP
+        if corner == ScreenCorner.BOTTOM_LEFT:
+            return ANCHOR_LEFT | ANCHOR_BOTTOM
+        return ANCHOR_RIGHT | ANCHOR_BOTTOM
 
     def _sensor_entered(self, handle: HotCornerSensorHandle) -> None:
         if self._triggered_corner == handle.corner and self._active_screen is handle.screen:

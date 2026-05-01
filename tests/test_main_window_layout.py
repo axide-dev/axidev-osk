@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.application import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.application.main_window import MainWindow
+from axidev_osk.application.overlay_window import OverlayPlacement
 
 
 class FakeKeyboardBackend:
@@ -162,7 +163,30 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.addCleanup(window.close)
 
         self.assertEqual(window.size(), window.sizeHint().expandedTo(window.minimumSize()))
-        self.assertEqual(window.minimumSize(), window.size())
+        self.assertEqual(window.minimumSize(), window.minimumSizeHint().expandedTo(window.minimumSize()))
+        self.assertLessEqual(window.minimumWidth(), window.width())
+        self.assertLessEqual(window.minimumHeight(), window.height())
+
+    def test_main_window_uses_center_overlay_placement(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with (
+            patch(
+                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
+                return_value=FakeKeyboardBackend(ready=True),
+            ),
+            patch(
+                "axidev_osk.application.main_window.configure_always_on_top_window",
+                return_value=overlay,
+            ) as configure_overlay,
+        ):
+            window = MainWindow()
+
+        self.addCleanup(window.close)
+
+        config = configure_overlay.call_args.kwargs["config"]
+        self.assertEqual(config.placement, OverlayPlacement.CENTER)
 
 
 if __name__ == "__main__":

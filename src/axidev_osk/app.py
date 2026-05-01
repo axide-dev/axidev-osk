@@ -11,6 +11,7 @@ from .styles.theme import apply_theme
 
 
 def main() -> int:
+    print("Starting axidev-osk v0.11.0")
     prepare_always_on_top_window_environment()
     app = QApplication(sys.argv)
     apply_theme(app)

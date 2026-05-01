@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QWidget
 from .layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
+    ANCHOR_RIGHT,
     ANCHOR_TOP,
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
@@ -282,6 +283,42 @@ class AlwaysOnTopWindowController:
 
         self._window.move(target)
         self._floating_position_initialized = True
+
+    def move_to_anchored(
+        self,
+        position: QPoint,
+        *,
+        anchors: int,
+        screen_geometry: QRect | None = None,
+    ) -> None:
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
+            self.move_to(position, screen_geometry=screen_geometry)
+            return
+
+        target = QPoint(position)
+        geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry(for_layer_shell=True)
+        left_margin = target.x() - geometry.x() if anchors & ANCHOR_LEFT else 0
+        top_margin = target.y() - geometry.y() if anchors & ANCHOR_TOP else 0
+        right_margin = geometry.right() - target.x() - self._window.width() + 1 if anchors & ANCHOR_RIGHT else 0
+        bottom_margin = geometry.bottom() - target.y() - self._window.height() + 1 if anchors & ANCHOR_BOTTOM else 0
+
+        self._layer_shell_left_margin = left_margin
+        self._layer_shell_bottom_margin = bottom_margin
+        self._layer_shell_anchors = anchors
+        self._layer_shell_margins = QMargins(left_margin, top_margin, right_margin, bottom_margin)
+        self._layer_shell_position_initialized = True
+        self._window.move(target)
+        self._debug_log(
+            "move-to-anchored-layer-shell",
+            target=target,
+            screen_geometry=geometry,
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+        )
+        self._sync_wayland_layer_shell_with(
+            anchors=self._layer_shell_anchors,
+            margins=self._layer_shell_margins,
+        )
 
     def move_by(self, dx: int, dy: int) -> None:
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
