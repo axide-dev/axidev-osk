@@ -34,7 +34,7 @@ axidev-osk
 ### Fedora (Wayland)
 
 ```bash
-sudo dnf install python3-pyside6 qt6-qtwayland layer-shell-qt \
+sudo dnf install qt6-qtwayland layer-shell-qt \
     libinput-devel systemd-devel systemd-libs \
     libxkbcommon-devel python3-devel
 
@@ -43,15 +43,15 @@ unzip axidev-osk-source.zip
 cd axidev-osk
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python --no-deps
-python -m pip install -e . --no-deps
+python -m pip install -e ./vendor/axidev-io-python
+python -m pip install -e .
 axidev-osk
 ```
 
 ### Arch (Wayland)
 
 ```bash
-sudo pacman -S --needed python python-pyside6 qt6-wayland layer-shell-qt \
+sudo pacman -S --needed python qt6-wayland layer-shell-qt \
     libinput systemd libxkbcommon
 
 curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
@@ -59,8 +59,8 @@ unzip axidev-osk-source.zip
 cd axidev-osk
 python -m venv --system-site-packages .venv
 source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python --no-deps
-python -m pip install -e . --no-deps
+python -m pip install -e ./vendor/axidev-io-python
+python -m pip install -e .
 axidev-osk
 ```
 
@@ -118,18 +118,18 @@ git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
 cd axidev-osk
 ```
 
-From there, follow the platform-specific venv and `pip install -e` steps in the [Install](#install) section, skipping the `curl` and `unzip`/`Expand-Archive` commands.
+From there, follow the platform-specific system package steps in the [Install](#install) section, skipping the `curl` and `unzip`/`Expand-Archive` commands.
 
-To install dependencies only inside this checkout, use:
+For normal development, install the vendored input backend and this project into a local virtual environment. The project's Python dependencies come from `pyproject.toml`.
 
 ```bash
 python -m venv .venv && .venv/bin/python -m pip install -e ./vendor/axidev-io-python -e .
 ```
 
-To start the app from the checkout without changing anything outside this folder, use:
+To start the app from the checkout without relying on the installed entrypoint, use:
 
 ```bash
-.venv/bin/python -m axidev_osk
+PYTHONPATH=src .venv/bin/python -m axidev_osk
 ```
 
 Before making structural changes, please read [`AGENTS.md`](./AGENTS.md). It describes the modular architecture rules the project is following while the Lua configuration layer is being built.

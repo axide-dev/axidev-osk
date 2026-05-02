@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -510,6 +511,27 @@ class OverlayBackendSelectionTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(RuntimeError, "X11/XWayland fallback backend could not be enabled"):
                     prepare_always_on_top_window_environment()
+
+    def test_wayland_platform_with_xcb_fallback_uses_layer_shell(self) -> None:
+        with patch(
+            "axidev_osk.application.overlay_window.sys.platform",
+            "linux",
+        ), patch(
+            "axidev_osk.application.overlay_window.is_wayland_session",
+            return_value=True,
+        ), patch.dict(
+            "os.environ",
+            {"QT_QPA_PLATFORM": "wayland;xcb"},
+            clear=True,
+        ), patch(
+            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            return_value=True,
+        ):
+            backend = prepare_always_on_top_window_environment()
+            selected_backend = os.environ["AXIDEV_OSK_OVERLAY_BACKEND"]
+
+        self.assertEqual(backend, OverlayBackend.WAYLAND_LAYER_SHELL)
+        self.assertEqual(selected_backend, "wayland-layer-shell")
 
     def test_wayland_controller_accepts_x11_bridge_backend(self) -> None:
         window = FakeWindow()

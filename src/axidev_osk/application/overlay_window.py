@@ -113,13 +113,13 @@ def prepare_always_on_top_window_environment(
     if not sys.platform.startswith("linux"):
         return _set_overlay_backend(OverlayBackend.NATIVE)
 
-    forced_platform = os.environ.get("QT_QPA_PLATFORM", "").lower()
-    if forced_platform == "xcb":
+    forced_platforms = _qt_platform_entries(os.environ.get("QT_QPA_PLATFORM", ""))
+    if forced_platforms[:1] == ["xcb"]:
         if is_wayland_session():
             return _set_overlay_backend(OverlayBackend.X11_UTILITY_BRIDGE)
         return _set_overlay_backend(OverlayBackend.X11_UTILITY)
 
-    if forced_platform and forced_platform != "wayland":
+    if forced_platforms and "wayland" not in forced_platforms:
         return _set_overlay_backend(OverlayBackend.NATIVE)
 
     if not is_wayland_session():
@@ -592,6 +592,10 @@ def _configure_x11_bridge_environment() -> bool:
     prepend_plugin_root(plugin_root)
     os.environ["QT_QPA_PLATFORM"] = "xcb"
     return True
+
+
+def _qt_platform_entries(raw_value: str) -> list[str]:
+    return [entry.strip().lower() for entry in raw_value.split(";") if entry.strip()]
 
 
 def _set_overlay_backend(backend: OverlayBackend) -> OverlayBackend:
