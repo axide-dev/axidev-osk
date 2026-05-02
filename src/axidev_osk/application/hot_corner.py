@@ -1,25 +1,28 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
+from PySide6.QtCore import QMargins, QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen, QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
-from .overlay_window import (
-    AlwaysOnTopWindowConfig,
-    OverlayBackend,
-    configure_always_on_top_window,
+from .layer_shell import (
+    ANCHOR_BOTTOM,
+    ANCHOR_LEFT,
+    ANCHOR_TOP,
+    KEYBOARD_INTERACTIVITY_NONE,
+    LAYER_OVERLAY,
+    apply_wayland_layer_shell,
 )
+from .overlay_window import OVERLAY_BACKEND_ENV, OverlayBackend
 from ..styles.theme import ThemePalette, build_theme_palette
 
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
     window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    window.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, not accepts_input)
     window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
     window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     window.setWindowFlag(Qt.WindowType.Tool, True)
@@ -27,7 +30,120 @@ def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> Non
     window.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
     window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
-    window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, not accepts_input)
+    if not accepts_input:
+        window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, True)
+
+
+def configure_hot_corner_overlay(window: QWidget) -> "HotCornerOverlayController":
+    controller = HotCornerOverlayController(window)
+    controller.configure_window()
+    return controller
+
+
+class HotCornerOverlayController:
+    def __init__(self, window: QWidget) -> None:
+        self._window = window
+        self._backend = self._detect_backend()
+        self._layer_shell_attempts = 0
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(0, 0, 0, 0)
+        self._layer_shell_position_initialized = False
+
+    @property
+    def backend(self) -> OverlayBackend:
+        return self._backend
+
+    def configure_window(self) -> None:
+        self._window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+
+        if self._backend in {
+            OverlayBackend.WAYLAND_LAYER_SHELL,
+            OverlayBackend.X11_UTILITY,
+            OverlayBackend.X11_UTILITY_BRIDGE,
+        }:
+            self._window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+
+        if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE}:
+            self._window.setWindowFlag(Qt.WindowType.Tool, True)
+            self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
+
+    def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
+        target = QPoint(position)
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry()
+            self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_TOP
+            self._layer_shell_margins = QMargins(
+                target.x() - geometry.x(),
+                target.y() - geometry.y(),
+                0,
+                0,
+            )
+            self._layer_shell_position_initialized = True
+            self._window.move(target)
+            self._sync_wayland_layer_shell()
+            return
+
+        self._window.move(target)
+
+    def handle_show(self) -> bool:
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            return self._apply_wayland_layer_shell_if_needed()
+        return True
+
+    def _detect_backend(self) -> OverlayBackend:
+        platform = QGuiApplication.platformName().lower() if QGuiApplication.instance() is not None else ""
+        selected = _read_hot_corner_backend()
+        if platform == "wayland" and selected == OverlayBackend.WAYLAND_LAYER_SHELL:
+            return selected
+        if platform == "xcb":
+            return OverlayBackend.X11_UTILITY_BRIDGE if selected == OverlayBackend.X11_UTILITY_BRIDGE else OverlayBackend.X11_UTILITY
+        return selected or OverlayBackend.NATIVE
+
+    def _apply_wayland_layer_shell_if_needed(self) -> bool:
+        if self._sync_wayland_layer_shell():
+            return True
+        if self._layer_shell_attempts < 5:
+            self._layer_shell_attempts += 1
+            QTimer.singleShot(50, self._apply_wayland_layer_shell_if_needed)
+        return False
+
+    def _sync_wayland_layer_shell(self) -> bool:
+        if not self._layer_shell_position_initialized:
+            self._layer_shell_position_initialized = True
+        return apply_wayland_layer_shell(
+            self._window,
+            anchors=self._layer_shell_anchors,
+            layer=LAYER_OVERLAY,
+            keyboard_interactivity=KEYBOARD_INTERACTIVITY_NONE,
+            activate_on_show=False,
+            wants_to_be_on_active_screen=True,
+            exclusion_zone=0,
+            margins=self._layer_shell_margins,
+        )
+
+    def _current_screen_geometry(self) -> QRect:
+        screen = self._window.screen()
+        if screen is None:
+            app = QGuiApplication.instance()
+            screen = app.primaryScreen() if app is not None else None
+        if screen is None:
+            return QRect(0, 0, 1920, 1080)
+        return screen.geometry()
+
+
+def _read_hot_corner_backend() -> OverlayBackend | None:
+    raw_value = os.environ.get(OVERLAY_BACKEND_ENV, "")
+    if not raw_value:
+        return None
+    try:
+        return OverlayBackend(raw_value)
+    except ValueError:
+        return None
 
 
 @dataclass(slots=True)
@@ -162,10 +278,7 @@ class HotCornerWindowToggleController(QObject):
             size_px=self._config.indicator_size_px,
             palette=build_theme_palette(),
         )
-        self._indicator_overlay = configure_always_on_top_window(
-            self._indicator,
-            config=AlwaysOnTopWindowConfig(manage_position=False),
-        )
+        self._indicator_overlay = configure_hot_corner_overlay(self._indicator)
         self._sensor_handles: list[HotCornerSensorHandle] = []
         self._use_sensor_windows = self._indicator_overlay.backend in {
             OverlayBackend.WAYLAND_LAYER_SHELL,
@@ -366,7 +479,6 @@ class HotCornerWindowToggleController(QObject):
             screen_geometry=geometry,
         )
         self._indicator.set_progress(progress)
-        self._indicator_overlay.prepare_show()
         if not self._indicator.isVisible():
             self._indicator.show()
         self._indicator_overlay.handle_show()
@@ -399,10 +511,7 @@ class HotCornerWindowToggleController(QObject):
         for screen in self._app.screens():
             for corner in ScreenCorner:
                 sensor_window = HotCornerSensorWindow(size_px=self._config.corner_size_px)
-                overlay = configure_always_on_top_window(
-                    sensor_window,
-                    config=AlwaysOnTopWindowConfig(manage_position=False),
-                )
+                overlay = configure_hot_corner_overlay(sensor_window)
                 handle = HotCornerSensorHandle(
                     corner=corner,
                     screen=screen,
@@ -429,20 +538,10 @@ class HotCornerWindowToggleController(QObject):
 
     def _position_sensor_window(self, handle: HotCornerSensorHandle) -> None:
         geometry = handle.screen.geometry()
-        handle.overlay.move_to_anchored(
+        handle.overlay.move_to(
             self._sensor_position(geometry, handle.corner),
-            anchors=self._sensor_anchors(handle.corner),
             screen_geometry=geometry,
         )
-
-    def _sensor_anchors(self, corner: ScreenCorner) -> int:
-        if corner == ScreenCorner.TOP_LEFT:
-            return ANCHOR_LEFT | ANCHOR_TOP
-        if corner == ScreenCorner.TOP_RIGHT:
-            return ANCHOR_RIGHT | ANCHOR_TOP
-        if corner == ScreenCorner.BOTTOM_LEFT:
-            return ANCHOR_LEFT | ANCHOR_BOTTOM
-        return ANCHOR_RIGHT | ANCHOR_BOTTOM
 
     def _sensor_entered(self, handle: HotCornerSensorHandle) -> None:
         if self._triggered_corner == handle.corner and self._active_screen is handle.screen:

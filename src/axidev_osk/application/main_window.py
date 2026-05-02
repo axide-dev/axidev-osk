@@ -78,9 +78,6 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         self._overlay.handle_show()
 
-    def prepare_overlay_show(self) -> None:
-        self._overlay.prepare_show()
-
     def _apply_startup_size(self) -> None:
         self.ensurePolished()
         central_widget = self.centralWidget()
@@ -91,9 +88,8 @@ class MainWindow(QMainWindow):
                 central_layout.activate()
 
         minimum_size = self.minimumSizeHint().expandedTo(QSize(0, 0))
-        startup_size = self.sizeHint().expandedTo(minimum_size)
         self.setMinimumSize(minimum_size)
-        self.resize(startup_size)
+        self.resize(minimum_size)
 
     def _prompt_for_linux_permissions_if_needed(self) -> None:
         if not self._keyboard_backend.needs_permission_setup:

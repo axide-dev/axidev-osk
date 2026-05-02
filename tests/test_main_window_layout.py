@@ -144,7 +144,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         central = window.centralWidget()
         self.assertTrue(central.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
 
-    def test_startup_size_uses_composed_size_hint(self) -> None:
+    def test_startup_size_uses_minimum_size(self) -> None:
         _app()
         overlay = FakeOverlayController()
 
@@ -162,7 +162,7 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         self.addCleanup(window.close)
 
-        self.assertEqual(window.size(), window.sizeHint().expandedTo(window.minimumSize()))
+        self.assertEqual(window.size(), window.minimumSize())
         self.assertEqual(window.minimumSize(), window.minimumSizeHint().expandedTo(window.minimumSize()))
         self.assertLessEqual(window.minimumWidth(), window.width())
         self.assertLessEqual(window.minimumHeight(), window.height())
