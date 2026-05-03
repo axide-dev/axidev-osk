@@ -110,6 +110,8 @@ Callbacks should be treated as deferred/asynchronous by default. Callback orderi
 
 User configs should be loaded from standard locations such as `XDG_CONFIG_HOME` or `~/.config` on Unix-like systems, and the usual per-user config location on Windows. Bundled configs should be used as fallback defaults and examples when user config is missing or invalid.
 
+For more detailed Lua config and runtime architecture direction, refer to GitHub issue #8: `Define Lua config architecture`.
+
 ## Practical Rule For Contributors
 
 When making a change, ask:
