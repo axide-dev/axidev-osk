@@ -7,7 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QSocketNotifier, QTimer
+from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 
@@ -116,11 +116,15 @@ class ApplicationQuitController(QObject):
             self.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        answer = QMessageBox.question(
-            parent,
-            "Close axidev-osk?",
-            "Do you want to close axidev-osk?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        prompt = QMessageBox(parent)
+        prompt.setWindowTitle("Close axidev-osk?")
+        prompt.setText("Do you want to close axidev-osk?")
+        prompt.setIcon(QMessageBox.Icon.Question)
+        prompt.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        prompt.setDefaultButton(QMessageBox.StandardButton.No)
+        prompt.setWindowFlag(Qt.WindowType.Dialog, True)
+        prompt.adjustSize()
+        prompt.setFixedSize(prompt.sizeHint())
+
+        answer = prompt.exec()
         return answer == QMessageBox.StandardButton.Yes
