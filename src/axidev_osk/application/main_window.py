@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, QTimer, Qt
+import logging
+import time
+
+from PySide6.QtCore import QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
@@ -16,12 +19,19 @@ from .linux_permissions import launch_permission_script_in_terminal
 from .window_chrome import install_overlay_chrome
 
 
+_logger = logging.getLogger(__name__)
+
+
 class MainWindow(QMainWindow):
+    close_requested = Signal()
+
     def __init__(self) -> None:
         super().__init__()
 
         self._keyboard_backend = AxidevIoKeyboardBackend()
         self._status_label: QLabel | None = None
+        self._quit_controller_managed = False
+        self._shutdown = False
         self._keyboard_backend.initialize()
 
         self.setWindowTitle("axidev on-screen keyboard")
@@ -71,8 +81,26 @@ class MainWindow(QMainWindow):
         self._prompt_for_linux_permissions_if_needed()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._quit_controller_managed:
+            self.shutdown()
+            super().closeEvent(event)
+            return
+
+        self.close_requested.emit()
+        event.ignore()
+
+    def set_quit_controller_managed(self, managed: bool) -> None:
+        self._quit_controller_managed = managed
+
+    def shutdown(self) -> None:
+        if self._shutdown:
+            _logger.info("Keyboard backend shutdown already completed")
+            return
+        self._shutdown = True
+        started_at = time.perf_counter()
+        _logger.info("Shutting down keyboard backend")
         self._keyboard_backend.shutdown()
-        super().closeEvent(event)
+        _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

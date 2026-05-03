@@ -8,6 +8,7 @@ from .overlay_window import (
     create_always_on_top_window,
     prepare_always_on_top_window_environment,
 )
+from .quit_controller import ApplicationQuitController
 from .window_chrome import (
     OverlayChromeWidgets,
     OverlayResizeHandle,
@@ -17,6 +18,7 @@ from .window_chrome import (
 
 __all__ = [
     "AlwaysOnTopWindowConfig",
+    "ApplicationQuitController",
     "OverlayBackend",
     "OverlayChromeWidgets",
     "OverlayPlacement",
