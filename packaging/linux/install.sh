@@ -112,6 +112,7 @@ stage_install() {
     log "Installing wheels into the virtual environment..."
     local wheels_dir="${bundle_root}/wheels"
     [ -d "${wheels_dir}" ] || die "Release bundle missing wheels/ directory"
+    [ -d "${bundle_root}/packaging" ] || die "Release bundle missing packaging/ directory"
 
     "${STAGING_DIR}/.venv/bin/pip" install \
         --quiet \
@@ -120,6 +121,8 @@ stage_install() {
         --find-links "${wheels_dir}" \
         axidev-io \
         axidev-osk
+
+    cp -a "${bundle_root}/packaging" "${STAGING_DIR}/"
 
     log "Verifying the staged install can import its modules..."
     "${STAGING_DIR}/.venv/bin/python" -c "import axidev_osk, axidev_io" \
