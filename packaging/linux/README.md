@@ -1,6 +1,6 @@
 # Linux Installer Internals
 
-This document describes what `install.sh` and `uninstall.sh` actually do, what files they touch, and how to debug a failed install.
+This document describes what `install.sh`, `install-from-source.sh`, and `uninstall.sh` actually do, what files they touch, and how to debug a failed install.
 
 For an architecture overview, see [`../README.md`](../README.md).
 
@@ -39,6 +39,18 @@ These come from the distribution package manager. The installer does not attempt
 - `python3` (>= 3.10), `curl`, `tar`
 
 The `-devel` packages are not needed at install time because the C extension is precompiled in the release bundle.
+
+For `install-from-source.sh`, development headers and compiler tooling are also required because the vendored `axidev-io` extension is built locally. On Fedora, install at least `gcc`, `python3-devel`, `libinput-devel`, `systemd-devel`, and `libxkbcommon-devel` in addition to the runtime packages.
+
+## Source-tree install
+
+Use `install-from-source.sh` when you have copied or cloned the repository and want to install that exact checkout system-wide:
+
+```bash
+sudo ./packaging/linux/install-from-source.sh
+```
+
+It creates the same `/opt/axidev-osk`, `/usr/local/bin/axidev-osk`, and udev rule layout as the release installer, but it builds and installs `vendor/axidev-io-python` and `axidev-osk` from the local checkout instead of downloading release wheels.
 
 ## Files written
 

@@ -15,6 +15,7 @@ packaging/
   linux/
     README.md            # Linux installer internals
     install.sh           # system-wide installer (downloads latest release bundle)
+    install-from-source.sh            # system-wide installer from a local checkout
     uninstall.sh         # cleanly removes the system-wide install
     resources/
       launcher.sh                     # placed at /usr/local/bin/axidev-osk
