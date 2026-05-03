@@ -180,8 +180,7 @@ jobs:
           cp packaging/linux/resources/launcher.sh "${bundle_root}/packaging/linux/resources/"
           cp packaging/linux/resources/70-axidev-io-uinput.rules "${bundle_root}/packaging/linux/resources/"
 
-          chmod +x "${bundle_root}/packaging/linux/uninstall.sh"
-          chmod +x "${bundle_root}/packaging/linux/resources/launcher.sh"
+          find "${bundle_root}" -type f -name '*.sh' -exec chmod 0755 {} +
 
           versioned_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-${TAG}-linux-x86_64.tar.gz"
           stable_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-linux-x86_64.tar.gz"
