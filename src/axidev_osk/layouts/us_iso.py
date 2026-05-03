@@ -175,7 +175,8 @@ def build_us_iso_layout() -> list[KeySpec]:
         shifted_key("4", "$", row=1, column=u(4)),
         shifted_key("5", "%", row=1, column=u(5)),
         shifted_key("6", "^", row=1, column=u(6)),
-        shifted_key("7", "&", row=1, column=u(7)),
+        # Qt button text treats '&' as a mnemonic marker, so escape it here.
+        shifted_key("7", "&&", row=1, column=u(7)),
         shifted_key("8", "*", row=1, column=u(8)),
         shifted_key("9", "(", row=1, column=u(9)),
         shifted_key("0", ")", row=1, column=u(10)),
