@@ -10,6 +10,8 @@ The repository deliberately keeps these files in tree even when no public packag
 packaging/
   README.md              # this file: install architecture overview
   MANUAL_INSTALL.md      # source-based install for development or unsupported distros
+  arch/                  # Arch PKGBUILD and install hook
+  deb/                   # Debian packaging template
   linux/
     README.md            # Linux installer internals
     install.sh           # system-wide installer (downloads latest release bundle)
@@ -17,9 +19,11 @@ packaging/
     resources/
       launcher.sh                     # placed at /usr/local/bin/axidev-osk
       70-axidev-io-uinput.rules       # placed at /etc/udev/rules.d/...
+  nix/                   # NixOS module documentation
+  rpm/                   # Fedora/RPM spec
 ```
 
-Future additions (RPM spec, Arch PKGBUILD, Debian packaging, Nix flake, Windows installer) will land in sibling directories under `packaging/` as the project grows.
+The top-level `flake.nix` exposes the Nix package and NixOS module because Nix users expect flakes at the repository root.
 
 ## Installation Architecture
 
@@ -40,7 +44,7 @@ A normal install ends up looking like this on disk:
 The install path is intentionally simple:
 
 - **Everything the application owns lives under `/opt/axidev-osk/`.** Wiping that directory removes the program. There is no per-user data managed by the installer at this stage.
-- **The launcher in `/usr/local/bin/`** is a one-line shim that exec's `/opt/axidev-osk/.venv/bin/axidev-osk`. The application performs its own environment discovery (Wayland vs X11, layer-shell plugin location, etc.); the shim does not pass extra environment variables.
+- **The launcher in `/usr/local/bin/`** is a one-line shim that exec's `/opt/axidev-osk/.venv/bin/python -m axidev_osk`. The application performs its own environment discovery (Wayland vs X11, layer-shell plugin location, etc.); the shim does not pass extra environment variables.
 - **The udev rule** allows non-root processes to write to `/dev/uinput` when they belong to the `input` group. The installer adds the invoking user to the `input` group when it is missing.
 
 PySide6, Qt6, layer-shell-qt, libinput, libudev, and libxkbcommon are **not** bundled with the install. They are loaded from the system at runtime so that the Qt and layer-shell-qt versions match (a mismatch causes hard-to-diagnose ABI segfaults). The Linux dependency list lives in `linux/README.md` and in the top-level `README.md` install commands.

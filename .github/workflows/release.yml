@@ -12,9 +12,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  packaging-validate:
+    name: Validate Packaging Metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check shell scripts
+        run: |
+          set -euo pipefail
+          bash -n \
+            packaging/linux/install.sh \
+            packaging/linux/uninstall.sh \
+            packaging/linux/resources/launcher.sh \
+            packaging/deb/debian/rules \
+            packaging/deb/debian/postinst \
+            packaging/deb/debian/postrm
+
+      - name: Check Debian metadata
+        run: |
+          set -euo pipefail
+          cp -a packaging/deb/debian ./debian
+          dpkg-parsechangelog --show-field Version
+          dpkg-parsechangelog --show-field Distribution
+
+      - name: Check RPM spec parses
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+          rpmspec --parse packaging/rpm/axidev-osk.spec >/dev/null
+
+      - name: Check Arch package metadata shape
+        run: |
+          set -euo pipefail
+          test -f packaging/arch/PKGBUILD
+          test -f packaging/arch/axidev-osk.install
+          grep -q '^pkgname=axidev-osk$' packaging/arch/PKGBUILD
+          grep -q "install=axidev-osk.install" packaging/arch/PKGBUILD
+
+      - name: Check Nix flake syntax
+        uses: DeterminateSystems/nix-installer-action@v15
+
+      - name: Evaluate Nix flake
+        run: nix flake check --no-build
+
   source-archive:
     name: Build And Upload Source Archive
     runs-on: ubuntu-latest
+    needs: packaging-validate
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,6 +108,7 @@ jobs:
   linux-bundle:
     name: Build And Upload Linux x86_64 Bundle
     runs-on: ubuntu-24.04
+    needs: packaging-validate
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

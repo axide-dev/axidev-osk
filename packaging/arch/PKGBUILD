@@ -1,0 +1,52 @@
+# Maintainer: Axidev <contact@axide.dev>
+
+pkgname=axidev-osk
+pkgver=0.12.0
+pkgrel=1
+pkgdesc='On-screen keyboard overlay with real key emission'
+arch=('x86_64')
+url='https://github.com/axide-dev/axidev-osk'
+license=('GPL-3.0-only' 'MIT')
+depends=(
+  'python'
+  'pyside6'
+  'qt6-wayland'
+  'layer-shell-qt'
+  'libinput'
+  'systemd-libs'
+  'libxkbcommon'
+)
+makedepends=(
+  'gcc'
+  'pkgconf'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+install=axidev-osk.install
+source=("${pkgname}-${pkgver}-source.zip::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-source.zip")
+sha256sums=('SKIP')
+
+build() {
+  cd "${srcdir}/${pkgname}"
+
+  # axidev-io is bundled until it is published as an independent Python
+  # package. It should become its own Arch package later.
+  python -m build --wheel --no-isolation --outdir dist vendor/axidev-io-python
+  python -m build --wheel --no-isolation --outdir dist .
+}
+
+package() {
+  cd "${srcdir}/${pkgname}"
+
+  python -m installer --destdir="${pkgdir}" dist/axidev_io-*.whl
+  python -m installer --destdir="${pkgdir}" dist/axidev_osk-*.whl
+
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 vendor/axidev-io-python/LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.axidev-io"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 packaging/linux/resources/70-axidev-io-uinput.rules \
+    "${pkgdir}/usr/lib/udev/rules.d/70-axidev-io-uinput.rules"
+}
