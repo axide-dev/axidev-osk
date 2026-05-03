@@ -89,6 +89,8 @@ On GNOME/Mutter the app falls back to its X11/XWayland overlay backend, since GN
 
 On Linux, install the matching Qt layer-shell plugin (`layer-shell-qt` on most distributions) alongside the packages listed above to get proper overlay support.
 
+On Wayland environments where layer-shell is unavailable or unsupported, the keyboard UI may be constrained by the compositor to the bounds of the application context that launched it. This is a display-surface limitation only: the input backend can still emit key events through the configured Linux input path.
+
 ## Project Status
 
 Axidev OSK is usable today as a keyboard overlay, but the project is aimed at something bigger: a modular composition system for on-screen input surfaces, with multiple windows, reusable grids, and user-defined layouts driven by a Lua config.
