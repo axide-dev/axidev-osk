@@ -57,3 +57,96 @@ jobs:
           files: release-assets/*
           fail_on_unmatched_files: true
           overwrite_files: true
+
+  linux-bundle:
+    name: Build And Upload Linux x86_64 Bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            python3 \
+            python3-dev \
+            python3-venv \
+            libinput-dev \
+            libudev-dev \
+            libxkbcommon-dev
+
+      - name: Build wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m venv build-venv
+          ./build-venv/bin/pip install --quiet --upgrade pip
+          ./build-venv/bin/pip install --quiet build wheel setuptools
+
+          mkdir -p wheelhouse
+
+          # Build the C-extension wheel. This wheel is platform-tagged
+          # (linux_x86_64) because it includes the compiled .so.
+          ./build-venv/bin/python -m build \
+            --wheel \
+            --no-isolation \
+            --outdir wheelhouse \
+            ./vendor/axidev-io-python
+
+          # Build the application wheel. This wheel is pure-Python.
+          ./build-venv/bin/python -m build \
+            --wheel \
+            --no-isolation \
+            --outdir wheelhouse \
+            .
+
+          ls -la wheelhouse
+
+      - name: Stage release bundle
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-assets
+          stage_dir="$(mktemp -d)"
+          bundle_root="${stage_dir}/axidev-osk"
+
+          mkdir -p "${bundle_root}/wheels"
+          mkdir -p "${bundle_root}/packaging/linux/resources"
+
+          # Wheels: precompiled, no source, no tests, no vendor C source.
+          cp wheelhouse/*.whl "${bundle_root}/wheels/"
+
+          # Packaging assets the installed system needs at runtime
+          # (uninstaller and the launcher/udev resources for re-runs).
+          cp packaging/linux/uninstall.sh "${bundle_root}/packaging/linux/"
+          cp packaging/linux/resources/launcher.sh "${bundle_root}/packaging/linux/resources/"
+          cp packaging/linux/resources/70-axidev-io-uinput.rules "${bundle_root}/packaging/linux/resources/"
+
+          chmod +x "${bundle_root}/packaging/linux/uninstall.sh"
+          chmod +x "${bundle_root}/packaging/linux/resources/launcher.sh"
+
+          versioned_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-${TAG}-linux-x86_64.tar.gz"
+          stable_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-linux-x86_64.tar.gz"
+
+          tar -czf "${versioned_archive}" -C "${stage_dir}" axidev-osk
+          cp "${versioned_archive}" "${stable_archive}"
+
+          ls -la release-assets
+
+      - name: Upload assets to published release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          overwrite_files: true

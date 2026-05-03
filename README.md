@@ -14,7 +14,35 @@ Axidev OSK gives you a clean, always-on-top keyboard overlay you can pop up when
 
 ## Install
 
-Axidev OSK is installed from source into a Python virtual environment. The commands below download the latest release source archive (no `git` required) and install from it. The archive already bundles the vendored `axidev-io-python` sources.
+### Linux
+
+Install the system dependencies for your distribution, then run the installer. The installer downloads the latest release bundle, places it under `/opt/axidev-osk/`, and sets up the udev rule needed to emit keystrokes.
+
+**Fedora:**
+
+```bash
+sudo dnf install qt6-qtwayland layer-shell-qt python3-pyside6 \
+    libinput systemd-libs libxkbcommon python3 curl tar
+curl -L https://raw.githubusercontent.com/axide-dev/axidev-osk/main/packaging/linux/install.sh | sudo bash
+```
+
+**Arch:**
+
+```bash
+sudo pacman -S --needed qt6-wayland layer-shell-qt pyside6 \
+    libinput systemd libxkbcommon python curl tar
+curl -L https://raw.githubusercontent.com/axide-dev/axidev-osk/main/packaging/linux/install.sh | sudo bash
+```
+
+After installing, log out and back in once so the new `input` group membership takes effect, then run `axidev-osk`.
+
+To uninstall:
+
+```bash
+sudo bash /opt/axidev-osk/packaging/linux/uninstall.sh
+```
+
+For a manual source-based install (development, custom layouts, or distributions not covered above), see [`packaging/MANUAL_INSTALL.md`](./packaging/MANUAL_INSTALL.md).
 
 ### Windows
 
@@ -30,51 +58,6 @@ python -m pip install -e .\vendor\axidev-io-python
 python -m pip install -e .
 axidev-osk
 ```
-
-### Fedora (Wayland)
-
-```bash
-sudo dnf install qt6-qtwayland layer-shell-qt \
-    libinput-devel systemd-devel systemd-libs \
-    libxkbcommon-devel python3-devel
-
-curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
-unzip axidev-osk-source.zip
-cd axidev-osk
-python3 -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python
-python -m pip install -e .
-axidev-osk
-```
-
-### Arch (Wayland)
-
-```bash
-sudo pacman -S --needed python qt6-wayland layer-shell-qt \
-    libinput systemd libxkbcommon
-
-curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
-unzip axidev-osk-source.zip
-cd axidev-osk
-python -m venv --system-site-packages .venv
-source .venv/bin/activate
-python -m pip install -e ./vendor/axidev-io-python
-python -m pip install -e .
-axidev-osk
-```
-
-### Linux: one-time uinput setup
-
-Linux needs permission to emit keystrokes through `uinput`. The first time you run the app, it will tell you if permissions are missing and point you at a helper script.
-
-You can also run the helper directly from the vendored sources:
-
-```bash
-bash ./vendor/axidev-io-python/src/axidev_io/vendor/axidev-io/scripts/setup_uinput_permissions.sh
-```
-
-The app also offers an **Open In Terminal** option so the helper can run in a real terminal with a normal `sudo` prompt.
 
 ## Wayland Notes
 
