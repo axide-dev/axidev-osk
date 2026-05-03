@@ -8,7 +8,9 @@ import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from .overlay_window import configure_plain_window
 
 
 QuitCallback = Callable[[], None]
@@ -116,15 +118,33 @@ class ApplicationQuitController(QObject):
             self.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        prompt = QMessageBox(parent)
+        prompt = QDialog()
+        configure_plain_window(prompt)
         prompt.setWindowTitle("Close axidev-osk?")
-        prompt.setText("Do you want to close axidev-osk?")
-        prompt.setIcon(QMessageBox.Icon.Question)
-        prompt.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        prompt.setDefaultButton(QMessageBox.StandardButton.No)
-        prompt.setWindowFlag(Qt.WindowType.Dialog, True)
+        prompt.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        layout = QVBoxLayout(prompt)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+
+        label = QLabel("Do you want to close axidev-osk?", prompt)
+        layout.addWidget(label)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        yes_button = QPushButton("Yes", prompt)
+        no_button = QPushButton("No", prompt)
+        no_button.setDefault(True)
+        yes_button.clicked.connect(prompt.accept)
+        no_button.clicked.connect(prompt.reject)
+        buttons.addWidget(yes_button)
+        buttons.addWidget(no_button)
+        layout.addLayout(buttons)
+
         prompt.adjustSize()
         prompt.setFixedSize(prompt.sizeHint())
+        if parent is not None:
+            prompt.move(parent.frameGeometry().center() - prompt.rect().center())
 
         answer = prompt.exec()
-        return answer == QMessageBox.StandardButton.Yes
+        return answer == QDialog.DialogCode.Accepted

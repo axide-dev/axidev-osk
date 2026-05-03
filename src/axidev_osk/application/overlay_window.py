@@ -154,6 +154,12 @@ def configure_always_on_top_window(
     return controller
 
 
+def configure_plain_window(window: QWidget) -> "PlainWindowController":
+    controller = PlainWindowController(window)
+    controller.configure_window()
+    return controller
+
+
 def create_always_on_top_window(
     window_factory: Callable[[], TWindow],
     *,
@@ -579,6 +585,41 @@ class AlwaysOnTopWindowController:
         if app is None:
             return ""
         return QGuiApplication.platformName().lower()
+
+
+class PlainWindowController:
+    def __init__(self, window: QWidget) -> None:
+        self._window = window
+
+    @property
+    def backend(self) -> OverlayBackend:
+        return OverlayBackend.NATIVE
+
+    @property
+    def uses_custom_chrome(self) -> bool:
+        return False
+
+    def configure_window(self) -> None:
+        self._window.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        self._window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+        self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, False)
+        self._window.setWindowFlag(Qt.WindowType.FramelessWindowHint, False)
+        self._window.setWindowFlag(Qt.WindowType.Tool, False)
+
+    def handle_show(self) -> bool:
+        return False
+
+    def prepare_show(self) -> bool:
+        return False
+
+    def move_by(self, _dx: int, _dy: int) -> None:
+        return
+
+    def resize_by(self, _dx: int, _dy: int) -> None:
+        return
 
 
 def _configure_x11_bridge_environment() -> bool:
