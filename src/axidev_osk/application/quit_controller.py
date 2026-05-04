@@ -7,10 +7,10 @@ import sys
 import time
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QSocketNotifier, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, QSocketNotifier, QTimer
+from PySide6.QtWidgets import QApplication, QDialog, QWidget
 
-from .overlay_window import configure_plain_window
+from .confirm_window import ConfirmOverlayWindow
 
 
 QuitCallback = Callable[[], None]
@@ -118,33 +118,18 @@ class ApplicationQuitController(QObject):
             self.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        prompt = QDialog()
-        configure_plain_window(prompt)
-        prompt.setWindowTitle("Close axidev-osk?")
-        prompt.setWindowModality(Qt.WindowModality.ApplicationModal)
-
-        layout = QVBoxLayout(prompt)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
-
-        label = QLabel("Do you want to close axidev-osk?", prompt)
-        layout.addWidget(label)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        yes_button = QPushButton("Yes", prompt)
-        no_button = QPushButton("No", prompt)
-        no_button.setDefault(True)
-        yes_button.clicked.connect(prompt.accept)
-        no_button.clicked.connect(prompt.reject)
-        buttons.addWidget(yes_button)
-        buttons.addWidget(no_button)
-        layout.addLayout(buttons)
-
-        prompt.adjustSize()
-        prompt.setFixedSize(prompt.sizeHint())
-        if parent is not None:
-            prompt.move(parent.frameGeometry().center() - prompt.rect().center())
-
-        answer = prompt.exec()
-        return answer == QDialog.DialogCode.Accepted
+        prompt = ConfirmOverlayWindow(
+            title="Close axidev-osk?",
+            message="Do you want to close axidev-osk? This will stop the on-screen keyboard.",
+            accept_label="Yes",
+            reject_label="No",
+            prompt_glyph="!",
+            danger=True,
+            hint=(
+                "Tip: if you only want to hide the keyboard, move your cursor into "
+                "the screen corner — the hot-corner sensor will hide it without "
+                "shutting the app down."
+            ),
+            parent=parent,
+        )
+        return prompt.exec() == QDialog.DialogCode.Accepted
