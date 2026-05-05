@@ -1,6 +1,3 @@
-"""Generic window and surface builders."""
+"""Generic window, surface, chrome, and overlay modules."""
 
-from .builder import build_window
-from .surface import register_surfaces
-
-__all__ = ["build_window", "register_surfaces"]
+__all__: list[str] = []
