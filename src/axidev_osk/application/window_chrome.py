@@ -128,7 +128,7 @@ def install_overlay_chrome(
 ) -> OverlayChromeWidgets:
     title_bar = OverlayTitleBar(title, parent)
     title_bar.dragDelta.connect(on_move)
-    layout.addWidget(title_bar)
+    layout.insertWidget(0, title_bar)
 
     resize_handle = OverlayResizeHandle(title_bar)
     resize_handle.resizeDelta.connect(on_resize)

@@ -8,9 +8,7 @@ import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer
-from PySide6.QtWidgets import QApplication, QDialog, QWidget
-
-from .confirm_window import ConfirmOverlayWindow
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 
 QuitCallback = Callable[[], None]
@@ -118,18 +116,11 @@ class ApplicationQuitController(QObject):
             self.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        prompt = ConfirmOverlayWindow(
-            title="Close axidev-osk?",
-            message="Do you want to close axidev-osk? This will stop the on-screen keyboard.",
-            accept_label="Yes",
-            reject_label="No",
-            prompt_glyph="!",
-            danger=True,
-            hint=(
-                "Tip: if you only want to hide the keyboard, move your cursor into "
-                "the screen corner — the hot-corner sensor will hide it without "
-                "shutting the app down."
-            ),
-            parent=parent,
+        result = QMessageBox.question(
+            parent,
+            "Close axidev-osk?",
+            "Do you want to close axidev-osk? This will stop OSK input.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        return prompt.exec() == QDialog.DialogCode.Accepted
+        return result == QMessageBox.StandardButton.Yes

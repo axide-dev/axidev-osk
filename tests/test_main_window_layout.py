@@ -7,7 +7,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.application import OverlayResizeHandle, OverlayTitleBar
-from axidev_osk.application.main_window import MainWindow
+from axidev_osk.components import register_components
+from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.runtime.context import Context
+from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
+from axidev_osk.runtime.state_store import StateStore
+from axidev_osk.windows.builder import build_window
+from axidev_osk.windows.surface import register_surfaces
 from axidev_osk.application.overlay_window import OverlayPlacement
 
 
@@ -66,6 +73,25 @@ def _app() -> QApplication:
     return app
 
 
+def _build_keyboard_window(backend: FakeKeyboardBackend):
+    config = build_default_app_config()
+    dispatcher = Dispatcher()
+    components = ComponentRegistry()
+    surfaces = SurfaceRegistry()
+    register_components(components)
+    register_surfaces(surfaces)
+    context = Context(
+        config=config,
+        dispatcher=dispatcher,
+        keyboard=backend,
+        state=StateStore(),
+        components=components,
+        surfaces=surfaces,
+    )
+    dispatcher.bind_context(context)
+    return build_window(config.windows[0], context)
+
+
 class MainWindowLayoutTests(unittest.TestCase):
     def test_custom_chrome_puts_resize_handle_in_title_bar(self) -> None:
         _app()
@@ -73,15 +99,11 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         with (
             patch(
-                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
-                return_value=FakeKeyboardBackend(ready=True),
-            ),
-            patch(
-                "axidev_osk.application.main_window.configure_always_on_top_window",
+                "axidev_osk.windows.builder.configure_always_on_top_window",
                 return_value=overlay,
             ),
         ):
-            window = MainWindow()
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
 
         self.addCleanup(window.close)
 
@@ -106,15 +128,11 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         with (
             patch(
-                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
-                return_value=FakeKeyboardBackend(ready=False),
-            ),
-            patch(
-                "axidev_osk.application.main_window.configure_always_on_top_window",
+                "axidev_osk.windows.builder.configure_always_on_top_window",
                 return_value=overlay,
             ),
         ):
-            window = MainWindow()
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=False))
 
         self.addCleanup(window.close)
 
@@ -129,15 +147,11 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         with (
             patch(
-                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
-                return_value=FakeKeyboardBackend(ready=True),
-            ),
-            patch(
-                "axidev_osk.application.main_window.configure_always_on_top_window",
+                "axidev_osk.windows.builder.configure_always_on_top_window",
                 return_value=overlay,
             ),
         ):
-            window = MainWindow()
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
 
         self.addCleanup(window.close)
 
@@ -150,15 +164,11 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         with (
             patch(
-                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
-                return_value=FakeKeyboardBackend(ready=True),
-            ),
-            patch(
-                "axidev_osk.application.main_window.configure_always_on_top_window",
+                "axidev_osk.windows.builder.configure_always_on_top_window",
                 return_value=overlay,
             ),
         ):
-            window = MainWindow()
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
 
         self.addCleanup(window.close)
 
@@ -173,15 +183,11 @@ class MainWindowLayoutTests(unittest.TestCase):
 
         with (
             patch(
-                "axidev_osk.application.main_window.AxidevIoKeyboardBackend",
-                return_value=FakeKeyboardBackend(ready=True),
-            ),
-            patch(
-                "axidev_osk.application.main_window.configure_always_on_top_window",
+                "axidev_osk.windows.builder.configure_always_on_top_window",
                 return_value=overlay,
             ) as configure_overlay,
         ):
-            window = MainWindow()
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
 
         self.addCleanup(window.close)
 

@@ -22,6 +22,7 @@ def set_key_button_label(button: QPushButton, label: str, secondary_label: str |
 
 
 def refresh_key_button(button: QPushButton, state_machine: KeyStateMachine) -> None:
+    button.setProperty("pressed", state_machine.is_pressed)
     button.setProperty("latched", state_machine.is_latched)
     button.setProperty("interactionState", state_machine.state.value)
     button.setChecked(state_machine.is_latched)
@@ -34,17 +35,27 @@ def create_key_button(
     label: str,
     *,
     state_machine: KeyStateMachine,
+    component_id: str | None = None,
     width: float = 1.0,
     secondary_label: str | None = None,
     key_id: str | None = None,
+    io_key: str | None = None,
+    profile: str | None = None,
+    layout: str | None = None,
     on_press: VoidCallback | None = None,
     on_release: VoidCallback | None = None,
 ) -> QPushButton:
     button = QPushButton()
     metrics = DEFAULT_KEYBOARD_METRICS
     set_key_button_label(button, label, secondary_label)
+    button.setProperty("componentType", "key")
+    button.setProperty("componentId", component_id or key_id or label)
     button.setProperty("keyId", key_id or label)
+    button.setProperty("ioKey", io_key)
+    button.setProperty("profile", profile)
+    button.setProperty("layout", layout)
     button.setProperty("keyWidth", width)
+    button.setProperty("pressed", state_machine.is_pressed)
     button.setProperty("latched", state_machine.is_latched)
     button.setProperty("latchable", state_machine.latchable)
     button.setProperty("interactionState", state_machine.state.value)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from ..config.models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 from ..models import KeyDisplay, KeySpec
+from ..runtime.identity import stable_id, validate_unique_ids
 
 
 UNIT = 4
@@ -283,3 +285,40 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("↓", row=5, column=NAV_START + u(1), io_key="Down"),
         key("→", row=5, column=NAV_START + u(2), io_key="Right"),
     ]
+
+
+def build_us_iso_layout_config(*, parent_id: str = "default") -> LayoutConfig:
+    """Build the bundled US ISO keyboard as pure layout/grid/component data.
+
+    Args:
+        parent_id: Parent config ID used when deriving deterministic IDs.
+
+    Returns:
+        Layout config containing one grid with key and spacer component DTOs.
+
+    Side effects:
+        Raises ``ValueError`` if deterministic IDs collide.
+    """
+
+    layout_id = stable_id(parent_id, "layout", "us_iso", stable_override="layout:us-iso")
+    grid_id = stable_id(layout_id, "grid", "keyboard", stable_override="grid:us-iso:keyboard")
+    components: list[KeyConfig | SpacerConfig] = []
+    for spec in build_us_iso_layout():
+        kind = "spacer" if spec.is_spacer else "key"
+        component_id = stable_id(
+            grid_id,
+            kind,
+            spec.row,
+            spec.column,
+            spec.width,
+            spec.height,
+            spec.key_id or spec.io_key or spec.label,
+        )
+        if spec.is_spacer:
+            components.append(SpacerConfig(id=component_id, spec=spec))
+            continue
+        components.append(KeyConfig(id=component_id, spec=spec))
+
+    validate_unique_ids((component.id for component in components), scope="US ISO keyboard grid")
+    grid = GridConfig(id=grid_id, components=tuple(components), nav_start_column=NAV_START)
+    return LayoutConfig(id=layout_id, name="us-iso", grids=(grid,))

@@ -1,0 +1,106 @@
+"""Runtime ownership for live windows keyed by deterministic IDs."""
+
+from __future__ import annotations
+
+from PySide6.QtWidgets import QWidget
+
+from ..config.models import WindowConfig
+from ..windows.builder import RuntimeWindow, build_window
+from .context import Context
+
+
+class WindowManager:
+    """Creates, stores, and controls runtime windows by ID."""
+
+    def __init__(self, context: Context) -> None:
+        """Create a window manager.
+
+        Args:
+            context: Runtime context used to build windows.
+
+        Returns:
+            None.
+
+        Side effects:
+            None.
+        """
+
+        self._context = context
+        self._windows: dict[str, RuntimeWindow] = {}
+        self._configs = {window.id: window for window in context.config.windows}
+
+    def get_or_create(self, window_id: str, *, parent: QWidget | None = None) -> RuntimeWindow:
+        """Return a live window, creating it from config if needed.
+
+        Args:
+            window_id: Deterministic window ID.
+            parent: Optional Qt parent used when creating the window.
+
+        Returns:
+            Live runtime window.
+
+        Side effects:
+            May build and store a new Qt window.
+        """
+
+        existing = self._windows.get(window_id)
+        if existing is not None:
+            return existing
+        config = self._configs.get(window_id)
+        if config is None:
+            raise ValueError(f"No window config registered for {window_id!r}")
+        window = build_window(config, self._context, parent=parent)
+        self._windows[window_id] = window
+        return window
+
+    def create_transient(self, config: WindowConfig, *, parent: QWidget | None = None) -> RuntimeWindow:
+        """Build a window that is not retained in the manager dict.
+
+        Args:
+            config: Window config to build.
+            parent: Optional Qt parent.
+
+        Returns:
+            Runtime window.
+
+        Side effects:
+            Builds Qt widgets.
+        """
+
+        return build_window(config, self._context, parent=parent)
+
+    def show(self, window_id: str) -> RuntimeWindow:
+        """Show a managed window.
+
+        Args:
+            window_id: Deterministic window ID.
+
+        Returns:
+            Shown window.
+
+        Side effects:
+            Creates and shows the window if necessary.
+        """
+
+        window = self.get_or_create(window_id)
+        window.show()
+        return window
+
+    def hide(self, window_id: str) -> None:
+        """Hide a managed window if it exists."""
+
+        window = self._windows.get(window_id)
+        if window is not None:
+            window.hide()
+
+    def close(self, window_id: str) -> None:
+        """Close and forget a managed window if it exists."""
+
+        window = self._windows.pop(window_id, None)
+        if window is not None:
+            window.close()
+
+    def all_windows(self) -> list[RuntimeWindow]:
+        """Return all live managed windows."""
+
+        return list(self._windows.values())
