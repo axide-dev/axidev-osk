@@ -90,9 +90,9 @@ def build_prompt_component(config: ComponentConfig, context: Context) -> QWidget
         hint_label.setStyleSheet(
             "QLabel {"
             "  color: rgba(220, 220, 220, 0.65);"
-            "  font-size: 11px;"
+            "  font-size: 10px;"
             "  font-style: italic;"
-            "  padding: 6px 8px;"
+            "  padding: 4px 8px;"
             "  border-left: 2px solid rgba(180, 180, 180, 0.35);"
             "}"
         )
@@ -100,7 +100,7 @@ def build_prompt_component(config: ComponentConfig, context: Context) -> QWidget
 
     buttons = QHBoxLayout()
     buttons.setContentsMargins(0, 0, 0, 0)
-    buttons.setSpacing(10)
+    buttons.setSpacing(16)
     buttons.addStretch(1)
     for button_config in config.buttons:
         button = context.components.build(button_config, context)
