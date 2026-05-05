@@ -46,7 +46,11 @@ def main() -> int:
         Initializes process metadata, overlay environment, runtime services, and Qt windows.
     """
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] [%(name)s] (%(filename)s:%(lineno)d) %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     _set_process_name("axidev-osk")
     _logger.info("Starting axidev-osk v%s", _package_version())
     prepare_always_on_top_window_environment()
