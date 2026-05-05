@@ -5,8 +5,8 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
-from .keyboard_metrics import DEFAULT_KEYBOARD_METRICS
-from .key_state_machine import KeyStateMachine
+from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
+from .state import KeyStateChange, KeyStateMachine, StateListener
 
 VoidCallback = Callable[[], None]
 
@@ -34,7 +34,10 @@ def refresh_key_button(button: QPushButton, state_machine: KeyStateMachine) -> N
 def create_key_button(
     label: str,
     *,
-    state_machine: KeyStateMachine,
+    state_machine: KeyStateMachine | None = None,
+    latchable: bool = False,
+    initial_latched: bool = False,
+    on_state_change: StateListener | None = None,
     component_id: str | None = None,
     width: float = 1.0,
     secondary_label: str | None = None,
@@ -47,6 +50,7 @@ def create_key_button(
 ) -> QPushButton:
     button = QPushButton()
     metrics = DEFAULT_KEYBOARD_METRICS
+    machine = state_machine or KeyStateMachine(latchable=latchable, initial_latched=initial_latched)
     set_key_button_label(button, label, secondary_label)
     button.setProperty("componentType", "key")
     button.setProperty("componentId", component_id or key_id or label)
@@ -55,31 +59,50 @@ def create_key_button(
     button.setProperty("profile", profile)
     button.setProperty("layout", layout)
     button.setProperty("keyWidth", width)
-    button.setProperty("pressed", state_machine.is_pressed)
-    button.setProperty("latched", state_machine.is_latched)
-    button.setProperty("latchable", state_machine.latchable)
-    button.setProperty("interactionState", state_machine.state.value)
+    button.setProperty("pressed", machine.is_pressed)
+    button.setProperty("latched", machine.is_latched)
+    button.setProperty("latchable", machine.latchable)
+    button.setProperty("interactionState", machine.state.value)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    button.setCheckable(state_machine.latchable)
+    button.setCheckable(machine.latchable)
     button.setMinimumHeight(metrics.span_height(1))
     button.setMinimumWidth(metrics.span_width(width))
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    refresh_key_button(button, state_machine)
+    button._axidev_key_state_machine = machine  # type: ignore[attr-defined]
+    refresh_key_button(button, machine)
 
-    state_machine.add_listener(lambda _change: refresh_key_button(button, state_machine))
+    machine.add_listener(lambda _change: refresh_key_button(button, machine))
+    if on_state_change is not None:
+        machine.add_listener(on_state_change)
 
     def handle_press() -> None:
-        state_machine.press()
+        machine.press()
         if on_press is not None:
             on_press()
 
     def handle_release() -> None:
-        state_machine.release()
-        if state_machine.latchable:
-            state_machine.toggle_latched()
+        machine.release()
+        if machine.latchable:
+            machine.toggle_latched()
         if on_release is not None:
             on_release()
 
     button.pressed.connect(handle_press)
     button.released.connect(handle_release)
     return button
+
+
+def key_button_state_machine(button: QPushButton) -> KeyStateMachine:
+    """Return the state machine owned by a key button.
+
+    Args:
+        button: Button created by ``create_key_button``.
+
+    Returns:
+        The button-owned key interaction state machine.
+
+    Side effects:
+        None.
+    """
+
+    return button._axidev_key_state_machine  # type: ignore[attr-defined,no-any-return]

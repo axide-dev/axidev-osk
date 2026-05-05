@@ -12,10 +12,11 @@ from ..application.linux_permissions import launch_permission_script_in_terminal
 from ..application.quit_controller import ApplicationQuitController
 from ..components import register_components
 from ..config.defaults import build_default_app_config
-from ..config.models import AppConfig, PromptConfig, SurfaceConfig, WindowConfig
+from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..hot_corner import HotCornerConfig, HotCornerWindowToggleController
 from ..styles.theme import apply_theme
-from ..windows.surface import prompt_button_config, register_surfaces
+from ..components.prompt import prompt_button_config
+from ..windows.surface import register_surfaces
 from .commands import AppQuit, WindowClose, WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
@@ -156,14 +157,13 @@ class ApplicationRuntime:
             title="Close axidev-osk?",
             surface=SurfaceConfig(
                 id=surface_id,
-                kind="prompt",
-                prompt=prompt,
+                components=(prompt,),
                 margins=(18, 18, 18, 16),
                 spacing=14,
-                minimum_width=460,
+                minimum_size=(460, 120),
             ),
             overlay=replace(keyboard_window.overlay, config=keyboard_window.overlay.config),
-            chrome=keyboard_window.chrome,
+            chrome=ChromeConfig(enabled=False),
         )
 
     def _show_linux_permission_prompt(self) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QSize, Signal
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
@@ -65,7 +65,7 @@ class RuntimeWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             apply_theme(app)
-        self.apply_startup_size(minimum_width=config.surface.minimum_width)
+        self.apply_startup_size(minimum_size=config.surface.minimum_size)
 
     @property
     def window_id(self) -> str:
@@ -88,11 +88,11 @@ class RuntimeWindow(QMainWindow):
 
         self._quit_controller_managed = managed
 
-    def apply_startup_size(self, *, minimum_width: int = 0) -> None:
+    def apply_startup_size(self, *, minimum_size: tuple[int, int] = (0, 0)) -> None:
         """Resize the window to its polished minimum size.
 
         Args:
-            minimum_width: Optional lower bound for the startup width.
+            minimum_size: Optional lower bound for startup size as ``(width, height)``.
 
         Returns:
             None.
@@ -108,9 +108,9 @@ class RuntimeWindow(QMainWindow):
             central_layout = central_widget.layout()
             if central_layout is not None:
                 central_layout.activate()
-        minimum_size = self.minimumSizeHint().expandedTo(QSize(minimum_width, 0))
-        self.setMinimumSize(minimum_size)
-        self.resize(minimum_size)
+        resolved_minimum_size = self.minimumSizeHint().expandedTo(QSize(*minimum_size))
+        self.setMinimumSize(resolved_minimum_size)
+        self.resize(resolved_minimum_size)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Route managed close requests through the runtime dispatcher."""
@@ -126,6 +126,7 @@ class RuntimeWindow(QMainWindow):
         """Let the overlay controller apply show-time platform fixes."""
 
         super().showEvent(event)
+        self.apply_startup_size(minimum_size=self._config.surface.minimum_size)
         self._overlay.handle_show()
 
 
@@ -145,26 +146,3 @@ def build_window(config: WindowConfig, context: Context, *, parent: QWidget | No
     """
 
     return RuntimeWindow(config, context, parent=parent)
-
-
-class PromptSession(QObject):
-    """Exec-like helper for prompt windows built by the generic builder."""
-
-    resolved = Signal(str)
-
-    def __init__(self, prompt_id: str, parent: QObject | None = None) -> None:
-        """Create a prompt result bridge.
-
-        Args:
-            prompt_id: Deterministic prompt ID.
-            parent: Optional Qt parent.
-
-        Returns:
-            None.
-
-        Side effects:
-            None.
-        """
-
-        super().__init__(parent)
-        self.prompt_id = prompt_id

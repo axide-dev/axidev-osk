@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from ..config.models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
-from ..models import KeyDisplay, KeySpec
-from ..runtime.identity import stable_id, validate_unique_ids
+from ...models import KeyDisplay, KeySpec
+from ...runtime.identity import stable_id, validate_unique_ids
+from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
 
 UNIT = 4

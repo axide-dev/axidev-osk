@@ -8,8 +8,8 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 from ...config.models import ComponentConfig, KeyConfig, SpacerConfig
 from ...runtime.context import Context
 from ...runtime.registries import ComponentRegistry
-from ..keyboard_metrics import DEFAULT_KEYBOARD_METRICS
-from ..keyboard_widget import KeyboardWidget
+from ..grid.keyboard import KeyboardWidget
+from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
 
 
 def register(registry: ComponentRegistry) -> None:

@@ -6,9 +6,9 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from axidev_osk.components.key_button import create_key_button
-from axidev_osk.components.key_state_machine import KeyStateMachine
-from axidev_osk.components.keyboard_widget import KeyboardWidget
+from axidev_osk.components.button.key import create_key_button
+from axidev_osk.components.button.state import KeyStateMachine
+from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
 

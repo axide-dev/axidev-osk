@@ -65,6 +65,9 @@ class FakeOverlayController:
     def handle_show(self) -> bool:
         return True
 
+    def apply_configured_position(self) -> None:
+        return None
+
 
 def _app() -> QApplication:
     app = QApplication.instance()

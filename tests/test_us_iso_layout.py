@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from axidev_osk.layouts.us_iso import build_us_iso_layout
-from axidev_osk.layouts.us_iso import build_us_iso_layout_config
+from axidev_osk.config.defaults.us_iso import build_us_iso_layout
+from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 
 
 def test_super_keys_use_platform_neutral_labels_and_io_keys() -> None:

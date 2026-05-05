@@ -2,7 +2,9 @@
 
 from ..runtime.registries import ComponentRegistry
 from .button import register as register_button
+from .grid.builder import register as register_grid
 from .key import register as register_key
+from .prompt import register as register_prompt
 
 
 def register_components(registry: ComponentRegistry) -> None:
@@ -19,7 +21,9 @@ def register_components(registry: ComponentRegistry) -> None:
     """
 
     register_key(registry)
+    register_grid(registry)
     register_button(registry)
+    register_prompt(registry)
 
 
 __all__ = ["register_components"]

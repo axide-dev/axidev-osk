@@ -82,9 +82,6 @@ class ButtonConfig:
     kind: Literal["button"] = "button"
 
 
-ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig
-
-
 @dataclass(frozen=True, slots=True)
 class GridConfig:
     """Declarative grid containing keys or other grid-positioned components.
@@ -119,7 +116,7 @@ class LayoutConfig:
 
 @dataclass(frozen=True, slots=True)
 class PromptConfig:
-    """Declarative prompt content for confirmation windows.
+    """Declarative prompt component for confirmation windows.
 
     Attributes:
         id: Deterministic prompt component ID.
@@ -136,29 +133,58 @@ class PromptConfig:
     prompt_glyph: str = "!"
     hint: str | None = None
     danger: bool = False
+    kind: Literal["prompt"] = "prompt"
+
+
+@dataclass(frozen=True, slots=True)
+class KeyboardGridConfig:
+    """Declarative keyboard grid component.
+
+    Attributes:
+        id: Deterministic component ID.
+        layout: Keyboard layout data used by the grid component.
+    """
+
+    id: str
+    layout: LayoutConfig
+    kind: Literal["keyboard-grid"] = "keyboard-grid"
+
+
+@dataclass(frozen=True, slots=True)
+class KeyboardStatusConfig:
+    """Declarative keyboard backend status component.
+
+    Attributes:
+        id: Deterministic component ID.
+    """
+
+    id: str
+    kind: Literal["keyboard-status"] = "keyboard-status"
+    omit_when_ready: bool = True
+
+
+ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig | PromptConfig | KeyboardGridConfig | KeyboardStatusConfig
 
 
 @dataclass(frozen=True, slots=True)
 class SurfaceConfig:
-    """Root content surface hosted by a window.
+    """Generic root content surface hosted by a window.
 
     Attributes:
         id: Deterministic surface ID.
         kind: Surface builder key.
-        layout: Keyboard layout data for keyboard surfaces.
-        prompt: Prompt data for confirmation surfaces.
+        components: Child components mounted into the surface.
         margins: Qt layout margins in pixels ordered left, top, right, bottom.
         spacing: Qt layout spacing in pixels.
-        minimum_width: Optional minimum width used for startup sizing.
+        minimum_size: Optional lower bound for startup size as ``(width, height)``.
     """
 
     id: str
-    kind: Literal["keyboard", "prompt"]
-    layout: LayoutConfig | None = None
-    prompt: PromptConfig | None = None
+    components: tuple[ComponentConfig, ...]
+    kind: Literal["surface"] = "surface"
     margins: tuple[int, int, int, int] = (10, 10, 10, 10)
     spacing: int = 8
-    minimum_width: int = 0
+    minimum_size: tuple[int, int] = (0, 0)
 
 
 @dataclass(frozen=True, slots=True)

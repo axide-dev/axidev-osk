@@ -7,16 +7,16 @@ from typing import ClassVar, Iterator
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QWidget
 
-from ..config.models import GridConfig, KeyConfig, LayoutConfig
-from ..layouts.us_iso import build_us_iso_layout_config
-from ..models import KeySpec
-from ..runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
-from ..runtime.context import Context
-from ..runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
-from ..services.keyboard import KeyboardService
-from .key_button import create_key_button, set_key_button_label
-from .keyboard_metrics import DEFAULT_KEYBOARD_METRICS
-from .key_state_machine import KeyInteractionState, KeyStateChange, KeyStateMachine
+from ...config.models import GridConfig, KeyConfig, LayoutConfig
+from ...config.defaults.us_iso import build_us_iso_layout_config
+from ...models import KeySpec
+from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
+from ...runtime.context import Context
+from ...runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
+from ...services.keyboard import KeyboardService
+from ..button.key import create_key_button, key_button_state_machine, set_key_button_label
+from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
+from .metrics import DEFAULT_KEYBOARD_METRICS
 
 Unsubscribe = Callable[[], None]
 
@@ -179,12 +179,8 @@ class KeyboardWidget(QFrame):
     def _build_key(self, spec: KeySpec, *, component_id: str) -> QPushButton:
         active_press: list[object | None] = [None]
         latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
-        state_machine = KeyStateMachine(latchable=spec.latchable, initial_latched=latched)
+        state_machine: KeyStateMachine | None = None
         listened_key_name = self._listened_key_name(spec)
-        if listened_key_name is not None:
-            self._state_machines_by_key_name.setdefault(listened_key_name, []).append(state_machine)
-            if self._keyboard.is_key_down(listened_key_name):
-                state_machine.set_pressed(True, reason="listener_snapshot")
 
         def on_press(key_spec: KeySpec = spec) -> None:
             active_press[0] = self._handle_key_press(component_id, key_spec)
@@ -193,25 +189,29 @@ class KeyboardWidget(QFrame):
             self._handle_key_release(component_id, active_press[0])
             active_press[0] = None
 
-        if spec.latchable and spec.key_id is not None:
-            if spec.holds_when_latched:
-                self._hold_visual_modifiers.add(spec.key_id)
-            state_machine.add_listener(
-                lambda change, key_spec=spec, key_id=spec.key_id, machine=state_machine, press_ref=active_press: self._handle_latch_state_change(
-                    component_id,
-                    key_spec,
-                    key_id,
-                    machine,
-                    change,
-                    press_ref,
-                )
+        def on_state_change(
+            change: KeyStateChange,
+            key_spec: KeySpec = spec,
+            key_id: str | None = spec.key_id,
+            press_ref: list[object | None] = active_press,
+        ) -> None:
+            if key_id is None:
+                return
+            self._handle_latch_state_change(
+                component_id,
+                key_spec,
+                key_id,
+                key_button_state_machine(button),
+                change,
+                press_ref,
             )
-            self._latch_groups.setdefault(spec.key_id, []).append(state_machine)
 
         display = spec.resolve_display(self._active_display_modifiers())
         button = create_key_button(
             display.label,
-            state_machine=state_machine,
+            latchable=spec.latchable,
+            initial_latched=latched,
+            on_state_change=on_state_change if spec.latchable and spec.key_id is not None else None,
             component_id=component_id,
             width=spec.width,
             secondary_label=display.secondary_label,
@@ -222,6 +222,15 @@ class KeyboardWidget(QFrame):
             on_press=on_press,
             on_release=on_release,
         )
+        state_machine = key_button_state_machine(button)
+        if listened_key_name is not None:
+            self._state_machines_by_key_name.setdefault(listened_key_name, []).append(state_machine)
+            if self._keyboard.is_key_down(listened_key_name):
+                state_machine.set_pressed(True, reason="listener_snapshot")
+        if spec.latchable and spec.key_id is not None:
+            if spec.holds_when_latched:
+                self._hold_visual_modifiers.add(spec.key_id)
+            self._latch_groups.setdefault(spec.key_id, []).append(state_machine)
         if listened_key_name is not None:
             button.setProperty("ioKeyName", listened_key_name)
         if spec.height > 1:
