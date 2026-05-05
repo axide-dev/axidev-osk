@@ -9,16 +9,16 @@ from unittest.mock import patch
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication
 
-from axidev_osk.application.hot_corner import (
+from axidev_osk.hot_corner.controller import (
     _configure_hot_corner_window,
     HiddenWindowState,
     HotCornerConfig,
     HotCornerWindowToggleController,
     ScreenCorner,
 )
-from axidev_osk.application import layer_shell
-from axidev_osk.application.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
-from axidev_osk.application.overlay_window import (
+from axidev_osk.windows.overlay import layer_shell
+from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
+from axidev_osk.windows.overlay.always_on_top import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,
     OverlayBackend,
@@ -205,7 +205,7 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
         ):
             controller = AlwaysOnTopWindowController(
@@ -234,7 +234,7 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
         ):
             controller = AlwaysOnTopWindowController(
@@ -262,7 +262,7 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
         ):
             controller = AlwaysOnTopWindowController(
@@ -293,10 +293,10 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.AlwaysOnTopWindowController._current_screen_geometry",
+            "axidev_osk.windows.overlay.always_on_top.AlwaysOnTopWindowController._current_screen_geometry",
             return_value=QRect(0, 0, 1920, 1080),
         ) as current_screen_geometry, patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
         ):
             controller = AlwaysOnTopWindowController(window)
@@ -316,10 +316,10 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             return_value=True,
         ), patch(
-            "axidev_osk.application.overlay_window.QTimer.singleShot",
+            "axidev_osk.windows.overlay.always_on_top.QTimer.singleShot",
             side_effect=lambda _delay, callback: callback(),
         ) as single_shot:
             controller = AlwaysOnTopWindowController(window)
@@ -345,10 +345,10 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
         ), patch(
-            "axidev_osk.application.overlay_window.AlwaysOnTopWindowController._current_screen_geometry",
+            "axidev_osk.windows.overlay.always_on_top.AlwaysOnTopWindowController._current_screen_geometry",
             return_value=QRect(0, 0, 1920, 1080),
         ), patch(
-            "axidev_osk.application.overlay_window.apply_wayland_layer_shell",
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
         ):
             controller = AlwaysOnTopWindowController(window)
@@ -367,65 +367,65 @@ class OverlayWindowControllerTests(unittest.TestCase):
             "_detect_backend",
             return_value=OverlayBackend.WINDOWS_NATIVE,
         ), patch(
-            "axidev_osk.application.overlay_window._GWL_EXSTYLE",
+            "axidev_osk.windows.overlay.always_on_top._GWL_EXSTYLE",
             create=True,
             new=-20,
         ), patch(
-            "axidev_osk.application.overlay_window._HWND_TOPMOST",
+            "axidev_osk.windows.overlay.always_on_top._HWND_TOPMOST",
             create=True,
             new=-1,
         ), patch(
-            "axidev_osk.application.overlay_window._SWP_NOMOVE",
+            "axidev_osk.windows.overlay.always_on_top._SWP_NOMOVE",
             create=True,
             new=0x0002,
         ), patch(
-            "axidev_osk.application.overlay_window._SWP_NOSIZE",
+            "axidev_osk.windows.overlay.always_on_top._SWP_NOSIZE",
             create=True,
             new=0x0001,
         ), patch(
-            "axidev_osk.application.overlay_window._SWP_NOACTIVATE",
+            "axidev_osk.windows.overlay.always_on_top._SWP_NOACTIVATE",
             create=True,
             new=0x0010,
         ), patch(
-            "axidev_osk.application.overlay_window._SWP_FRAMECHANGED",
+            "axidev_osk.windows.overlay.always_on_top._SWP_FRAMECHANGED",
             create=True,
             new=0x0020,
         ), patch(
-            "axidev_osk.application.overlay_window._SWP_NOOWNERZORDER",
+            "axidev_osk.windows.overlay.always_on_top._SWP_NOOWNERZORDER",
             create=True,
             new=0x0200,
         ), patch(
-            "axidev_osk.application.overlay_window._WS_EX_NOACTIVATE",
+            "axidev_osk.windows.overlay.always_on_top._WS_EX_NOACTIVATE",
             create=True,
             new=0x08000000,
         ), patch(
-            "axidev_osk.application.overlay_window._DWMWA_WINDOW_CORNER_PREFERENCE",
+            "axidev_osk.windows.overlay.always_on_top._DWMWA_WINDOW_CORNER_PREFERENCE",
             create=True,
             new=33,
         ), patch(
-            "axidev_osk.application.overlay_window._DWMWA_BORDER_COLOR",
+            "axidev_osk.windows.overlay.always_on_top._DWMWA_BORDER_COLOR",
             create=True,
             new=34,
         ), patch(
-            "axidev_osk.application.overlay_window._DWMWCP_DONOTROUND",
+            "axidev_osk.windows.overlay.always_on_top._DWMWCP_DONOTROUND",
             create=True,
             new=1,
         ), patch(
-            "axidev_osk.application.overlay_window._DWMWA_COLOR_NONE",
+            "axidev_osk.windows.overlay.always_on_top._DWMWA_COLOR_NONE",
             create=True,
             new=0xFFFFFFFE,
         ), patch(
-            "axidev_osk.application.overlay_window._get_window_long_ptr",
+            "axidev_osk.windows.overlay.always_on_top._get_window_long_ptr",
             create=True,
             return_value=0,
         ), patch(
-            "axidev_osk.application.overlay_window._set_window_long_ptr",
+            "axidev_osk.windows.overlay.always_on_top._set_window_long_ptr",
             create=True,
         ), patch(
-            "axidev_osk.application.overlay_window._set_window_pos",
+            "axidev_osk.windows.overlay.always_on_top._set_window_pos",
             create=True,
         ), patch(
-            "axidev_osk.application.overlay_window._dwm_set_window_attribute",
+            "axidev_osk.windows.overlay.always_on_top._dwm_set_window_attribute",
             create=True,
         ) as set_dwm_attribute:
             controller = AlwaysOnTopWindowController(
@@ -467,23 +467,23 @@ class LayerShellPluginDiscoveryTests(unittest.TestCase):
 class OverlayBackendSelectionTests(unittest.TestCase):
     def test_wayland_without_layer_shell_falls_back_to_x11_bridge_with_warning(self) -> None:
         with patch(
-            "axidev_osk.application.overlay_window.sys.platform",
+            "axidev_osk.windows.overlay.always_on_top.sys.platform",
             "linux",
         ), patch(
-            "axidev_osk.application.overlay_window.is_wayland_session",
+            "axidev_osk.windows.overlay.always_on_top.is_wayland_session",
             return_value=True,
         ), patch.dict(
             "os.environ",
             {},
             clear=True,
         ), patch(
-            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
             return_value=False,
         ), patch(
-            "axidev_osk.application.overlay_window._configure_x11_bridge_environment",
+            "axidev_osk.windows.overlay.always_on_top._configure_x11_bridge_environment",
             return_value=True,
         ), patch(
-            "axidev_osk.application.overlay_window._warn_wayland_fallback",
+            "axidev_osk.windows.overlay.always_on_top._warn_wayland_fallback",
         ) as warn_wayland_fallback:
             backend = prepare_always_on_top_window_environment()
 
@@ -492,21 +492,21 @@ class OverlayBackendSelectionTests(unittest.TestCase):
 
     def test_wayland_without_layer_shell_raises_if_x11_bridge_unavailable(self) -> None:
         with patch(
-            "axidev_osk.application.overlay_window.sys.platform",
+            "axidev_osk.windows.overlay.always_on_top.sys.platform",
             "linux",
         ), patch(
-            "axidev_osk.application.overlay_window.is_wayland_session",
+            "axidev_osk.windows.overlay.always_on_top.is_wayland_session",
             return_value=True,
         ), patch.dict(
             "os.environ",
             {},
             clear=True,
         ), patch(
-            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
             return_value=False,
         ):
             with patch(
-                "axidev_osk.application.overlay_window._configure_x11_bridge_environment",
+                "axidev_osk.windows.overlay.always_on_top._configure_x11_bridge_environment",
                 return_value=False,
             ):
                 with self.assertRaisesRegex(RuntimeError, "X11/XWayland fallback backend could not be enabled"):
@@ -514,17 +514,17 @@ class OverlayBackendSelectionTests(unittest.TestCase):
 
     def test_wayland_platform_with_xcb_fallback_uses_layer_shell(self) -> None:
         with patch(
-            "axidev_osk.application.overlay_window.sys.platform",
+            "axidev_osk.windows.overlay.always_on_top.sys.platform",
             "linux",
         ), patch(
-            "axidev_osk.application.overlay_window.is_wayland_session",
+            "axidev_osk.windows.overlay.always_on_top.is_wayland_session",
             return_value=True,
         ), patch.dict(
             "os.environ",
             {"QT_QPA_PLATFORM": "wayland;xcb"},
             clear=True,
         ), patch(
-            "axidev_osk.application.overlay_window.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
             return_value=True,
         ):
             backend = prepare_always_on_top_window_environment()
@@ -572,7 +572,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_show_indicator_uses_overlay_controller_for_manual_position(self) -> None:
         overlay = FakeOverlayController()
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -585,7 +585,7 @@ class HotCornerControllerTests(unittest.TestCase):
                 "show",
                 wraps=controller._indicator.show,
             ) as show_indicator, patch(
-                "axidev_osk.application.hot_corner.QGuiApplication.screenAt",
+                "axidev_osk.hot_corner.controller.QGuiApplication.screenAt",
                 return_value=screen,
             ):
                 controller._show_indicator(ScreenCorner.TOP_RIGHT, QPoint(899, 200), 0.5)
@@ -604,7 +604,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_visible_top_level_windows_excludes_indicator(self) -> None:
         overlay = FakeOverlayController()
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -643,7 +643,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_restore_windows_reveals_existing_windows_after_one_tick(self) -> None:
         overlay = FakeOverlayController()
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -672,7 +672,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_toggle_rehides_pending_restore_windows(self) -> None:
         overlay = FakeOverlayController()
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -696,7 +696,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_sensor_position_uses_corner_size(self) -> None:
         overlay = FakeOverlayController()
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(
@@ -721,7 +721,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_x11_hot_corners_use_cursor_polling_without_sensor_windows(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY)
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(
@@ -739,7 +739,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_wayland_hot_corners_create_sensor_windows(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -754,7 +754,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_sensor_windows_use_overlay_controller_for_positions(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -772,7 +772,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_x11_bridge_hot_corners_create_sensor_windows(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
@@ -786,7 +786,7 @@ class HotCornerControllerTests(unittest.TestCase):
     def test_sensor_window_polling_uses_active_sensor(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
         with patch(
-            "axidev_osk.application.hot_corner.configure_hot_corner_overlay",
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())

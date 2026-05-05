@@ -9,7 +9,7 @@ from PySide6.QtCore import QMargins, QObject, QPoint, QRect, QRectF, QSize, QTim
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen, QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .layer_shell import (
+from ..windows.overlay.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
     ANCHOR_TOP,
@@ -17,7 +17,7 @@ from .layer_shell import (
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
 )
-from .overlay_window import OVERLAY_BACKEND_ENV, OverlayBackend
+from ..windows.overlay.always_on_top import OVERLAY_BACKEND_ENV, OverlayBackend
 from ..styles.theme import ThemePalette, build_theme_palette
 
 

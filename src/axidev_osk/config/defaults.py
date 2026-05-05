@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ..application.overlay_window import AlwaysOnTopWindowConfig, OverlayPlacement
 from ..layouts.us_iso import build_us_iso_layout_config
 from ..runtime.identity import stable_id, validate_unique_ids
+from ..windows.overlay import AlwaysOnTopWindowConfig, OverlayPlacement
 from .models import AppConfig, ChromeConfig, OverlayConfig, SurfaceConfig, WindowConfig
 
 

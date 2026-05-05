@@ -7,8 +7,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from PySide6.QtWidgets import QApplication
 
-from .application.overlay_window import prepare_always_on_top_window_environment
 from .runtime.application import ApplicationRuntime
+from .windows.overlay import prepare_always_on_top_window_environment
 
 
 _logger = logging.getLogger(__name__)

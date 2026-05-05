@@ -8,12 +8,12 @@ from dataclasses import replace
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
-from ..application.hot_corner import HotCornerConfig, HotCornerWindowToggleController
 from ..application.linux_permissions import launch_permission_script_in_terminal
 from ..application.quit_controller import ApplicationQuitController
 from ..components import register_components
 from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, PromptConfig, SurfaceConfig, WindowConfig
+from ..hot_corner import HotCornerConfig, HotCornerWindowToggleController
 from ..styles.theme import apply_theme
 from ..windows.surface import prompt_button_config, register_surfaces
 from .commands import AppQuit, WindowClose, WindowHide, WindowShow

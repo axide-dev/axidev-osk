@@ -10,8 +10,8 @@ from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested
 from ..styles.theme import apply_theme
-from ..application.overlay_window import configure_always_on_top_window, configure_plain_window
-from ..application.window_chrome import install_overlay_chrome
+from .chrome import install_overlay_chrome
+from .overlay import configure_always_on_top_window, configure_plain_window
 
 
 class RuntimeWindow(QMainWindow):

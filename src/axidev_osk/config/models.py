@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ..application.overlay_window import AlwaysOnTopWindowConfig
 from ..models import KeySpec
+from ..windows.overlay import AlwaysOnTopWindowConfig
 
 
 @dataclass(frozen=True, slots=True)
