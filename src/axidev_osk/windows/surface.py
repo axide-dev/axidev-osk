@@ -52,6 +52,6 @@ def build_surface(config: SurfaceConfig, context: Context) -> QWidget:
     for component in config.components:
         if getattr(component, "omit_when_ready", False) and context.keyboard.ready:
             continue
-        widget = context.components.build(component, context)
+        widget = context.components.build(component, context, host=central)
         layout.addWidget(widget)
     return central

@@ -1,3 +1,15 @@
+"""Wayland layer-shell integration helpers.
+
+Wraps the optional ``LayerShellQt`` plugin so the rest of the codebase
+can call ``apply_wayland_layer_shell`` without caring whether the
+plugin is installed, locatable, or missing. Constants mirror the
+``zwlr_layer_shell_v1`` protocol so call sites remain readable.
+
+Per the project's architectural rules, Wayland-specific branching is
+isolated to this module; non-Wayland sessions short-circuit to a no-op
+return so callers can treat layer-shell as an optional optimization.
+"""
+
 from __future__ import annotations
 
 import os

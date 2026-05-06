@@ -42,14 +42,44 @@ QPushButton#confirmRejectButton:pressed {
 
 
 def register(registry: ComponentRegistry) -> None:
-    """Register the prompt component builder."""
+    """Register the prompt component builder.
+
+    Args:
+        registry: Component registry owned by the runtime context.
+
+    Returns:
+        None.
+
+    Side effects:
+        Mutates the registry.
+    """
 
     registry.register("prompt", build_prompt_component)
 
 
-def build_prompt_component(config: ComponentConfig, context: Context) -> QWidget:
-    """Build a prompt component."""
+def build_prompt_component(
+    config: ComponentConfig,
+    context: Context,
+    *,
+    host: QWidget | None = None,
+) -> QWidget:
+    """Build a prompt component.
 
+    Args:
+        config: Prompt component config.
+        context: Runtime context, used to dispatch ``PromptResolved`` events.
+        host: Unused; accepted for registry signature parity.
+
+    Returns:
+        Constructed prompt root widget containing message, optional hint, and
+        action buttons.
+
+    Side effects:
+        Wires button click signals to dispatch ``PromptResolved`` and hide the
+        hosting window.
+    """
+
+    del host
     if not isinstance(config, PromptConfig):
         raise TypeError(f"Expected PromptConfig, got {type(config).__name__}")
     widget = QWidget()
@@ -103,7 +133,7 @@ def build_prompt_component(config: ComponentConfig, context: Context) -> QWidget
     buttons.setSpacing(16)
     buttons.addStretch(1)
     for button_config in config.buttons:
-        button = context.components.build(button_config, context)
+        button = context.components.build(button_config, context, host=widget)
         if not isinstance(button, QPushButton):
             raise TypeError("Prompt button builder must return QPushButton")
         button.clicked.connect(lambda _checked=False, item=button_config: _resolve_prompt(widget, context, config.id, item))
@@ -113,7 +143,20 @@ def build_prompt_component(config: ComponentConfig, context: Context) -> QWidget
 
 
 def prompt_button_config(parent_id: str, *, role: str, label: str) -> ButtonConfig:
-    """Create a prompt button config preserving existing styles."""
+    """Create a prompt button config preserving existing styles.
+
+    Args:
+        parent_id: Stable ID of the parent prompt component.
+        role: Semantic role string (e.g. ``"accepted"`` or ``"rejected"``).
+        label: Visible button text (the role glyph is prepended automatically).
+
+    Returns:
+        Constructed ``ButtonConfig`` with role-appropriate styling preserved
+        from the legacy confirmation window.
+
+    Side effects:
+        None.
+    """
 
     object_name = "confirmAcceptButton" if role == "accepted" else "confirmRejectButton"
     glyph = "✔" if role == "accepted" else "✖"
@@ -128,6 +171,22 @@ def prompt_button_config(parent_id: str, *, role: str, label: str) -> ButtonConf
 
 
 def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, button: ButtonConfig) -> None:
+    """Dispatch the prompt resolution event and dismiss the hosting window.
+
+    Args:
+        window_child: Any widget inside the prompt window; used to find the
+            hosting top-level window.
+        context: Runtime context used to dispatch the event.
+        prompt_id: Stable ID of the resolving prompt component.
+        button: Button config describing which action was clicked.
+
+    Returns:
+        None.
+
+    Side effects:
+        Dispatches ``PromptResolved`` and hides the hosting window.
+    """
+
     result = "accepted" if button.role == "accepted" else "rejected"
     context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=result))
     window = window_child.window()

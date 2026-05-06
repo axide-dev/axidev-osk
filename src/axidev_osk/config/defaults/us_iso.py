@@ -1,3 +1,19 @@
+"""Bundled US ISO keyboard layout, expressed as plain config DTOs.
+
+This module is the canonical example of a default layout produced by
+the Python side of the project. It exists to:
+
+- ship a working layout out of the box;
+- exercise the same ``LayoutConfig`` / ``GridConfig`` / ``KeyConfig``
+  data path that user configs will use;
+- act as a parity reference for the future Lua config loader.
+
+It is intentionally pure data: no Qt, no widgets, no registries. When
+the Lua config layer lands (issue #8), this file should be replicable
+as a Lua bundled config and treated as a fallback default rather than
+embedded Python knowledge.
+"""
+
 from __future__ import annotations
 
 from ...models import KeyDisplay, KeySpec

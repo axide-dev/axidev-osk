@@ -1,3 +1,22 @@
+"""Hot-corner dwell trigger that toggles app windows.
+
+TEMPORARY: this subsystem currently lives outside the main runtime
+event/command queue and talks to its own overlays directly. It is
+intentionally kept self-contained so it can be ported to per-corner
+events through the central runtime queue later (see issue #8). New
+features should not extend this controller — add them through the
+queue instead.
+
+Internally, the controller picks one of two strategies based on the
+detected overlay backend:
+
+- A polling strategy that samples the cursor position (X11 native /
+  fallback paths).
+- A sensor-window strategy that places small layer-shell or X11 utility
+  windows in each corner of every screen and reacts to enter/leave
+  events (Wayland layer-shell or X11 utility-bridge backends).
+"""
+
 from __future__ import annotations
 
 import os
@@ -256,6 +275,20 @@ class HotCornerSensorWindow(QWidget):
 
 
 class HotCornerWindowToggleController(QObject):
+    """Drives the dwell timer and window show/hide flow.
+
+    TEMPORARY: this controller talks directly to ``QApplication`` and
+    overlay primitives instead of routing through the runtime queue.
+    Treat each corner as a future event source. When the queue lands,
+    sensor enter/leave and dwell completion should each become explicit
+    events so callbacks can decide window visibility centrally.
+
+    Side effects:
+        Owns timers, indicator/sensor windows, and toggles visibility of
+        every other top-level window in the application during dwell
+        triggers.
+    """
+
     _WINDOW_REVEAL_DELAY_MS = 16
 
     def __init__(

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import contextmanager
-from typing import ClassVar, Iterator
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QWidget
 
 from ...config.models import GridConfig, KeyConfig, LayoutConfig
-from ...config.defaults.us_iso import build_us_iso_layout_config
 from ...models import KeySpec
 from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
 from ...runtime.context import Context
@@ -21,28 +18,57 @@ Unsubscribe = Callable[[], None]
 
 
 class _KeyStateBridge(QObject):
+    """Qt signal relay used to marshal backend key-state callbacks into the GUI thread."""
+
     key_state_changed = Signal(str, bool)
 
 
 class KeyboardWidget(QFrame):
-    """Keyboard grid component built from declarative layout data."""
+    """Keyboard grid component built from declarative layout data.
 
-    _current_builder: ClassVar["KeyboardWidget | None"] = None
+    The widget is a reusable composition primitive: it accepts a ``LayoutConfig``
+    and uses the runtime ``Context`` (when present) to dispatch commands and
+    events through the central runtime instead of calling backend services
+    directly.
+
+    A ``KeyboardWidget`` does not know about any specific bundled layout. Callers
+    that want the default Axidev US ISO layout must build a ``LayoutConfig`` via
+    the bundled config layer (``config.defaults``) and pass it in.
+    """
 
     def __init__(
         self,
         keyboard: object | None = None,
         *,
-        layout_config: LayoutConfig | None = None,
+        layout_config: LayoutConfig,
         context: Context | None = None,
     ) -> None:
+        """Construct a keyboard grid populated from layout data.
+
+        Args:
+            keyboard: Optional direct keyboard backend, used only when
+                ``context`` is ``None`` (legacy/test path). In production the
+                runtime context owns the keyboard service.
+            layout_config: Declarative layout describing grids, keys, and
+                spacers. Required so the widget never embeds a default layout.
+            context: Optional runtime context. When present, all backend
+                interaction and event dispatch flow through it.
+
+        Returns:
+            None.
+
+        Side effects:
+            Builds child widgets and subscribes to the keyboard service for
+            live key state changes.
+        """
+
         super().__init__()
         self._metrics = DEFAULT_KEYBOARD_METRICS
         self._context = context
         self._keyboard = keyboard or (context.keyboard if context is not None else None)
         if self._keyboard is None:
             raise ValueError("KeyboardWidget requires a keyboard service or runtime context")
-        self._layout_config = layout_config or build_us_iso_layout_config()
+        self._layout_config = layout_config
         self._latched_keys: dict[str, bool] = {
             "shift": False,
             "caps": False,
@@ -90,37 +116,47 @@ class KeyboardWidget(QFrame):
         self._refresh_key_legends()
         self.destroyed.connect(lambda _object=None: self._unsubscribe_from_backend_key_state())
 
-    @classmethod
-    def current_builder(cls) -> "KeyboardWidget | None":
-        """Return the keyboard widget currently building registry components."""
-
-        return cls._current_builder
-
-    @contextmanager
-    def _builder_scope(self) -> Iterator[None]:
-        previous = type(self)._current_builder
-        type(self)._current_builder = self
-        try:
-            yield
-        finally:
-            type(self)._current_builder = previous
-
     def _add_grid(self, container: QGridLayout, grid: GridConfig) -> int:
+        """Place a single grid's components into the Qt container.
+
+        Args:
+            container: Target ``QGridLayout``.
+            grid: Grid DTO containing keys/spacers and metadata.
+
+        Returns:
+            The number of dense body columns produced; used by the caller to
+            apply column stretch.
+
+        Side effects:
+            Adds child widgets to the container.
+        """
+
         function_components = [component for component in grid.components if component.spec.row == 0]
         body_components = [component for component in grid.components if component.spec.row > 0]
         body_column_map = self._build_dense_column_map([component.spec for component in body_components])
         body_column_count = self._count_occupied_columns([component.spec for component in body_components])
-        with self._builder_scope():
-            self._add_function_row(
-                container,
-                function_components,
-                nav_start_column=grid.nav_start_column,
-                body_column_map=body_column_map,
-            )
-            self._add_body_grid(container, body_components)
+        self._add_function_row(
+            container,
+            function_components,
+            nav_start_column=grid.nav_start_column,
+            body_column_map=body_column_map,
+        )
+        self._add_body_grid(container, body_components)
         return body_column_count
 
     def _build_dense_column_map(self, specs: list[KeySpec]) -> dict[int, int]:
+        """Compute dense column indices for a sparse component column layout.
+
+        Args:
+            specs: Specs whose ``column`` and ``width`` define occupied cells.
+
+        Returns:
+            Mapping from sparse column index to dense column index.
+
+        Side effects:
+            None.
+        """
+
         occupied_columns: set[int] = set()
         for spec in specs:
             column_span = int(spec.width * 4)
@@ -130,6 +166,8 @@ class KeyboardWidget(QFrame):
         }
 
     def _count_occupied_columns(self, specs: list[KeySpec]) -> int:
+        """Count how many dense columns the supplied specs occupy."""
+
         return len(self._build_dense_column_map(specs))
 
     def _add_function_row(
@@ -140,6 +178,23 @@ class KeyboardWidget(QFrame):
         nav_start_column: int,
         body_column_map: dict[int, int],
     ) -> None:
+        """Place row-0 (function row) components.
+
+        Args:
+            container: Target Qt grid layout.
+            components: Function-row components to place.
+            nav_start_column: Sparse column where the navigation block begins.
+            body_column_map: Dense column map produced from the body rows; the
+                navigation block is aligned against the body so the function
+                row sits visually correctly above it.
+
+        Returns:
+            None.
+
+        Side effects:
+            Adds child widgets to the container.
+        """
+
         left_block_specs = [component.spec for component in components if component.spec.column < nav_start_column]
         left_column_map = self._build_dense_column_map(left_block_specs)
 
@@ -154,6 +209,8 @@ class KeyboardWidget(QFrame):
             container.addWidget(self._build_item(component), 0, dense_column, spec.height, column_span)
 
     def _add_body_grid(self, container: QGridLayout, components: list[KeyConfig]) -> None:
+        """Place body-row components using a dense column map."""
+
         column_map = self._build_dense_column_map([component.spec for component in components])
         for component in components:
             spec = component.spec
@@ -162,20 +219,65 @@ class KeyboardWidget(QFrame):
             container.addWidget(self._build_item(component), spec.row, dense_column, spec.height, column_span)
 
     def _build_item(self, component: KeyConfig) -> QWidget:
+        """Build one child widget for the grid via the component registry.
+
+        When a runtime context is available the registry is used and the
+        keyboard widget passes itself as the explicit ``host`` so the key
+        builder can wire latch state through this grid. The legacy/no-context
+        path delegates straight to ``build_key_from_config`` for tests that
+        instantiate a ``KeyboardWidget`` without a runtime.
+
+        Args:
+            component: Key or spacer config to materialize.
+
+        Returns:
+            Constructed Qt widget reparented to this grid.
+
+        Side effects:
+            Reparents the widget under this grid.
+        """
+
         if self._context is not None:
-            widget = self._context.components.build(component, self._context)
+            widget = self._context.components.build(component, self._context, host=self)
         else:
             widget = self.build_key_from_config(component, None)
         widget.setParent(self)
         return widget
 
     def build_key_from_config(self, config: KeyConfig, context: Context | None) -> QPushButton:
-        """Build a key button from config inside the keyboard builder scope."""
+        """Build a key button from config inside this grid's latch wiring.
+
+        Args:
+            config: Key component config.
+            context: Unused; accepted for symmetry with builder signatures.
+
+        Returns:
+            Constructed key button.
+
+        Side effects:
+            Registers the new button with this grid's latch and listener
+            bookkeeping.
+        """
 
         del context
         return self._build_key(config.spec, component_id=config.id)
 
     def _build_key(self, spec: KeySpec, *, component_id: str) -> QPushButton:
+        """Construct a single key button and wire it into the grid's state.
+
+        Args:
+            spec: Keyboard key spec describing label, modifiers, and layout
+                placement.
+            component_id: Deterministic ID for the resulting key.
+
+        Returns:
+            The constructed key ``QPushButton``.
+
+        Side effects:
+            Registers the button's state machine in latch groups and listener
+            tables so live key state can drive its visual state.
+        """
+
         active_press: list[object | None] = [None]
         latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
         state_machine: KeyStateMachine | None = None
@@ -239,6 +341,19 @@ class KeyboardWidget(QFrame):
         return button
 
     def set_latched_state(self, key_id: str, latched: bool) -> None:
+        """Force a logical modifier latch state and sync sibling state machines.
+
+        Args:
+            key_id: Modifier identity string (e.g. ``"shift"``).
+            latched: ``True`` to mark the modifier latched.
+
+        Returns:
+            None.
+
+        Side effects:
+            Updates latch state machines and refreshes secondary key legends.
+        """
+
         self._latched_keys[key_id] = latched
         if key_id in self._syncing_latch_keys:
             return
@@ -252,12 +367,16 @@ class KeyboardWidget(QFrame):
         self._refresh_key_legends()
 
     def _handle_key_press(self, component_id: str, spec: KeySpec) -> object | None:
+        """Dispatch a press event/command through the runtime when present."""
+
         self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
         if self._context is not None:
             return self._context.dispatcher.dispatch_command(KeyboardKeyDown(spec, dict(self._latched_keys)))
         return self._keyboard.key_down(spec, self._latched_keys)
 
     def _handle_key_release(self, component_id: str, active_press: object | None) -> None:
+        """Dispatch a release event/command through the runtime when present."""
+
         self._dispatch_event(ComponentReleased(component_id=component_id, active_press=active_press))
         if self._context is not None:
             self._context.dispatcher.dispatch_command(KeyboardKeyUp(active_press))
@@ -265,19 +384,27 @@ class KeyboardWidget(QFrame):
         self._keyboard.key_up(active_press)
 
     def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
+        """Apply a backend key state change to all matching button state machines."""
+
         for state_machine in self._state_machines_by_key_name.get(key_name, []):
             state_machine.set_pressed(pressed, reason="listener")
 
     def _listened_key_name(self, spec: KeySpec) -> str | None:
+        """Return the backend key name this spec should listen to, if any."""
+
         return self._keyboard.key_name_for_spec(spec)
 
     def _subscribe_to_backend_key_state(self) -> None:
+        """Subscribe the grid to backend key state changes via a signal bridge."""
+
         self._key_state_bridge.key_state_changed.connect(self._handle_backend_key_state_change)
         self._key_state_unsubscribe = self._keyboard.add_key_state_listener(
             self._key_state_bridge.key_state_changed.emit
         )
 
     def _unsubscribe_from_backend_key_state(self) -> None:
+        """Detach the grid from backend key state notifications."""
+
         if self._key_state_unsubscribe is None:
             return
         self._key_state_unsubscribe()
@@ -292,6 +419,25 @@ class KeyboardWidget(QFrame):
         change: KeyStateChange,
         active_press: list[object | None],
     ) -> None:
+        """Update grid-wide latch state when a button transitions latch state.
+
+        Args:
+            component_id: Stable key component ID.
+            spec: Key spec being toggled.
+            key_id: Modifier identity string for the key.
+            state_machine: State machine of the button that initiated the change.
+            change: State machine transition record.
+            active_press: Mutable single-cell holder for the in-flight press
+                handle so latch-sync results can replace it.
+
+        Returns:
+            None.
+
+        Side effects:
+            Updates latched-key registry, dispatches state events/commands,
+            and synchronizes sibling latch buttons in the same group.
+        """
+
         if spec.holds_when_latched and change.reason != "release":
             self._refresh_key_legends()
 
@@ -331,6 +477,8 @@ class KeyboardWidget(QFrame):
         self._refresh_key_legends()
 
     def _active_display_modifiers(self) -> frozenset[str]:
+        """Return the set of modifier IDs that should affect key display."""
+
         active = {key_id for key_id, latched in self._latched_keys.items() if latched}
         for key_id in self._hold_visual_modifiers:
             if any(machine.is_pressed for machine in self._latch_groups.get(key_id, [])):
@@ -338,16 +486,22 @@ class KeyboardWidget(QFrame):
         return frozenset(active)
 
     def _refresh_key_legends(self) -> None:
+        """Recompute every button's primary/secondary label from active modifiers."""
+
         active_modifiers = self._active_display_modifiers()
         for button, spec in self._buttons_by_spec:
             display = spec.resolve_display(active_modifiers)
             set_key_button_label(button, display.label, display.secondary_label)
 
     def _dispatch_event(self, event: object) -> None:
+        """Forward an event to the runtime dispatcher when a context is bound."""
+
         if self._context is not None:
             self._context.dispatcher.dispatch_event(event)  # type: ignore[arg-type]
 
     def _dispatch_command(self, command: object) -> object | None:
+        """Forward a command to the runtime dispatcher when a context is bound."""
+
         if self._context is None:
             return None
         return self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]

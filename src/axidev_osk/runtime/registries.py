@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .context import Context
 
 
-ComponentBuilder = Callable[[ComponentConfig, "Context"], QWidget]
+ComponentBuilder = Callable[..., QWidget]
 SurfaceBuilder = Callable[[SurfaceConfig, "Context"], QWidget]
 
 
@@ -22,6 +22,10 @@ class ComponentRegistry:
 
     Components self-register during runtime startup. Missing builders fail with a
     clear error so deleting a component directory exposes stale config references.
+
+    Builders accept an optional ``host`` keyword that lets parent components pass
+    explicit construction context (for example, a containing grid) without using
+    module-level globals or class-level mutable state.
     """
 
     def __init__(self) -> None:
@@ -44,7 +48,10 @@ class ComponentRegistry:
 
         Args:
             kind: Component kind string from config.
-            builder: Callable that creates a widget for the component.
+            builder: Callable that creates a widget for the component. The
+                callable receives ``(config, context)`` positional arguments and
+                may opt into an additional ``host`` keyword argument naming the
+                immediate parent component.
 
         Returns:
             None.
@@ -55,12 +62,21 @@ class ComponentRegistry:
 
         self._builders[kind] = builder
 
-    def build(self, config: ComponentConfig, context: "Context") -> QWidget:
+    def build(
+        self,
+        config: ComponentConfig,
+        context: "Context",
+        *,
+        host: QWidget | None = None,
+    ) -> QWidget:
         """Build a component widget from config.
 
         Args:
             config: Component DTO.
             context: Runtime context.
+            host: Optional immediate parent component, forwarded to builders
+                that opt in via a ``host`` keyword. Builders that do not accept
+                ``host`` simply ignore it.
 
         Returns:
             Constructed widget.
@@ -72,7 +88,7 @@ class ComponentRegistry:
         builder = self._builders.get(config.kind)
         if builder is None:
             raise ValueError(f"No component registered for kind {config.kind!r}")
-        return builder(config, context)
+        return builder(config, context, host=host)
 
 
 class SurfaceRegistry:

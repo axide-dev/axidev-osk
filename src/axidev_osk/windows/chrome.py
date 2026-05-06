@@ -1,3 +1,11 @@
+"""Reusable overlay chrome widgets (title bar + resize handle).
+
+These widgets are shared by frameless overlay surfaces. They emit
+``dragDelta`` / ``resizeDelta`` signals and stay decoupled from any
+specific window class so multiple surface implementations can install
+the same chrome via ``install_overlay_chrome``.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -12,6 +20,13 @@ MoveResizeHandler = Callable[[int, int], None]
 
 @dataclass(slots=True)
 class OverlayChromeWidgets:
+    """Bundle of chrome widgets returned by ``install_overlay_chrome``.
+
+    Attributes:
+        title_bar: Frameless drag-to-move title bar.
+        resize_handle: Bottom-right diagonal resize handle.
+    """
+
     title_bar: "OverlayTitleBar"
     resize_handle: "OverlayResizeHandle"
 
@@ -126,6 +141,31 @@ def install_overlay_chrome(
     on_move: MoveResizeHandler,
     on_resize: MoveResizeHandler,
 ) -> OverlayChromeWidgets:
+    """Install title bar + resize handle into a vertical layout.
+
+    Args:
+        layout: Top-level vertical layout of the overlay surface. The
+            title bar is inserted at index 0; the resize handle is
+            attached to the title bar as a trailing control.
+        title: Initial title bar text.
+        parent: Parent widget that hosts the chrome and receives focus
+            ownership. Typically the surface widget itself.
+        on_move: Callback invoked with cumulative ``(dx, dy)`` deltas
+            during title-bar drag. Implementations should translate the
+            window by the delta.
+        on_resize: Callback invoked with cumulative ``(dx, dy)`` deltas
+            during resize-handle drag. Implementations should grow or
+            shrink the window's geometry.
+
+    Returns:
+        ``OverlayChromeWidgets`` bundle exposing the constructed
+        widgets so callers can theme or further configure them.
+
+    Side effects:
+        Mutates ``layout``; connects ``dragDelta`` / ``resizeDelta``
+        signals to the supplied handlers.
+    """
+
     title_bar = OverlayTitleBar(title, parent)
     title_bar.dragDelta.connect(on_move)
     layout.insertWidget(0, title_bar)

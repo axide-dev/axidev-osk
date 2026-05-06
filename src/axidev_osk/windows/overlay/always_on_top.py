@@ -1,3 +1,16 @@
+"""Cross-platform "always on top" overlay backend dispatch.
+
+Selects an overlay strategy per platform/session — Wayland layer-shell,
+X11 utility windows (or the bridge variant), Win32 ``SetWindowPos`` /
+``WS_EX_TOPMOST``, and a generic Qt fallback — behind a single
+``OverlayBackend`` enum. Platform-specific branching is contained here
+so callers stay platform-agnostic.
+
+Per the project's architectural rules, platform branching lives only in
+leaf intent-named functions; higher-level callers should pick a backend
+from ``OverlayBackend`` and let this module map to the right primitive.
+"""
+
 from __future__ import annotations
 
 import ctypes

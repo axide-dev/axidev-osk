@@ -29,34 +29,51 @@ def register(registry: ComponentRegistry) -> None:
     registry.register("spacer", build_spacer_component)
 
 
-def build_key_component(config: ComponentConfig, context: Context) -> QWidget:
+def build_key_component(
+    config: ComponentConfig,
+    context: Context,
+    *,
+    host: QWidget | None = None,
+) -> QWidget:
     """Build a key button component.
 
     Args:
         config: Key component config.
         context: Runtime context.
+        host: Containing keyboard grid that owns latch state and event wiring.
+            Required because keys are tightly coupled to their host grid; the
+            registry forwards this from the parent component during build.
 
     Returns:
         Constructed key button widget.
 
     Side effects:
-        Registers the key with the active keyboard widget builder scope.
+        Registers the key with the host keyboard grid for latch and listener
+        bookkeeping.
     """
 
     if not isinstance(config, KeyConfig):
         raise TypeError(f"Expected KeyConfig, got {type(config).__name__}")
-    owner = KeyboardWidget.current_builder()
-    if owner is None:
-        raise RuntimeError("Key components must be built inside a KeyboardWidget")
-    return owner.build_key_from_config(config, context)
+    if not isinstance(host, KeyboardWidget):
+        raise RuntimeError(
+            "Key components must be built with a KeyboardWidget host; "
+            "the parent grid is responsible for forwarding host=self."
+        )
+    return host.build_key_from_config(config, context)
 
 
-def build_spacer_component(config: ComponentConfig, context: Context) -> QWidget:
+def build_spacer_component(
+    config: ComponentConfig,
+    context: Context,
+    *,
+    host: QWidget | None = None,
+) -> QWidget:
     """Build a spacer component.
 
     Args:
         config: Spacer component config.
         context: Runtime context.
+        host: Unused; accepted for registry signature parity.
 
     Returns:
         Transparent spacer widget.
@@ -65,7 +82,7 @@ def build_spacer_component(config: ComponentConfig, context: Context) -> QWidget
         None beyond widget construction.
     """
 
-    del context
+    del context, host
     if not isinstance(config, SpacerConfig):
         raise TypeError(f"Expected SpacerConfig, got {type(config).__name__}")
     metrics = DEFAULT_KEYBOARD_METRICS

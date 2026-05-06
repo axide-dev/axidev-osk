@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from axidev_osk.components.button.key import create_key_button
 from axidev_osk.components.button.state import KeyStateMachine
 from axidev_osk.components.grid.keyboard import KeyboardWidget
+from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
 
@@ -153,7 +154,7 @@ class KeyStateListenerTests(unittest.TestCase):
     def test_keyboard_widget_reflects_backend_key_state_for_sent_io_key(self) -> None:
         _app()
         backend = FakeWidgetKeyboardBackend(pressed_key_names={"A"})
-        widget = KeyboardWidget(backend)
+        widget = KeyboardWidget(backend, layout_config=build_us_iso_layout_config())
         self.addCleanup(widget.close)
 
         button = self._button_for_io_key(widget, "A")

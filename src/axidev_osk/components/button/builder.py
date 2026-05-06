@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QWidget
 
 
 from ...config.models import ButtonConfig, ComponentConfig
@@ -26,12 +26,18 @@ def register(registry: ComponentRegistry) -> None:
     registry.register("button", build_button_component)
 
 
-def build_button_component(config: ComponentConfig, context: Context) -> QPushButton:
+def build_button_component(
+    config: ComponentConfig,
+    context: Context,
+    *,
+    host: QWidget | None = None,
+) -> QPushButton:
     """Build a QPushButton from declarative config.
 
     Args:
         config: Button component config.
         context: Runtime context.
+        host: Unused; accepted for registry signature parity.
 
     Returns:
         Constructed QPushButton.
@@ -40,7 +46,7 @@ def build_button_component(config: ComponentConfig, context: Context) -> QPushBu
         None beyond widget construction.
     """
 
-    del context
+    del context, host
     if not isinstance(config, ButtonConfig):
         raise TypeError(f"Expected ButtonConfig, got {type(config).__name__}")
     button = QPushButton(config.label)
