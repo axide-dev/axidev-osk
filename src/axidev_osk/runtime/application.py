@@ -8,7 +8,6 @@ from dataclasses import replace
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
-from ..application.linux_permissions import launch_permission_script_in_terminal
 from ..application.quit_controller import ApplicationQuitController
 from ..components import register_components
 from ..config.defaults import build_default_app_config
@@ -202,6 +201,11 @@ class ApplicationRuntime:
             return
 
     def _open_linux_permission_terminal(self) -> None:
+        # Lazy import: this Linux-only helper drags in subprocess/terminal
+        # detection logic that should not be loaded on macOS or Windows
+        # where Linux permission prompts are never raised.
+        from ..application.linux_permissions import launch_permission_script_in_terminal
+
         script_path = self._keyboard.permission_setup_script_path
         parent = self._window_manager.get_or_create(self._config.keyboard_window_id)
         if script_path is None:

@@ -121,14 +121,55 @@ class Dispatcher:
         for handler in tuple(self._event_handlers):
             handler(event)
 
-    def dispatch_command(self, command: RuntimeCommand) -> Any:
+    def dispatch_command(self, command: RuntimeCommand) -> None:
+        """Apply a command without returning its handler result.
+
+        This is the queue-ready dispatch path: when the runtime gains a
+        proper async queue, ``dispatch_command`` will enqueue the command
+        for asynchronous handling and callers will receive results
+        through events. New call sites should use this method.
+
+        Args:
+            command: Runtime command DTO.
+
+        Returns:
+            None.
+
+        Side effects:
+            Invokes the command handler synchronously.
+        """
+
+        self._dispatch_command_internal(command)
+
+    def dispatch_command_sync(self, command: RuntimeCommand) -> Any:
         """Apply a command and return its handler result.
+
+        Legacy synchronous variant retained for the keyboard latch-sync
+        flow which still threads the backend's updated ``active_press``
+        handle back into the caller. When ``KeyboardSyncLatchedKey``
+        moves to event-feedback, this method should be removed.
 
         Args:
             command: Runtime command DTO.
 
         Returns:
             Handler-specific result.
+
+        Side effects:
+            Invokes the command handler synchronously.
+        """
+
+        return self._dispatch_command_internal(command)
+
+    def _dispatch_command_internal(self, command: RuntimeCommand) -> Any:
+        """Look up and invoke a command handler.
+
+        Args:
+            command: Runtime command DTO.
+
+        Returns:
+            Handler-specific result, or ``None`` for fire-and-forget
+            handlers.
 
         Side effects:
             Invokes the command handler synchronously.

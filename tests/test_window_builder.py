@@ -96,6 +96,7 @@ def _build_keyboard_window(backend: FakeKeyboardBackend):
 
 
 class MainWindowLayoutTests(unittest.TestCase):
+    """Tests covering the default keyboard window built via ``build_window``."""
     def test_custom_chrome_puts_resize_handle_in_title_bar(self) -> None:
         _app()
         overlay = FakeOverlayController()
