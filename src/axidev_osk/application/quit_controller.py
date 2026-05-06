@@ -72,22 +72,28 @@ class ApplicationQuitController(QObject):
     def register_window(self, window: QWidget) -> None:
         """Register a top-level window that participates in shutdown.
 
+        The runtime is responsible for routing ``WindowCloseRequested``
+        events on the dispatcher to ``request_quit``; this method only
+        records the window so it can be closed at the end of the
+        shutdown sequence and informs it that the controller now owns
+        close behavior.
+
         Args:
-            window: Window exposing a ``close_requested`` signal. If the
-                window also defines ``set_quit_controller_managed`` it
-                is informed so it can suppress its own confirmation UI.
+            window: Window participating in graceful shutdown. If the
+                window defines ``set_quit_controller_managed`` it is
+                informed so it can suppress its own confirmation UI.
 
         Returns:
             None.
 
         Side effects:
-            Connects ``close_requested`` to ``request_quit``.
+            Appends the window to the controller's tracked list and
+            flags it as managed.
         """
 
         self._windows.append(window)
         if hasattr(window, "set_quit_controller_managed"):
             window.set_quit_controller_managed(True)  # type: ignore[attr-defined]
-        window.close_requested.connect(self.request_quit)  # type: ignore[attr-defined]
 
     def register_quit_callback(self, callback: QuitCallback) -> None:
         """Register a callback fired in registration order during shutdown.

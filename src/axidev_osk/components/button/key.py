@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
-from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
+from ..grid.metrics import DEFAULT_KEYBOARD_METRICS, KeyboardMetrics
 from .state import KeyStateMachine, StateListener
 
 VoidCallback = Callable[[], None]
@@ -114,6 +114,7 @@ def create_key_button(
     layout: str | None = None,
     on_press: VoidCallback | None = None,
     on_release: VoidCallback | None = None,
+    metrics: KeyboardMetrics | None = None,
 ) -> KeyButton:
     """Create a configured key button paired with its state machine.
 
@@ -135,6 +136,8 @@ def create_key_button(
         on_press: Optional callback fired on Qt ``pressed``.
         on_release: Optional callback fired on Qt ``released`` after the
             internal state machine processes the release and toggles latch.
+        metrics: Pixel metrics used to size the button. Defaults to
+            ``DEFAULT_KEYBOARD_METRICS`` when omitted.
 
     Returns:
         ``KeyButton`` pairing the constructed ``QPushButton`` with the
@@ -148,7 +151,7 @@ def create_key_button(
     """
 
     button = QPushButton()
-    metrics = DEFAULT_KEYBOARD_METRICS
+    cell_metrics = metrics or DEFAULT_KEYBOARD_METRICS
     machine = state_machine or KeyStateMachine(latchable=latchable, initial_latched=initial_latched)
     set_key_button_label(button, label, secondary_label)
     button.setProperty("componentType", "key")
@@ -164,8 +167,8 @@ def create_key_button(
     button.setProperty("interactionState", machine.state.value)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setCheckable(machine.latchable)
-    button.setMinimumHeight(metrics.span_height(1))
-    button.setMinimumWidth(metrics.span_width(width))
+    button.setMinimumHeight(cell_metrics.span_height(1))
+    button.setMinimumWidth(cell_metrics.span_width(width))
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     refresh_key_button(button, machine)
 

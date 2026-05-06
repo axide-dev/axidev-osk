@@ -50,7 +50,11 @@ def build_keyboard_grid_component(
     del host
     if not isinstance(config, KeyboardGridConfig):
         raise TypeError(f"Expected KeyboardGridConfig, got {type(config).__name__}")
-    widget = KeyboardWidget(layout_config=config.layout, context=context)
+    widget = KeyboardWidget(
+        layout_config=config.layout,
+        context=context,
+        metrics=config.metrics,
+    )
     widget.setProperty("componentId", config.id)
     return widget
 

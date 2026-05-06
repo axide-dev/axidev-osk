@@ -19,7 +19,7 @@ from ..windows.surface import register_surfaces
 from .commands import AppQuit, WindowClose, WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
-from .events import PromptResolved
+from .events import PromptResolved, WindowCloseRequested
 from .identity import stable_id
 from .registries import ComponentRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -79,6 +79,7 @@ class ApplicationRuntime:
             prompt=self._show_quit_prompt,
             parent=app,
         )
+        self._dispatcher.add_event_handler(self._handle_window_close_requested)
 
     def start(self) -> int:
         """Start services, windows, hot corner, and the Qt event loop.
@@ -108,6 +109,23 @@ class ApplicationRuntime:
     def _prompt_for_linux_permissions_if_needed(self) -> None:
         if self._keyboard.needs_permission_setup:
             QTimer.singleShot(0, self._show_linux_permission_prompt)
+
+    def _handle_window_close_requested(self, event: object) -> None:
+        """Route ``WindowCloseRequested`` events to the quit controller.
+
+        Args:
+            event: Any runtime event; non-matching events are ignored.
+
+        Returns:
+            None.
+
+        Side effects:
+            Triggers ``ApplicationQuitController.request_quit`` when the
+            event is a ``WindowCloseRequested``.
+        """
+
+        if isinstance(event, WindowCloseRequested):
+            self._quit_controller.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_window = self._window_manager.create_transient(

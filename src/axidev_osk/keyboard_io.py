@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from collections.abc import Callable
@@ -9,6 +10,8 @@ from threading import RLock
 from typing import Any, Mapping
 
 from .models import KeySpec
+
+_logger = logging.getLogger(__name__)
 
 KeyStateListener = Callable[[str, bool], None]
 Unsubscribe = Callable[[], None]
@@ -208,7 +211,7 @@ class AxidevIoKeyboardBackend:
             self._stop_key_state_listener()
             self._keyboard.shutdown()
         except Exception as exc:
-            print(f"axidev_io shutdown failed: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io shutdown failed: %s", exc)
         finally:
             self._keyboard = None
             self._ready = False
@@ -291,7 +294,7 @@ class AxidevIoKeyboardBackend:
                 return None
             return active_press
         except Exception as exc:
-            print(f"axidev_io latch sync failed for {spec.label!r}: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io latch sync failed for %r: %s", spec.label, exc)
             return active_press
 
     def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
@@ -311,7 +314,7 @@ class AxidevIoKeyboardBackend:
             self._set_key_down(press.key_name, True)
             return press
         except Exception as exc:
-            print(f"axidev_io key_down failed for {spec.label!r}: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io key_down failed for %r: %s", spec.label, exc)
             return None
 
     def key_up(self, press: object | None) -> None:
@@ -325,7 +328,7 @@ class AxidevIoKeyboardBackend:
                 self._keyboard.sender.key_up(press.key_name, mods=press.mods)
             self._set_key_down(press.key_name, False)
         except Exception as exc:
-            print(f"axidev_io key_up failed for {press.key_name!r}: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
 
     def _resolve_key_press(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
         key_name = self._resolve_key_name(spec)
@@ -470,7 +473,7 @@ class AxidevIoKeyboardBackend:
         try:
             self._listener_unsubscribe = self._keyboard.listener.start(self._handle_key_event)
         except Exception as exc:
-            print(f"axidev_io listener startup failed: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io listener startup failed: %s", exc)
 
     def _stop_key_state_listener(self) -> None:
         if self._listener_unsubscribe is None:
@@ -479,7 +482,7 @@ class AxidevIoKeyboardBackend:
         try:
             self._listener_unsubscribe()
         except Exception as exc:
-            print(f"axidev_io listener shutdown failed: {exc}", file=sys.stderr)
+            _logger.exception("axidev_io listener shutdown failed: %s", exc)
         finally:
             self._listener_unsubscribe = None
 
@@ -521,7 +524,7 @@ class AxidevIoKeyboardBackend:
             try:
                 listener(key_name, pressed)
             except Exception as exc:
-                print(f"axidev_io key state listener failed for {key_name!r}: {exc}", file=sys.stderr)
+                _logger.exception("axidev_io key state listener failed for %r: %s", key_name, exc)
 
     def _release_all_latched_keys(self) -> None:
         if self._keyboard is None:
@@ -535,5 +538,5 @@ class AxidevIoKeyboardBackend:
                     self._keyboard.sender.key_up(press.key_name, mods=press.mods)
                 self._set_key_down(press.key_name, False)
             except Exception as exc:
-                print(f"axidev_io key_up failed for latched key {key_id!r}: {exc}", file=sys.stderr)
+                _logger.exception("axidev_io key_up failed for latched key %r: %s", key_id, exc)
         self._held_latched_keys.clear()

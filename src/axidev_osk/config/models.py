@@ -3,10 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Literal
 
 from ..models import KeySpec
-from ..windows.overlay import AlwaysOnTopWindowConfig
+
+
+class OverlayPlacement(str, Enum):
+    """Placement preset for an overlay-backed window."""
+
+    CENTER = "center"
+    TOP_RIGHT = "top-right"
+
+
+@dataclass(slots=True)
+class AlwaysOnTopWindowConfig:
+    """Platform-agnostic overlay placement policy.
+
+    Attributes:
+        placement: Preset describing where the overlay should be anchored.
+        screen_margin: Pixel margin from the chosen screen edge.
+        manage_position: Whether the overlay controller should keep the
+            window placed; ``False`` lets the host owner manage geometry.
+    """
+
+    placement: OverlayPlacement = OverlayPlacement.TOP_RIGHT
+    screen_margin: int = 16
+    manage_position: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,16 +160,42 @@ class PromptConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyboardMetrics:
+    """Pixel-level dimensions for keyboard grid cells.
+
+    Attributes:
+        key_unit_px: Edge length of a single 1u key cell, in pixels.
+        grid_gap_px: Gap between adjacent cells, in pixels. Used when a
+            key spans multiple rows so the spanned cells visually merge.
+    """
+
+    key_unit_px: int = 48
+    grid_gap_px: int = 4
+
+    def span_width(self, units: float) -> int:
+        """Return pixel width for a key spanning ``units`` columns."""
+
+        return max(self.key_unit_px, round(self.key_unit_px * units))
+
+    def span_height(self, units: int) -> int:
+        """Return pixel height for a key spanning ``units`` rows including gaps."""
+
+        return (self.key_unit_px * units) + (self.grid_gap_px * (units - 1))
+
+
+@dataclass(frozen=True, slots=True)
 class KeyboardGridConfig:
     """Declarative keyboard grid component.
 
     Attributes:
         id: Deterministic component ID.
         layout: Keyboard layout data used by the grid component.
+        metrics: Pixel metrics applied to keys in this grid.
     """
 
     id: str
     layout: LayoutConfig
+    metrics: KeyboardMetrics = field(default_factory=KeyboardMetrics)
     kind: Literal["keyboard-grid"] = "keyboard-grid"
 
 

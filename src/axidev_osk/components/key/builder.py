@@ -5,11 +5,10 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from ...config.models import ComponentConfig, KeyConfig, SpacerConfig
+from ...config.models import ComponentConfig, KeyboardMetrics, KeyConfig, SpacerConfig
 from ...runtime.context import Context
 from ...runtime.registries import ComponentRegistry
 from ..grid.keyboard import KeyboardWidget
-from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
 
 
 def register(registry: ComponentRegistry) -> None:
@@ -73,7 +72,9 @@ def build_spacer_component(
     Args:
         config: Spacer component config.
         context: Runtime context.
-        host: Unused; accepted for registry signature parity.
+        host: Optional containing grid; used to inherit pixel metrics so
+            the spacer aligns with neighboring keys. Falls back to default
+            metrics when the host is not a ``KeyboardWidget``.
 
     Returns:
         Transparent spacer widget.
@@ -82,10 +83,12 @@ def build_spacer_component(
         None beyond widget construction.
     """
 
-    del context, host
+    del context
     if not isinstance(config, SpacerConfig):
         raise TypeError(f"Expected SpacerConfig, got {type(config).__name__}")
-    metrics = DEFAULT_KEYBOARD_METRICS
+    metrics: KeyboardMetrics = (
+        host._metrics if isinstance(host, KeyboardWidget) else KeyboardMetrics()  # noqa: SLF001
+    )
     spacer = QWidget()
     spacer.setProperty("componentType", "spacer")
     spacer.setProperty("componentId", config.id)

@@ -12,7 +12,7 @@ from ...runtime.context import Context
 from ...runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
-from .metrics import DEFAULT_KEYBOARD_METRICS
+from .metrics import KeyboardMetrics
 
 Unsubscribe = Callable[[], None]
 
@@ -41,6 +41,7 @@ class KeyboardWidget(QFrame):
         *,
         layout_config: LayoutConfig,
         context: Context,
+        metrics: KeyboardMetrics | None = None,
     ) -> None:
         """Construct a keyboard grid populated from layout data.
 
@@ -51,6 +52,8 @@ class KeyboardWidget(QFrame):
                 dispatcher, and state store. All backend interaction and
                 event dispatch flow through it. Tests should build a
                 context via ``axidev_osk.runtime.testing.make_test_context``.
+            metrics: Pixel metrics applied to keys in this grid. When
+                omitted, defaults to ``KeyboardMetrics()``.
 
         Returns:
             None.
@@ -61,7 +64,7 @@ class KeyboardWidget(QFrame):
         """
 
         super().__init__()
-        self._metrics = DEFAULT_KEYBOARD_METRICS
+        self._metrics = metrics or KeyboardMetrics()
         self._context = context
         self._keyboard = context.keyboard
         self._layout_config = layout_config
@@ -317,6 +320,7 @@ class KeyboardWidget(QFrame):
             layout=self._layout_config.name,
             on_press=on_press,
             on_release=on_release,
+            metrics=self._metrics,
         )
         button = key_button.button
         state_machine = key_button.state_machine

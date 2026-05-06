@@ -18,13 +18,18 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from enum import Enum
 from typing import TypeVar
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
+
+# AlwaysOnTopWindowConfig and OverlayPlacement are pure data DTOs and live
+# in the config layer so config files (and a future Lua config) can build
+# them without importing Qt-bound modules. We re-export them here so
+# existing callers keep working.
+from ...config.models import AlwaysOnTopWindowConfig, OverlayPlacement
 
 from .layer_shell import (
     ANCHOR_BOTTOM,
@@ -55,18 +60,6 @@ class OverlayBackend(str, Enum):
     WAYLAND_LAYER_SHELL = "wayland-layer-shell"
     X11_UTILITY = "x11-utility"
     X11_UTILITY_BRIDGE = "x11-utility-bridge"
-
-
-class OverlayPlacement(str, Enum):
-    CENTER = "center"
-    TOP_RIGHT = "top-right"
-
-
-@dataclass(slots=True)
-class AlwaysOnTopWindowConfig:
-    placement: OverlayPlacement = OverlayPlacement.TOP_RIGHT
-    screen_margin: int = 16
-    manage_position: bool = True
 
 
 if sys.platform == "win32":

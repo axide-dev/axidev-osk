@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QCloseEvent, QShowEvent
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested
-from ..styles.theme import apply_theme
 from .chrome import install_overlay_chrome
 from .overlay import configure_always_on_top_window, configure_plain_window
 
@@ -19,9 +18,10 @@ class RuntimeWindow(QMainWindow):
 
     The class owns only Qt event interception and overlay show handling. Window
     identity, title, content, chrome, and overlay behavior all come from config.
+    Close requests are routed through the runtime dispatcher via
+    ``WindowCloseRequested`` events; the quit controller subscribes to that
+    event to drive shutdown rather than relying on a Qt signal side channel.
     """
-
-    close_requested = Signal()
 
     def __init__(self, config: WindowConfig, context: Context, parent: QWidget | None = None) -> None:
         """Create a generic runtime window.
@@ -62,9 +62,6 @@ class RuntimeWindow(QMainWindow):
                     on_resize=self._overlay.resize_by,
                 )
         self.setCentralWidget(central)
-        app = QApplication.instance()
-        if app is not None:
-            apply_theme(app)
         self.apply_startup_size(minimum_size=config.surface.minimum_size)
 
     @property
@@ -119,7 +116,6 @@ class RuntimeWindow(QMainWindow):
             super().closeEvent(event)
             return
         self._context.dispatcher.dispatch_event(WindowCloseRequested(window_id=self._config.id))
-        self.close_requested.emit()
         event.ignore()
 
     def showEvent(self, event: QShowEvent) -> None:  # type: ignore[override]
