@@ -13,7 +13,6 @@ from ...models import KeySpec
 from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
 from ...runtime.context import Context
 from ...runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
-from ...services.keyboard import KeyboardService
 from ..button.key import create_key_button, key_button_state_machine, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import DEFAULT_KEYBOARD_METRICS

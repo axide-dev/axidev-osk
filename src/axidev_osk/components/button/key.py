@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
 from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
-from .state import KeyStateChange, KeyStateMachine, StateListener
+from .state import KeyStateMachine, StateListener
 
 VoidCallback = Callable[[], None]
 
