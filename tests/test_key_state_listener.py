@@ -12,6 +12,7 @@ from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
+from axidev_osk.runtime.testing import make_test_context
 
 
 def _app() -> QApplication:
@@ -154,7 +155,8 @@ class KeyStateListenerTests(unittest.TestCase):
     def test_keyboard_widget_reflects_backend_key_state_for_sent_io_key(self) -> None:
         _app()
         backend = FakeWidgetKeyboardBackend(pressed_key_names={"A"})
-        widget = KeyboardWidget(backend, layout_config=build_us_iso_layout_config())
+        context = make_test_context(backend)
+        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
         self.addCleanup(widget.close)
 
         button = self._button_for_io_key(widget, "A")
@@ -172,11 +174,12 @@ class KeyStateListenerTests(unittest.TestCase):
         _app()
         calls: list[str] = []
         state_machine = KeyStateMachine()
-        button = create_key_button(
+        key_button = create_key_button(
             "A",
             state_machine=state_machine,
             on_release=lambda: calls.append("released"),
         )
+        button = key_button.button
         self.addCleanup(button.close)
 
         button.pressed.emit()

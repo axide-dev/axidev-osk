@@ -10,7 +10,7 @@ from ...models import KeySpec
 from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
 from ...runtime.context import Context
 from ...runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
-from ..button.key import create_key_button, key_button_state_machine, set_key_button_label
+from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import DEFAULT_KEYBOARD_METRICS
 
@@ -38,21 +38,19 @@ class KeyboardWidget(QFrame):
 
     def __init__(
         self,
-        keyboard: object | None = None,
         *,
         layout_config: LayoutConfig,
-        context: Context | None = None,
+        context: Context,
     ) -> None:
         """Construct a keyboard grid populated from layout data.
 
         Args:
-            keyboard: Optional direct keyboard backend, used only when
-                ``context`` is ``None`` (legacy/test path). In production the
-                runtime context owns the keyboard service.
             layout_config: Declarative layout describing grids, keys, and
                 spacers. Required so the widget never embeds a default layout.
-            context: Optional runtime context. When present, all backend
-                interaction and event dispatch flow through it.
+            context: Runtime context that owns the keyboard service,
+                dispatcher, and state store. All backend interaction and
+                event dispatch flow through it. Tests should build a
+                context via ``axidev_osk.runtime.testing.make_test_context``.
 
         Returns:
             None.
@@ -65,9 +63,7 @@ class KeyboardWidget(QFrame):
         super().__init__()
         self._metrics = DEFAULT_KEYBOARD_METRICS
         self._context = context
-        self._keyboard = keyboard or (context.keyboard if context is not None else None)
-        if self._keyboard is None:
-            raise ValueError("KeyboardWidget requires a keyboard service or runtime context")
+        self._keyboard = context.keyboard
         self._layout_config = layout_config
         self._latched_keys: dict[str, bool] = {
             "shift": False,
@@ -221,11 +217,8 @@ class KeyboardWidget(QFrame):
     def _build_item(self, component: KeyConfig) -> QWidget:
         """Build one child widget for the grid via the component registry.
 
-        When a runtime context is available the registry is used and the
-        keyboard widget passes itself as the explicit ``host`` so the key
-        builder can wire latch state through this grid. The legacy/no-context
-        path delegates straight to ``build_key_from_config`` for tests that
-        instantiate a ``KeyboardWidget`` without a runtime.
+        The keyboard widget passes itself as the explicit ``host`` so the
+        key builder can wire latch state through this grid.
 
         Args:
             component: Key or spacer config to materialize.
@@ -237,14 +230,11 @@ class KeyboardWidget(QFrame):
             Reparents the widget under this grid.
         """
 
-        if self._context is not None:
-            widget = self._context.components.build(component, self._context, host=self)
-        else:
-            widget = self.build_key_from_config(component, None)
+        widget = self._context.components.build(component, self._context, host=self)
         widget.setParent(self)
         return widget
 
-    def build_key_from_config(self, config: KeyConfig, context: Context | None) -> QPushButton:
+    def build_key_from_config(self, config: KeyConfig, context: Context) -> QPushButton:
         """Build a key button from config inside this grid's latch wiring.
 
         Args:
@@ -280,8 +270,10 @@ class KeyboardWidget(QFrame):
 
         active_press: list[object | None] = [None]
         latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
-        state_machine: KeyStateMachine | None = None
         listened_key_name = self._listened_key_name(spec)
+        # Late-bound holder so ``on_state_change`` (constructed before the
+        # button exists) can reach the state machine after construction.
+        machine_ref: list[KeyStateMachine | None] = [None]
 
         def on_press(key_spec: KeySpec = spec) -> None:
             active_press[0] = self._handle_key_press(component_id, key_spec)
@@ -298,17 +290,20 @@ class KeyboardWidget(QFrame):
         ) -> None:
             if key_id is None:
                 return
+            machine = machine_ref[0]
+            if machine is None:
+                return
             self._handle_latch_state_change(
                 component_id,
                 key_spec,
                 key_id,
-                key_button_state_machine(button),
+                machine,
                 change,
                 press_ref,
             )
 
         display = spec.resolve_display(self._active_display_modifiers())
-        button = create_key_button(
+        key_button = create_key_button(
             display.label,
             latchable=spec.latchable,
             initial_latched=latched,
@@ -323,7 +318,18 @@ class KeyboardWidget(QFrame):
             on_press=on_press,
             on_release=on_release,
         )
-        state_machine = key_button_state_machine(button)
+        button = key_button.button
+        state_machine = key_button.state_machine
+        machine_ref[0] = state_machine
+        # Durable runtime ownership of the state machine lives in the
+        # central state store, namespaced per layout+component_id. Widgets
+        # and listeners read snapshots; the store is the source of truth
+        # for future config reloads and profile switches (AGENTS.md).
+        self._context.state.set(
+            f"key_state_machines:{self._layout_config.name}",
+            component_id,
+            state_machine,
+        )
         if listened_key_name is not None:
             self._state_machines_by_key_name.setdefault(listened_key_name, []).append(state_machine)
             if self._keyboard.is_key_down(listened_key_name):
@@ -367,21 +373,18 @@ class KeyboardWidget(QFrame):
         self._refresh_key_legends()
 
     def _handle_key_press(self, component_id: str, spec: KeySpec) -> object | None:
-        """Dispatch a press event/command through the runtime when present."""
+        """Dispatch a press event/command through the runtime."""
 
         self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
-        if self._context is not None:
-            return self._context.dispatcher.dispatch_command(KeyboardKeyDown(spec, dict(self._latched_keys)))
-        return self._keyboard.key_down(spec, self._latched_keys)
+        # TODO(#8): replace synchronous return with an event carrying
+        # the active_press handle once the queue lands.
+        return self._context.dispatcher.dispatch_command_sync(KeyboardKeyDown(spec, dict(self._latched_keys)))
 
     def _handle_key_release(self, component_id: str, active_press: object | None) -> None:
-        """Dispatch a release event/command through the runtime when present."""
+        """Dispatch a release event/command through the runtime."""
 
         self._dispatch_event(ComponentReleased(component_id=component_id, active_press=active_press))
-        if self._context is not None:
-            self._context.dispatcher.dispatch_command(KeyboardKeyUp(active_press))
-            return
-        self._keyboard.key_up(active_press)
+        self._context.dispatcher.dispatch_command(KeyboardKeyUp(active_press))
 
     def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
         """Apply a backend key state change to all matching button state machines."""
@@ -460,10 +463,12 @@ class KeyboardWidget(QFrame):
             return
 
         command = KeyboardSyncLatchedKey(spec, currently_latched, active_press[0])
-        if self._context is not None:
-            active_press[0] = self._context.dispatcher.dispatch_command(command)
-        else:
-            active_press[0] = self._keyboard.sync_latched_key(spec, currently_latched, active_press[0])
+        # TODO(#8): when the queue lands, replace this synchronous
+        # round-trip with an event-based flow where the keyboard
+        # service emits a "latched key synced" event carrying the
+        # new active_press handle. ``dispatch_command_sync`` is the
+        # named legacy path so this site is easy to grep for.
+        active_press[0] = self._context.dispatcher.dispatch_command_sync(command)
 
         self._syncing_latch_keys.add(key_id)
         try:
@@ -494,14 +499,11 @@ class KeyboardWidget(QFrame):
             set_key_button_label(button, display.label, display.secondary_label)
 
     def _dispatch_event(self, event: object) -> None:
-        """Forward an event to the runtime dispatcher when a context is bound."""
+        """Forward an event to the runtime dispatcher."""
 
-        if self._context is not None:
-            self._context.dispatcher.dispatch_event(event)  # type: ignore[arg-type]
+        self._context.dispatcher.dispatch_event(event)  # type: ignore[arg-type]
 
-    def _dispatch_command(self, command: object) -> object | None:
-        """Forward a command to the runtime dispatcher when a context is bound."""
+    def _dispatch_command(self, command: object) -> None:
+        """Forward a fire-and-forget command to the runtime dispatcher."""
 
-        if self._context is None:
-            return None
-        return self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]
+        self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]

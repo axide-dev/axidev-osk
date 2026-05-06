@@ -1,13 +1,15 @@
 """Key button widget construction and label/state helpers.
 
-Key buttons are reusable Qt widgets keyed off a ``KeyStateMachine`` instance.
-Construction stays in this leaf component; latch wiring and event dispatch are
-the responsibility of the containing keyboard grid.
+Key buttons are reusable Qt widgets paired with a ``KeyStateMachine``.
+Construction stays in this leaf component; latch wiring, event dispatch,
+and durable state ownership are the responsibility of the containing
+keyboard grid and the runtime context.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
@@ -16,6 +18,20 @@ from ..grid.metrics import DEFAULT_KEYBOARD_METRICS
 from .state import KeyStateMachine, StateListener
 
 VoidCallback = Callable[[], None]
+
+
+@dataclass(frozen=True)
+class KeyButton:
+    """Construction result pairing a key button with its state machine.
+
+    The pair is returned together so callers do not need to fish the
+    state machine out of a private widget attribute. Durable ownership
+    of the machine belongs to the runtime state store; this dataclass is
+    just the construction handoff.
+    """
+
+    button: QPushButton
+    state_machine: KeyStateMachine
 
 
 def format_key_label(label: str, secondary_label: str | None = None) -> str:
@@ -98,8 +114,8 @@ def create_key_button(
     layout: str | None = None,
     on_press: VoidCallback | None = None,
     on_release: VoidCallback | None = None,
-) -> QPushButton:
-    """Create a configured key button with attached state machine.
+) -> KeyButton:
+    """Create a configured key button paired with its state machine.
 
     Args:
         label: Visible primary label.
@@ -121,8 +137,10 @@ def create_key_button(
             internal state machine processes the release and toggles latch.
 
     Returns:
-        Constructed ``QPushButton`` with the state machine attached as a
-        private ``_axidev_key_state_machine`` attribute.
+        ``KeyButton`` pairing the constructed ``QPushButton`` with the
+        ``KeyStateMachine`` that drives it. Callers are responsible for
+        storing the machine wherever durable ownership lives (typically
+        the runtime state store, namespaced by component ID).
 
     Side effects:
         Connects ``pressed``/``released`` signals to internal handlers and
@@ -149,10 +167,6 @@ def create_key_button(
     button.setMinimumHeight(metrics.span_height(1))
     button.setMinimumWidth(metrics.span_width(width))
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    # Internal: state machine ownership lives on the widget so reusable
-    # helpers (``key_button_state_machine``, ``refresh_key_button``) can
-    # locate it without a separate registry. Treat the attribute as private.
-    button._axidev_key_state_machine = machine  # type: ignore[attr-defined]
     refresh_key_button(button, machine)
 
     machine.add_listener(lambda _change: refresh_key_button(button, machine))
@@ -173,20 +187,4 @@ def create_key_button(
 
     button.pressed.connect(handle_press)
     button.released.connect(handle_release)
-    return button
-
-
-def key_button_state_machine(button: QPushButton) -> KeyStateMachine:
-    """Return the state machine owned by a key button.
-
-    Args:
-        button: Button created by ``create_key_button``.
-
-    Returns:
-        The button-owned key interaction state machine.
-
-    Side effects:
-        None.
-    """
-
-    return button._axidev_key_state_machine  # type: ignore[attr-defined,no-any-return]
+    return KeyButton(button=button, state_machine=machine)
