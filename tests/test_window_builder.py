@@ -40,11 +40,11 @@ class FakeKeyboardBackend:
     def key_down(self, spec, latched_keys):
         return None
 
-    def key_up(self, active_press) -> None:
+    def key_up(self, press_handle) -> None:
         return None
 
-    def sync_latched_key(self, spec, latched: bool, active_press=None):
-        return active_press
+    def sync_latched_key(self, spec, latched: bool, press_handle=None):
+        return press_handle
 
 
 class FakeOverlayController:

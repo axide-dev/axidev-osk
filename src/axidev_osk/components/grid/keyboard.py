@@ -489,7 +489,7 @@ class KeyboardWidget(QFrame):
         self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
-        return spec.key_id or spec.io_key or spec.label
+        return spec.io_key or spec.label or spec.key_id
 
     def _latch_namespace(self) -> str:
         return f"keyboard.latches:{self._layout_config.name}"

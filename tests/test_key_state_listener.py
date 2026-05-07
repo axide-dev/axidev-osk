@@ -68,11 +68,11 @@ class FakeWidgetKeyboardBackend:
     def key_down(self, spec: KeySpec, latched_keys):
         return SimpleNamespace(spec=spec)
 
-    def key_up(self, active_press) -> None:
+    def key_up(self, press_handle) -> None:
         return None
 
-    def sync_latched_key(self, spec: KeySpec, latched: bool, active_press=None):
-        return active_press
+    def sync_latched_key(self, spec: KeySpec, latched: bool, press_handle=None):
+        return press_handle
 
     def emit_key_state(self, key_name: str, pressed: bool) -> None:
         if pressed:

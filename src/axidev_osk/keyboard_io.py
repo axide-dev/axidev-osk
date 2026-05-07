@@ -250,39 +250,39 @@ class AxidevIoKeyboardBackend:
             return None
         return self._canonical_key_name(key_name)
 
-    def sync_latched_key(self, spec: KeySpec, latched: bool, active_press: object | None = None) -> object | None:
+    def sync_latched_key(self, spec: KeySpec, latched: bool, press_handle: object | None = None) -> object | None:
         if (
             not self._ready
             or self._keyboard is None
             or not spec.holds_when_latched
             or spec.key_id is None
         ):
-            return active_press
+            return press_handle
 
-        resolved_active_press = active_press if isinstance(active_press, KeyPressHandle) else None
+        resolved_press_handle = press_handle if isinstance(press_handle, KeyPressHandle) else None
         try:
             held_press = self._held_latch_presses.get(spec.key_id)
             if latched:
                 if held_press is not None:
-                    if resolved_active_press is held_press:
+                    if resolved_press_handle is held_press:
                         return None
-                    return active_press
+                    return press_handle
 
-                if resolved_active_press is not None:
-                    self._held_latch_presses[spec.key_id] = resolved_active_press
+                if resolved_press_handle is not None:
+                    self._held_latch_presses[spec.key_id] = resolved_press_handle
                     return None
 
                 press = self._resolve_latched_press(spec)
                 if press is None:
-                    return active_press
+                    return press_handle
 
                 self._send_key_down(press)
                 self._set_key_down(press.key_name, True)
                 self._held_latch_presses[spec.key_id] = press
-                return active_press
+                return press_handle
 
             if held_press is None:
-                return active_press
+                return press_handle
 
             if held_press.mods is None:
                 self._keyboard.sender.key_up(held_press.key_name)
@@ -290,12 +290,12 @@ class AxidevIoKeyboardBackend:
                 self._keyboard.sender.key_up(held_press.key_name, mods=held_press.mods)
             self._set_key_down(held_press.key_name, False)
             del self._held_latch_presses[spec.key_id]
-            if resolved_active_press is held_press:
+            if resolved_press_handle is held_press:
                 return None
-            return active_press
+            return press_handle
         except Exception as exc:
             _logger.exception("axidev_io latch sync failed for %r: %s", spec.label, exc)
-            return active_press
+            return press_handle
 
     def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
         if not self._ready or self._keyboard is None:
