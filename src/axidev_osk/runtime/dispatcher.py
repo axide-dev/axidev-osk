@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .commands import (
     KeyboardKeyDown,
@@ -21,13 +21,15 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[RuntimeEvent], object | None]
 CommandHandler = Callable[[RuntimeCommand], object | None]
+Unsubscribe = Callable[[], None]
 
 
 class Dispatcher:
     """Routes runtime events and commands synchronously for now.
 
-    The public shape accepts DTOs and returns command results, which keeps UI code
-    independent from direct service calls and allows a later async queue swap.
+    The public shape accepts DTOs and applies commands without returning service
+    results, which keeps UI code independent from direct service calls and allows
+    a later async queue swap.
     """
 
     def __init__(self) -> None:
@@ -66,7 +68,6 @@ class Dispatcher:
                 KeyboardKeyDown: lambda command: context.keyboard.key_down(  # type: ignore[union-attr]
                     command.layout,
                     command.key_spec,
-                    command.latched_keys,
                 ),
                 KeyboardKeyUp: lambda command: context.keyboard.key_up(command.layout, command.key_spec),  # type: ignore[union-attr]
                 KeyboardSyncLatchedKey: lambda command: context.keyboard.sync_latched_key(  # type: ignore[union-attr]
@@ -78,20 +79,26 @@ class Dispatcher:
             }
         )
 
-    def add_event_handler(self, handler: EventHandler) -> None:
+    def add_event_handler(self, handler: EventHandler) -> Unsubscribe:
         """Register an event observer.
 
         Args:
             handler: Callable invoked for every dispatched event.
 
         Returns:
-            None.
+            Callable that removes the handler when invoked.
 
         Side effects:
             Mutates dispatcher handler list.
         """
 
         self._event_handlers.append(handler)
+
+        def unsubscribe() -> None:
+            if handler in self._event_handlers:
+                self._event_handlers.remove(handler)
+
+        return unsubscribe
 
     def add_command_handler(self, command_type: type[object], handler: CommandHandler) -> None:
         """Register or replace a command handler.
@@ -145,27 +152,7 @@ class Dispatcher:
 
         self._dispatch_command_internal(command)
 
-    def dispatch_command_sync(self, command: RuntimeCommand) -> Any:
-        """Apply a command and return its handler result.
-
-        Legacy synchronous variant retained for the keyboard latch-sync
-        flow which still threads the backend's updated ``active_press``
-        handle back into the caller. When ``KeyboardSyncLatchedKey``
-        moves to event-feedback, this method should be removed.
-
-        Args:
-            command: Runtime command DTO.
-
-        Returns:
-            Handler-specific result.
-
-        Side effects:
-            Invokes the command handler synchronously.
-        """
-
-        return self._dispatch_command_internal(command)
-
-    def _dispatch_command_internal(self, command: RuntimeCommand) -> Any:
+    def _dispatch_command_internal(self, command: RuntimeCommand) -> object | None:
         """Look up and invoke a command handler.
 
         Args:
