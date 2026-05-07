@@ -77,4 +77,5 @@ def make_test_context(
         surfaces=surfaces or SurfaceRegistry(),
     )
     dispatcher.bind_context(context)
+    keyboard.bind_context(context)
     return context

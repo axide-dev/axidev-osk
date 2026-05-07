@@ -64,6 +64,7 @@ class ApplicationRuntime:
             surfaces=self._surfaces,
         )
         self._dispatcher.bind_context(self.context)
+        self._keyboard.bind_context(self.context)
         self._window_manager = WindowManager(self.context)
         self._dispatcher.add_command_handler(WindowShow, lambda command: self._window_manager.show(command.window_id))
         self._dispatcher.add_command_handler(WindowHide, lambda command: self._window_manager.hide(command.window_id))

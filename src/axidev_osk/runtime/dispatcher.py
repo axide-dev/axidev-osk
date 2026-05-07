@@ -63,12 +63,16 @@ class Dispatcher:
         self._context = context
         self._command_handlers.update(
             {
-                KeyboardKeyDown: lambda command: context.keyboard.key_down(command.key_spec, command.latched_keys),  # type: ignore[union-attr]
-                KeyboardKeyUp: lambda command: context.keyboard.key_up(command.active_press),  # type: ignore[union-attr]
+                KeyboardKeyDown: lambda command: context.keyboard.key_down(  # type: ignore[union-attr]
+                    command.layout,
+                    command.key_spec,
+                    command.latched_keys,
+                ),
+                KeyboardKeyUp: lambda command: context.keyboard.key_up(command.layout, command.key_spec),  # type: ignore[union-attr]
                 KeyboardSyncLatchedKey: lambda command: context.keyboard.sync_latched_key(  # type: ignore[union-attr]
+                    command.layout,
                     command.key_spec,
                     command.latched,
-                    command.active_press,
                 ),
                 StateSet: lambda command: context.state.set(command.namespace, command.key, command.value),
             }
