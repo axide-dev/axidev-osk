@@ -28,11 +28,9 @@ class ComponentReleased:
 
     Attributes:
         component_id: Deterministic component ID.
-        active_press: Backend-specific press handle returned by the press command.
     """
 
     component_id: str
-    active_press: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +44,21 @@ class ComponentStateChanged:
     """
 
     component_id: str
+    key_id: str
+    latched: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BackendKeyStateChanged:
+    layout: str
+    key_id: str
+    pressed: bool
+    latched: bool
+
+
+@dataclass(frozen=True, slots=True)
+class KeyLatchChanged:
+    layout: str
     key_id: str
     latched: bool
 
@@ -74,4 +87,12 @@ class PromptResolved:
     result: Literal["accepted", "rejected"]
 
 
-RuntimeEvent = ComponentPressed | ComponentReleased | ComponentStateChanged | WindowCloseRequested | PromptResolved
+RuntimeEvent = (
+    ComponentPressed
+    | ComponentReleased
+    | ComponentStateChanged
+    | BackendKeyStateChanged
+    | KeyLatchChanged
+    | WindowCloseRequested
+    | PromptResolved
+)

@@ -209,7 +209,6 @@ class KeyboardStatusConfig:
 
     id: str
     kind: Literal["keyboard-status"] = "keyboard-status"
-    omit_when_ready: bool = True
 
 
 ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig | PromptConfig | KeyboardGridConfig | KeyboardStatusConfig

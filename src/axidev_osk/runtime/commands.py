@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from typing import Mapping
-
 from ..models import KeySpec
 
 
@@ -14,23 +12,25 @@ class KeyboardKeyDown:
     """Command requesting keyboard output for a key press.
 
     Attributes:
+        layout: Keyboard layout instance name.
         key_spec: Key semantics to emit.
-        latched_keys: Snapshot of active latch groups.
     """
 
+    layout: str
     key_spec: KeySpec
-    latched_keys: Mapping[str, bool]
 
 
 @dataclass(frozen=True, slots=True)
 class KeyboardKeyUp:
-    """Command requesting release of a backend press handle.
+    """Command requesting release of a key press owned by the keyboard service.
 
     Attributes:
-        active_press: Backend-specific handle returned by ``KeyboardKeyDown``.
+        layout: Keyboard layout instance name.
+        key_spec: Key semantics to release.
     """
 
-    active_press: object | None
+    layout: str
+    key_spec: KeySpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,14 +38,14 @@ class KeyboardSyncLatchedKey:
     """Command requesting backend synchronization for a latched modifier.
 
     Attributes:
+        layout: Keyboard layout instance name.
         key_spec: Latchable key semantics.
         latched: Desired latched state.
-        active_press: Optional active press handle to reuse.
     """
 
+    layout: str
     key_spec: KeySpec
     latched: bool
-    active_press: object | None = None
 
 
 @dataclass(frozen=True, slots=True)

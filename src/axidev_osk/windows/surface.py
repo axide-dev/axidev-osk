@@ -50,8 +50,6 @@ def build_surface(config: SurfaceConfig, context: Context) -> QWidget:
     layout.setContentsMargins(*config.margins)
     layout.setSpacing(config.spacing)
     for component in config.components:
-        if getattr(component, "omit_when_ready", False) and context.keyboard.ready:
-            continue
         widget = context.components.build(component, context, host=central)
         layout.addWidget(widget)
     return central

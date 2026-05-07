@@ -9,7 +9,7 @@ from ...config.models import GridConfig, KeyConfig, LayoutConfig
 from ...models import KeySpec
 from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
 from ...runtime.context import Context
-from ...runtime.events import ComponentPressed, ComponentReleased, ComponentStateChanged
+from ...runtime.events import BackendKeyStateChanged, ComponentPressed, ComponentReleased, ComponentStateChanged, KeyLatchChanged
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import KeyboardMetrics
@@ -20,7 +20,8 @@ Unsubscribe = Callable[[], None]
 class _KeyStateBridge(QObject):
     """Qt signal relay used to marshal backend key-state callbacks into the GUI thread."""
 
-    key_state_changed = Signal(str, bool)
+    key_state_changed = Signal(str, str, bool, bool)
+    key_latch_changed = Signal(str, str, bool)
 
 
 class KeyboardWidget(QFrame):
@@ -68,14 +69,6 @@ class KeyboardWidget(QFrame):
         self._context = context
         self._keyboard = context.keyboard
         self._layout_config = layout_config
-        self._latched_keys: dict[str, bool] = {
-            "shift": False,
-            "caps": False,
-            "ctrl": False,
-            "alt": False,
-            "altgr": False,
-            "super": False,
-        }
         self._latch_groups: dict[str, list[KeyStateMachine]] = {
             "shift": [],
             "caps": [],
@@ -87,16 +80,16 @@ class KeyboardWidget(QFrame):
         self._syncing_latch_keys: set[str] = set()
         self._hold_visual_modifiers: set[str] = set()
         self._buttons_by_spec: list[tuple[QPushButton, KeySpec]] = []
-        self._state_machines_by_key_name: dict[str, list[KeyStateMachine]] = {}
+        self._state_machines_by_key_id: dict[str, list[KeyStateMachine]] = {}
         self._key_state_bridge = _KeyStateBridge(self)
-        self._key_state_unsubscribe: Unsubscribe | None = None
+        self._event_unsubscribe: Unsubscribe | None = None
 
         self.setObjectName("keyboard")
         self.setProperty("componentType", "grid")
         self.setProperty("componentId", self._layout_config.id)
         self.setProperty("layout", self._layout_config.name)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self._subscribe_to_backend_key_state()
+        self._subscribe_to_runtime_key_state()
 
         container = QGridLayout(self)
         container.setContentsMargins(0, 0, 0, 0)
@@ -113,7 +106,7 @@ class KeyboardWidget(QFrame):
                 container.setRowStretch(row, 1)
 
         self._refresh_key_legends()
-        self.destroyed.connect(lambda _object=None: self._unsubscribe_from_backend_key_state())
+        self.destroyed.connect(lambda _object=None: self._unsubscribe_from_runtime_key_state())
 
     def _add_grid(self, container: QGridLayout, grid: GridConfig) -> int:
         """Place a single grid's components into the Qt container.
@@ -271,25 +264,23 @@ class KeyboardWidget(QFrame):
             tables so live key state can drive its visual state.
         """
 
-        active_press: list[object | None] = [None]
-        latched = bool(spec.key_id is not None and self._latched_keys.get(spec.key_id, False))
-        listened_key_name = self._listened_key_name(spec)
+        latched = bool(spec.key_id is not None and self._context.state.get(self._latch_namespace(), spec.key_id, False))
+        listened_key_name = self._keyboard.register_key_spec(self._layout_config.name, spec)
+        state_key = self._state_key_for_spec(spec)
         # Late-bound holder so ``on_state_change`` (constructed before the
         # button exists) can reach the state machine after construction.
         machine_ref: list[KeyStateMachine | None] = [None]
 
         def on_press(key_spec: KeySpec = spec) -> None:
-            active_press[0] = self._handle_key_press(component_id, key_spec)
+            self._handle_key_press(component_id, key_spec)
 
-        def on_release() -> None:
-            self._handle_key_release(component_id, active_press[0])
-            active_press[0] = None
+        def on_release(key_spec: KeySpec = spec) -> None:
+            self._handle_key_release(component_id, key_spec)
 
         def on_state_change(
             change: KeyStateChange,
             key_spec: KeySpec = spec,
             key_id: str | None = spec.key_id,
-            press_ref: list[object | None] = active_press,
         ) -> None:
             if key_id is None:
                 return
@@ -302,7 +293,6 @@ class KeyboardWidget(QFrame):
                 key_id,
                 machine,
                 change,
-                press_ref,
             )
 
         display = spec.resolve_display(self._active_display_modifiers())
@@ -334,10 +324,13 @@ class KeyboardWidget(QFrame):
             component_id,
             state_machine,
         )
-        if listened_key_name is not None:
-            self._state_machines_by_key_name.setdefault(listened_key_name, []).append(state_machine)
-            if self._keyboard.is_key_down(listened_key_name):
-                state_machine.set_pressed(True, reason="listener_snapshot")
+        if state_key is not None:
+            self._state_machines_by_key_id.setdefault(state_key, []).append(state_machine)
+            snapshot = self._context.state.get(f"keyboard.key_states:{self._layout_config.name}", state_key, {})
+            if isinstance(snapshot, dict):
+                state_machine.set_pressed(bool(snapshot.get("pressed", False)), reason="store_snapshot")
+            if spec.key_id is not None:
+                state_machine.set_latched(bool(self._context.state.get(self._latch_namespace(), spec.key_id, False)), reason="store_snapshot")
         if spec.latchable and spec.key_id is not None:
             if spec.holds_when_latched:
                 self._hold_visual_modifiers.add(spec.key_id)
@@ -350,72 +343,61 @@ class KeyboardWidget(QFrame):
         self._buttons_by_spec.append((button, spec))
         return button
 
-    def set_latched_state(self, key_id: str, latched: bool) -> None:
-        """Force a logical modifier latch state and sync sibling state machines.
+    def _handle_key_press(self, component_id: str, spec: KeySpec) -> None:
+        """Dispatch a press event/command through the runtime."""
 
-        Args:
-            key_id: Modifier identity string (e.g. ``"shift"``).
-            latched: ``True`` to mark the modifier latched.
+        self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
+        self._context.dispatcher.dispatch_command(KeyboardKeyDown(self._layout_config.name, spec))
 
-        Returns:
-            None.
+    def _handle_key_release(self, component_id: str, spec: KeySpec) -> None:
+        """Dispatch a release event/command through the runtime."""
 
-        Side effects:
-            Updates latch state machines and refreshes secondary key legends.
-        """
+        self._dispatch_event(ComponentReleased(component_id=component_id))
+        self._context.dispatcher.dispatch_command(KeyboardKeyUp(self._layout_config.name, spec))
 
-        self._latched_keys[key_id] = latched
-        if key_id in self._syncing_latch_keys:
+    def _handle_backend_key_state_change(self, layout: str, key_id: str, pressed: bool, latched: bool) -> None:
+        """Apply a backend key state change to all matching button state machines."""
+
+        if layout != self._layout_config.name:
             return
+        for state_machine in self._state_machines_by_key_id.get(key_id, []):
+            state_machine.set_pressed(pressed, reason="listener")
+            state_machine.set_latched(latched, reason="listener")
 
+    def _handle_key_latch_change(self, layout: str, key_id: str, latched: bool) -> None:
+        """Apply a latch state change from the runtime store."""
+
+        if layout != self._layout_config.name:
+            return
         self._syncing_latch_keys.add(key_id)
         try:
             for state_machine in self._latch_groups.get(key_id, []):
-                state_machine.set_latched(latched, reason="sync_group")
+                state_machine.set_latched(latched, reason="store_event")
         finally:
             self._syncing_latch_keys.discard(key_id)
         self._refresh_key_legends()
 
-    def _handle_key_press(self, component_id: str, spec: KeySpec) -> object | None:
-        """Dispatch a press event/command through the runtime."""
-
-        self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
-        # TODO(#8): replace synchronous return with an event carrying
-        # the active_press handle once the queue lands.
-        return self._context.dispatcher.dispatch_command_sync(KeyboardKeyDown(spec, dict(self._latched_keys)))
-
-    def _handle_key_release(self, component_id: str, active_press: object | None) -> None:
-        """Dispatch a release event/command through the runtime."""
-
-        self._dispatch_event(ComponentReleased(component_id=component_id, active_press=active_press))
-        self._context.dispatcher.dispatch_command(KeyboardKeyUp(active_press))
-
-    def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
-        """Apply a backend key state change to all matching button state machines."""
-
-        for state_machine in self._state_machines_by_key_name.get(key_name, []):
-            state_machine.set_pressed(pressed, reason="listener")
-
-    def _listened_key_name(self, spec: KeySpec) -> str | None:
-        """Return the backend key name this spec should listen to, if any."""
-
-        return self._keyboard.key_name_for_spec(spec)
-
-    def _subscribe_to_backend_key_state(self) -> None:
-        """Subscribe the grid to backend key state changes via a signal bridge."""
+    def _subscribe_to_runtime_key_state(self) -> None:
+        """Subscribe the grid to runtime key state events via signal bridges."""
 
         self._key_state_bridge.key_state_changed.connect(self._handle_backend_key_state_change)
-        self._key_state_unsubscribe = self._keyboard.add_key_state_listener(
-            self._key_state_bridge.key_state_changed.emit
-        )
+        self._key_state_bridge.key_latch_changed.connect(self._handle_key_latch_change)
 
-    def _unsubscribe_from_backend_key_state(self) -> None:
-        """Detach the grid from backend key state notifications."""
+        def handle_event(event: object) -> None:
+            if isinstance(event, BackendKeyStateChanged):
+                self._key_state_bridge.key_state_changed.emit(event.layout, event.key_id, event.pressed, event.latched)
+            elif isinstance(event, KeyLatchChanged):
+                self._key_state_bridge.key_latch_changed.emit(event.layout, event.key_id, event.latched)
 
-        if self._key_state_unsubscribe is None:
+        self._event_unsubscribe = self._context.dispatcher.add_event_handler(handle_event)
+
+    def _unsubscribe_from_runtime_key_state(self) -> None:
+        """Detach runtime event handling when the widget is destroyed."""
+
+        if self._event_unsubscribe is None:
             return
-        self._key_state_unsubscribe()
-        self._key_state_unsubscribe = None
+        self._event_unsubscribe()
+        self._event_unsubscribe = None
 
     def _handle_latch_state_change(
         self,
@@ -424,7 +406,6 @@ class KeyboardWidget(QFrame):
         key_id: str,
         state_machine: KeyStateMachine,
         change: KeyStateChange,
-        active_press: list[object | None],
     ) -> None:
         """Update grid-wide latch state when a button transitions latch state.
 
@@ -434,9 +415,6 @@ class KeyboardWidget(QFrame):
             key_id: Modifier identity string for the key.
             state_machine: State machine of the button that initiated the change.
             change: State machine transition record.
-            active_press: Mutable single-cell holder for the in-flight press
-                handle so latch-sync results can replace it.
-
         Returns:
             None.
 
@@ -444,6 +422,11 @@ class KeyboardWidget(QFrame):
             Updates latched-key registry, dispatches state events/commands,
             and synchronizes sibling latch buttons in the same group.
         """
+
+        if change.reason in {"sync_group", "store_snapshot", "store_event", "listener"}:
+            if spec.holds_when_latched:
+                self._refresh_key_legends()
+            return
 
         if spec.holds_when_latched and change.reason != "release":
             self._refresh_key_legends()
@@ -460,19 +443,12 @@ class KeyboardWidget(QFrame):
         if previously_latched == currently_latched:
             return
 
-        self._latched_keys[key_id] = currently_latched
         self._dispatch_event(ComponentStateChanged(component_id=component_id, key_id=key_id, latched=currently_latched))
         self._dispatch_command(StateSet(namespace=f"component:{component_id}", key="latched", value=currently_latched))
         if key_id in self._syncing_latch_keys:
             return
 
-        command = KeyboardSyncLatchedKey(spec, currently_latched, active_press[0])
-        # TODO(#8): when the queue lands, replace this synchronous
-        # round-trip with an event-based flow where the keyboard
-        # service emits a "latched key synced" event carrying the
-        # new active_press handle. ``dispatch_command_sync`` is the
-        # named legacy path so this site is easy to grep for.
-        active_press[0] = self._context.dispatcher.dispatch_command_sync(command)
+        self._dispatch_command(KeyboardSyncLatchedKey(self._layout_config.name, spec, currently_latched))
 
         self._syncing_latch_keys.add(key_id)
         try:
@@ -488,7 +464,7 @@ class KeyboardWidget(QFrame):
     def _active_display_modifiers(self) -> frozenset[str]:
         """Return the set of modifier IDs that should affect key display."""
 
-        active = {key_id for key_id, latched in self._latched_keys.items() if latched}
+        active = {key_id for key_id in self._latch_groups if self._context.state.get(self._latch_namespace(), key_id, False)}
         for key_id in self._hold_visual_modifiers:
             if any(machine.is_pressed for machine in self._latch_groups.get(key_id, [])):
                 active.add(key_id)
@@ -511,3 +487,9 @@ class KeyboardWidget(QFrame):
         """Forward a fire-and-forget command to the runtime dispatcher."""
 
         self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]
+
+    def _state_key_for_spec(self, spec: KeySpec) -> str | None:
+        return spec.io_key or spec.label or spec.key_id
+
+    def _latch_namespace(self) -> str:
+        return f"keyboard.latches:{self._layout_config.name}"

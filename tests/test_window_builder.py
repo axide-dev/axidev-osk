@@ -8,10 +8,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.components import register_components
 from axidev_osk.config.defaults import build_default_app_config
-from axidev_osk.runtime.context import Context
-from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
-from axidev_osk.runtime.state_store import StateStore
+from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.builder import build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.surface import register_surfaces
@@ -42,11 +40,11 @@ class FakeKeyboardBackend:
     def key_down(self, spec, latched_keys):
         return None
 
-    def key_up(self, active_press) -> None:
+    def key_up(self, press_handle) -> None:
         return None
 
-    def sync_latched_key(self, spec, latched: bool, active_press=None):
-        return active_press
+    def sync_latched_key(self, spec, latched: bool, press_handle=None):
+        return press_handle
 
 
 class FakeOverlayController:
@@ -78,20 +76,16 @@ def _app() -> QApplication:
 
 def _build_keyboard_window(backend: FakeKeyboardBackend):
     config = build_default_app_config()
-    dispatcher = Dispatcher()
     components = ComponentRegistry()
     surfaces = SurfaceRegistry()
     register_components(components)
     register_surfaces(surfaces)
-    context = Context(
+    context = make_test_context(
+        backend,
         config=config,
-        dispatcher=dispatcher,
-        keyboard=backend,
-        state=StateStore(),
         components=components,
         surfaces=surfaces,
     )
-    dispatcher.bind_context(context)
     return build_window(config.windows[0], context)
 
 
@@ -112,7 +106,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.addCleanup(window.close)
 
         central_layout = window.centralWidget().layout()
-        self.assertEqual(central_layout.count(), 2)
+        self.assertEqual(central_layout.count(), 3)
 
         title_bar = central_layout.itemAt(0).widget()
         self.assertIsInstance(title_bar, OverlayTitleBar)
@@ -124,9 +118,11 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.assertIsNotNone(close_button)
         title_bar_layout = title_bar.layout()
         self.assertLess(title_bar_layout.indexOf(resize_handle), title_bar_layout.indexOf(close_button))
-        self.assertIsNone(window.findChild(QLabel, "statusLabel"))
+        status_label = window.findChild(QLabel, "statusLabel")
+        self.assertIsNotNone(status_label)
+        self.assertFalse(status_label.isVisible())
 
-    def test_status_footer_is_only_added_when_backend_is_unavailable(self) -> None:
+    def test_status_footer_is_only_visible_when_backend_is_unavailable(self) -> None:
         _app()
         overlay = FakeOverlayController()
 
