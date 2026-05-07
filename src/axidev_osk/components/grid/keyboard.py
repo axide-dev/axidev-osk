@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QWidget
 
@@ -11,6 +13,9 @@ from ...runtime.events import BackendKeyStateChanged, ComponentPressed, Componen
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import KeyboardMetrics
+
+Unsubscribe = Callable[[], None]
+
 
 class _KeyStateBridge(QObject):
     """Qt signal relay used to marshal backend key-state callbacks into the GUI thread."""
@@ -77,6 +82,7 @@ class KeyboardWidget(QFrame):
         self._buttons_by_spec: list[tuple[QPushButton, KeySpec]] = []
         self._state_machines_by_key_id: dict[str, list[KeyStateMachine]] = {}
         self._key_state_bridge = _KeyStateBridge(self)
+        self._event_unsubscribe: Unsubscribe | None = None
 
         self.setObjectName("keyboard")
         self.setProperty("componentType", "grid")
@@ -100,6 +106,7 @@ class KeyboardWidget(QFrame):
                 container.setRowStretch(row, 1)
 
         self._refresh_key_legends()
+        self.destroyed.connect(lambda _object=None: self._unsubscribe_from_runtime_key_state())
 
     def _add_grid(self, container: QGridLayout, grid: GridConfig) -> int:
         """Place a single grid's components into the Qt container.
@@ -382,7 +389,15 @@ class KeyboardWidget(QFrame):
             elif isinstance(event, KeyLatchChanged):
                 self._key_state_bridge.key_latch_changed.emit(event.layout, event.key_id, event.latched)
 
-        self._context.dispatcher.add_event_handler(handle_event)
+        self._event_unsubscribe = self._context.dispatcher.add_event_handler(handle_event)
+
+    def _unsubscribe_from_runtime_key_state(self) -> None:
+        """Detach runtime event handling when the widget is destroyed."""
+
+        if self._event_unsubscribe is None:
+            return
+        self._event_unsubscribe()
+        self._event_unsubscribe = None
 
     def _handle_latch_state_change(
         self,

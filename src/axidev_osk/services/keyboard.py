@@ -219,11 +219,17 @@ class KeyboardService:
         """Emit a key-up action through the backend."""
 
         key_id = self._state_key_for_spec(spec)
+        latched = self.is_latched(layout, key_id) if key_id is not None else False
         active_press = self._active_presses.pop((layout, key_id), None) if key_id is not None else None
-        self._backend.key_up(active_press)
+        if not (spec.holds_when_latched and latched):
+            self._backend.key_up(active_press)
         if key_id is not None:
-            latched = self.is_latched(layout, key_id)
-            self._emit_key_state(layout, key_id, pressed=False, latched=latched)
+            self._emit_key_state(
+                layout,
+                key_id,
+                pressed=self._pressed_snapshot(spec, latched=latched),
+                latched=latched,
+            )
 
     def sync_latched_key(self, layout: str, spec: KeySpec, latched: bool) -> None:
         """Synchronize a latched modifier with backend held-key state."""
@@ -238,7 +244,8 @@ class KeyboardService:
                 self._active_presses.pop((layout, key_id), None)
             else:
                 self._active_presses[(layout, key_id)] = synced_press
-            self._emit_key_state(layout, key_id, pressed=latched, latched=latched)
+            if spec.holds_when_latched:
+                self._emit_key_state(layout, key_id, pressed=latched, latched=latched)
 
     def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
         for layout, spec in self._specs_by_key_name.get(key_name, []):
@@ -291,6 +298,12 @@ class KeyboardService:
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
         return spec.key_id or spec.io_key or spec.label
+
+    def _pressed_snapshot(self, spec: KeySpec, *, latched: bool) -> bool:
+        if spec.holds_when_latched and latched:
+            return True
+        key_name = self.key_name_for_spec(spec)
+        return self._backend.is_key_down(key_name) if key_name is not None else False
 
     def _ensure_backend_listener(self) -> None:
         if self._backend_listener_unsubscribe is None:

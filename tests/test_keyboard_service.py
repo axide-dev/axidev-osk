@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 from axidev_osk.models import KeySpec
-from axidev_osk.runtime.commands import KeyboardSyncLatchedKey
+from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey
 from axidev_osk.runtime.events import BackendKeyStateChanged, KeyLatchChanged
 from axidev_osk.runtime.testing import make_test_context
 
@@ -118,6 +118,40 @@ class KeyboardServiceTests(unittest.TestCase):
 
         self.assertEqual(events, [KeyLatchChanged(layout="default", key_id="shift", latched=True)])
         self.assertTrue(context.state.get("keyboard.latches:default", "shift"))
+
+    def test_non_held_latch_does_not_emit_backend_pressed_state(self) -> None:
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        spec = KeySpec(label="Caps", row=0, column=0, key_id="caps", io_key="capslock", latchable=True)
+        events: list[BackendKeyStateChanged] = []
+        context.dispatcher.add_event_handler(lambda event: events.append(event) if isinstance(event, BackendKeyStateChanged) else None)
+
+        context.dispatcher.dispatch_command(KeyboardSyncLatchedKey("default", spec, True))
+
+        self.assertEqual(events, [])
+        self.assertTrue(context.state.get("keyboard.latches:default", "caps"))
+
+    def test_held_latch_stays_backend_pressed_after_release(self) -> None:
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        spec = KeySpec(
+            label="Shift",
+            row=0,
+            column=0,
+            key_id="shift",
+            io_key="leftshift",
+            latchable=True,
+            holds_when_latched=True,
+        )
+        events: list[BackendKeyStateChanged] = []
+        context.dispatcher.add_event_handler(lambda event: events.append(event) if isinstance(event, BackendKeyStateChanged) else None)
+
+        context.dispatcher.dispatch_command(KeyboardKeyDown("default", spec))
+        context.dispatcher.dispatch_command(KeyboardSyncLatchedKey("default", spec, True))
+        context.dispatcher.dispatch_command(KeyboardKeyUp("default", spec))
+
+        self.assertEqual(events[-1], BackendKeyStateChanged(layout="default", key_id="shift", pressed=True, latched=True))
+        backend.key_up.assert_not_called()
 
     def test_service_reset_state_clears_latches_for_registered_layout(self) -> None:
         backend = FakeKeyboardBackend()

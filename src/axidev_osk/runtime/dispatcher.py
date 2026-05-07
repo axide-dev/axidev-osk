@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[RuntimeEvent], object | None]
 CommandHandler = Callable[[RuntimeCommand], object | None]
+Unsubscribe = Callable[[], None]
 
 
 class Dispatcher:
@@ -78,20 +79,26 @@ class Dispatcher:
             }
         )
 
-    def add_event_handler(self, handler: EventHandler) -> None:
+    def add_event_handler(self, handler: EventHandler) -> Unsubscribe:
         """Register an event observer.
 
         Args:
             handler: Callable invoked for every dispatched event.
 
         Returns:
-            None.
+            Callable that removes the handler when invoked.
 
         Side effects:
             Mutates dispatcher handler list.
         """
 
         self._event_handlers.append(handler)
+
+        def unsubscribe() -> None:
+            if handler in self._event_handlers:
+                self._event_handlers.remove(handler)
+
+        return unsubscribe
 
     def add_command_handler(self, command_type: type[object], handler: CommandHandler) -> None:
         """Register or replace a command handler.
