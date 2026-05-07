@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from typing import Mapping
-
 from ..models import KeySpec
 
 
@@ -16,12 +14,10 @@ class KeyboardKeyDown:
     Attributes:
         layout: Keyboard layout instance name.
         key_spec: Key semantics to emit.
-        latched_keys: Snapshot of active latch groups.
     """
 
     layout: str
     key_spec: KeySpec
-    latched_keys: Mapping[str, bool]
 
 
 @dataclass(frozen=True, slots=True)

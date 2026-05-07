@@ -59,6 +59,13 @@ class BackendKeyStateChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyLatchChanged:
+    layout: str
+    key_id: str
+    latched: bool
+
+
+@dataclass(frozen=True, slots=True)
 class WindowCloseRequested:
     """A managed window requested application shutdown confirmation.
 
@@ -87,6 +94,7 @@ RuntimeEvent = (
     | ComponentReleased
     | ComponentStateChanged
     | BackendKeyStateChanged
+    | KeyLatchChanged
     | WindowCloseRequested
     | PromptResolved
 )
