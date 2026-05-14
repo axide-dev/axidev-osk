@@ -19,11 +19,57 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
+from .commands import AppQuit, WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import register_event_handlers
+from .events import HotCornerTriggered, WindowCloseRequested
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
+from .window_manager import WindowManager
+
+
+class _TestApplication:
+    """Minimal QApplication-shaped adapter for default command handlers."""
+
+    def __init__(self) -> None:
+        """Create an adapter that records requested exit codes."""
+
+        self.exit_code: int | None = None
+
+    def exit(self, exit_code: int) -> None:
+        """Record the requested application exit code."""
+
+        self.exit_code = exit_code
+
+
+class _TestRuntime:
+    """Runtime-shaped adapter used to install default handlers in tests."""
+
+    def __init__(self, context: Context) -> None:
+        """Bind context, window manager, and app adapter for handlers."""
+
+        self._config = context.config
+        self._dispatcher = context.dispatcher
+        self._window_manager = WindowManager(context)
+        self._app = _TestApplication()
+
+    def _handle_window_close_requested(self, event: object) -> None:
+        """Map close requests to a direct test quit command."""
+
+        if isinstance(event, WindowCloseRequested):
+            self._dispatcher.dispatch_command(AppQuit())
+
+    def _handle_hot_corner_triggered(self, event: object) -> None:
+        """Mirror production hot-corner visibility command routing."""
+
+        if not isinstance(event, HotCornerTriggered):
+            return
+        for window_id in self._config.hot_corner.bindings.get(event.corner, []):
+            if self._window_manager.is_visible(window_id):
+                self._dispatcher.dispatch_command(WindowHide(window_id))
+            else:
+                self._dispatcher.dispatch_command(WindowShow(window_id))
 
 
 def make_test_context(
@@ -58,7 +104,7 @@ def make_test_context(
         services: Optional explicit service names to register and start.
             When omitted, only the supplied keyboard backend is bound.
         event_handlers: Whether to install bundled application-level event
-            handler factories that do not require a window manager.
+            handler factories against a lightweight runtime adapter.
 
     Returns:
         A bound ``Context`` ready to pass into widgets and builders.
@@ -95,4 +141,5 @@ def make_test_context(
     if event_handlers:
         handler_registry = EventHandlerRegistry()
         register_event_handlers(handler_registry)
+        handler_registry.install(dispatcher, _TestRuntime(context))
     return context
