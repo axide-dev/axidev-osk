@@ -239,7 +239,7 @@ class HotCornerConfig:
         bindings: Mapping of corner ID to managed window IDs toggled by the runtime.
     """
 
-    dwell_ms: int = 450
+    dwell_ms: int = 200
     poll_interval_ms: int = 25
     corner_size_px: int = 20
     indicator_size_px: int = 52
