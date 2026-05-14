@@ -153,6 +153,19 @@ class HotCornerEventTests(unittest.TestCase):
 
         self.assertEqual(commands, [WindowHide("window:keyboard")])
 
+    def test_make_test_context_installs_default_event_handlers(self) -> None:
+        config = replace(
+            make_test_context(FakeKeyboardBackend()).config,
+            hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
+        )
+        context = make_test_context(FakeKeyboardBackend(), config=config, event_handlers=True)
+        commands: list[object] = []
+        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
+
+        context.dispatcher.dispatch_event(HotCornerTriggered(corner="bottom_left"))
+
+        self.assertEqual(commands, [WindowShow("window:keyboard")])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,17 @@ class KeyboardService:
         self._context = context
         self._ensure_backend_listener()
 
+    def start(self, context: "Context") -> None:
+        """Bind context and initialize keyboard output for runtime startup."""
+
+        self.bind_context(context)
+        self.initialize()
+
+    def stop(self) -> None:
+        """Stop keyboard output through the generic service lifecycle."""
+
+        self.shutdown()
+
     @property
     def ready(self) -> bool:
         """Return whether keyboard output is available."""
