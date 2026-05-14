@@ -1,1 +1,1 @@
-"""AxiDev OSK package."""
+"""Axidev OSK package."""
