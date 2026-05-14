@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 QuitCallback = Callable[[], None]
@@ -28,6 +28,10 @@ _logger = logging.getLogger(__name__)
 class ApplicationQuitController(QObject):
     """Coordinates app-wide quit requests before process shutdown.
 
+    The controller intentionally requires an injected prompt instead of
+    owning fallback UI. This keeps prompt composition in the runtime config
+    path and prevents shutdown policy from depending on a hardcoded widget.
+
     Side effects:
         Installs OS signal handlers, owns a heartbeat ``QTimer`` so
         Python signal handlers run promptly under Qt's event loop, and
@@ -38,7 +42,7 @@ class ApplicationQuitController(QObject):
         self,
         app: QApplication,
         *,
-        prompt: QuitPrompt | None = None,
+        prompt: QuitPrompt,
         parent: QObject | None = None,
     ) -> None:
         """Construct an unstarted quit controller.
@@ -46,9 +50,10 @@ class ApplicationQuitController(QObject):
         Args:
             app: Application instance whose ``exit`` is called at end of
                 shutdown.
-            prompt: Optional confirmation prompt. Receives the active
-                window and returns ``True`` to proceed with shutdown.
-                Defaults to a Yes/No ``QMessageBox``.
+            prompt: Confirmation prompt. Receives the active window and
+                returns ``True`` to proceed with shutdown. The prompt is
+                required so application UI remains supplied by runtime config
+                rather than a controller-owned fallback dialog.
             parent: Standard ``QObject`` parent.
 
         Returns:
@@ -60,7 +65,7 @@ class ApplicationQuitController(QObject):
 
         super().__init__(parent)
         self._app = app
-        self._prompt = prompt or self._show_quit_prompt
+        self._prompt = prompt
         self._callbacks: list[QuitCallback] = []
         self._windows: list[QWidget] = []
         self._quitting = False
@@ -201,13 +206,3 @@ class ApplicationQuitController(QObject):
             return
         if data == b"":
             self.request_quit()
-
-    def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        result = QMessageBox.question(
-            parent,
-            "Close axidev-osk?",
-            "Do you want to close axidev-osk? This will stop OSK input.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return result == QMessageBox.StandardButton.Yes

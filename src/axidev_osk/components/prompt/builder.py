@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from ...config.models import ButtonConfig, ComponentConfig, PromptConfig
 from ...runtime.context import Context
 from ...runtime.events import PromptResolved
+from ...runtime.identity import stable_id
 from ...runtime.registries import ComponentRegistry
 
 _ACCEPT_BUTTON_QSS = """
@@ -162,7 +163,7 @@ def prompt_button_config(parent_id: str, *, role: str, label: str) -> ButtonConf
     glyph = "✔" if role == "accepted" else "✖"
     style_sheet = _ACCEPT_BUTTON_QSS if role == "accepted" else _REJECT_BUTTON_QSS
     return ButtonConfig(
-        id=f"{parent_id}:button:{role}",
+        id=stable_id(parent_id, "button", role, stable_override=f"{parent_id}:button:{role}"),
         label=f"{glyph}  {label}",
         role=role,
         object_name=object_name,
@@ -187,7 +188,6 @@ def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, but
         Dispatches ``PromptResolved`` and hides the hosting window.
     """
 
-    result = "accepted" if button.role == "accepted" else "rejected"
-    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=result))
+    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=button.role))
     window = window_child.window()
     window.hide()

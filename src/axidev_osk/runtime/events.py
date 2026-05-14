@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from typing import Literal
-
 from ..models import KeySpec
 
 
@@ -76,15 +74,15 @@ class WindowCloseRequested:
 
 @dataclass(frozen=True, slots=True)
 class PromptResolved:
-    """A prompt window resolved to an accepted or rejected outcome.
+    """A prompt window resolved to the selected button role.
 
     Attributes:
         prompt_id: Deterministic prompt ID.
-        result: Prompt result value.
+        result: Selected prompt button role.
     """
 
     prompt_id: str
-    result: Literal["accepted", "rejected"]
+    result: str
 
 
 RuntimeEvent = (
