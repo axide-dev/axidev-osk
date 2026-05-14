@@ -17,10 +17,12 @@ from typing import Any, cast
 
 from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
+from ..services import register_services
 from ..services.keyboard import KeyboardService
 from .context import Context
 from .dispatcher import Dispatcher
-from .registries import ComponentRegistry, SurfaceRegistry
+from .event_handlers import register_event_handlers
+from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 
 
@@ -30,6 +32,8 @@ def make_test_context(
     config: AppConfig | None = None,
     components: ComponentRegistry | None = None,
     surfaces: SurfaceRegistry | None = None,
+    services: set[str] | None = None,
+    event_handlers: bool = False,
 ) -> Context:
     """Build a runtime ``Context`` wrapping a test keyboard backend.
 
@@ -51,6 +55,10 @@ def make_test_context(
             component builders are registered into it.
         surfaces: Optional pre-populated surface registry. Defaults to
             an empty registry.
+        services: Optional explicit service names to register and start.
+            When omitted, only the supplied keyboard backend is bound.
+        event_handlers: Whether to install bundled application-level event
+            handler factories that do not require a window manager.
 
     Returns:
         A bound ``Context`` ready to pass into widgets and builders.
@@ -77,5 +85,14 @@ def make_test_context(
         surfaces=surfaces or SurfaceRegistry(),
     )
     dispatcher.bind_context(context)
-    keyboard.bind_context(context)
+    if services is None:
+        keyboard.bind_context(context)
+    else:
+        service_registry = ServiceRegistry()
+        register_services(service_registry, include=services, keyboard=keyboard)
+        for service in service_registry.services():
+            service.start(context)
+    if event_handlers:
+        handler_registry = EventHandlerRegistry()
+        register_event_handlers(handler_registry)
     return context

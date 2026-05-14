@@ -1,9 +1,17 @@
-"""Runtime registries for component and surface builders."""
+"""Runtime registries for components, surfaces, services, and handlers.
+
+``EventHandlerRegistry`` follows the same self-registration pattern as the
+component and surface registries instead of extending ``Dispatcher`` directly.
+Application/window orchestration handlers need runtime-owned collaborators such
+as ``WindowManager`` and ``QApplication``; keeping those factories in a registry
+preserves ``Dispatcher`` as a generic command/event router rather than making it
+aware of application policy.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from PySide6.QtWidgets import QWidget
 
@@ -11,10 +19,26 @@ from ..config.models import ComponentConfig, SurfaceConfig
 
 if TYPE_CHECKING:
     from .context import Context
+    from .dispatcher import CommandHandler, Dispatcher, EventHandler
 
 
 ComponentBuilder = Callable[..., QWidget]
 SurfaceBuilder = Callable[[SurfaceConfig, "Context"], QWidget]
+RuntimeT = TypeVar("RuntimeT")
+
+
+class RuntimeService(Protocol):
+    """Runtime-managed service lifecycle contract."""
+
+    def start(self, context: "Context") -> None:
+        """Start the service using the bound runtime context."""
+
+    def stop(self) -> None:
+        """Stop the service and release owned resources."""
+
+
+CommandHandlerFactory = Callable[[RuntimeT], "CommandHandler"]
+EventHandlerFactory = Callable[[RuntimeT], "EventHandler"]
 
 
 class ComponentRegistry:
@@ -143,3 +167,64 @@ class SurfaceRegistry:
         if builder is None:
             raise ValueError(f"No surface registered for kind {config.kind!r}")
         return builder(config, context)
+
+
+class ServiceRegistry:
+    """Maintains named runtime services in deterministic startup order."""
+
+    def __init__(self) -> None:
+        """Create an empty service registry."""
+
+        self._services: dict[str, RuntimeService] = {}
+
+    def register(self, name: str, service: RuntimeService) -> None:
+        """Register a runtime service under a stable name."""
+
+        self._services[name] = service
+
+    def get(self, name: str, service_type: type[RuntimeT]) -> RuntimeT:
+        """Return a named service, validating its concrete type."""
+
+        service = self._services.get(name)
+        if service is None:
+            raise ValueError(f"No service registered for name {name!r}")
+        if not isinstance(service, service_type):
+            raise TypeError(f"Service {name!r} is not a {service_type.__name__}")
+        return cast(RuntimeT, service)
+
+    def services(self) -> Iterable[RuntimeService]:
+        """Yield services in registration order."""
+
+        return tuple(self._services.values())
+
+
+class EventHandlerRegistry:
+    """Stores default command and event handler factories for installation."""
+
+    def __init__(self) -> None:
+        """Create an empty handler registry."""
+
+        self._command_handlers: list[tuple[type[object], CommandHandlerFactory[object]]] = []
+        self._event_handlers: list[EventHandlerFactory[object]] = []
+
+    def register_command_handler(
+        self,
+        command_type: type[object],
+        factory: CommandHandlerFactory[RuntimeT],
+    ) -> None:
+        """Register a command handler factory."""
+
+        self._command_handlers.append((command_type, cast(CommandHandlerFactory[object], factory)))
+
+    def register_event_handler(self, factory: EventHandlerFactory[RuntimeT]) -> None:
+        """Register an event handler factory."""
+
+        self._event_handlers.append(cast(EventHandlerFactory[object], factory))
+
+    def install(self, dispatcher: "Dispatcher", runtime: object) -> None:
+        """Install all registered handlers onto a dispatcher."""
+
+        for command_type, factory in self._command_handlers:
+            dispatcher.add_command_handler(command_type, factory(runtime))
+        for factory in self._event_handlers:
+            dispatcher.add_event_handler(factory(runtime))

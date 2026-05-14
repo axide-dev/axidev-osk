@@ -69,7 +69,7 @@ class FakeKeyboardBackend:
 class KeyboardServiceTests(unittest.TestCase):
     def test_service_emits_backend_key_state_changed_on_backend_update(self) -> None:
         backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
+        context = make_test_context(backend, services={"keyboard"})
         spec = KeySpec(label="A", row=0, column=0, io_key="A")
         events: list[BackendKeyStateChanged] = []
         context.dispatcher.add_event_handler(lambda event: events.append(event) if isinstance(event, BackendKeyStateChanged) else None)
