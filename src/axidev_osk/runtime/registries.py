@@ -16,10 +16,12 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import ComponentConfig, SurfaceConfig
+from .commands import RuntimeCommand
+from .events import RuntimeEvent
 
 if TYPE_CHECKING:
     from .context import Context
-    from .dispatcher import CommandHandler, Dispatcher, EventHandler
+    from .dispatcher import Dispatcher
 
 
 ComponentBuilder = Callable[..., QWidget]
@@ -37,8 +39,8 @@ class RuntimeService(Protocol):
         """Stop the service and release owned resources."""
 
 
-CommandHandlerFactory = Callable[[RuntimeT], "CommandHandler"]
-EventHandlerFactory = Callable[[RuntimeT], "EventHandler"]
+CommandHandlerFactory = Callable[[RuntimeT], Callable[[RuntimeCommand], object | None]]
+EventHandlerFactory = Callable[[RuntimeT], Callable[[RuntimeEvent], object | None]]
 
 
 class ComponentRegistry:
