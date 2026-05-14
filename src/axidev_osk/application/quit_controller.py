@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 QuitCallback = Callable[[], None]
@@ -38,7 +38,7 @@ class ApplicationQuitController(QObject):
         self,
         app: QApplication,
         *,
-        prompt: QuitPrompt | None = None,
+        prompt: QuitPrompt,
         parent: QObject | None = None,
     ) -> None:
         """Construct an unstarted quit controller.
@@ -46,9 +46,8 @@ class ApplicationQuitController(QObject):
         Args:
             app: Application instance whose ``exit`` is called at end of
                 shutdown.
-            prompt: Optional confirmation prompt. Receives the active
-                window and returns ``True`` to proceed with shutdown.
-                Defaults to a Yes/No ``QMessageBox``.
+            prompt: Confirmation prompt. Receives the active window and
+                returns ``True`` to proceed with shutdown.
             parent: Standard ``QObject`` parent.
 
         Returns:
@@ -60,7 +59,7 @@ class ApplicationQuitController(QObject):
 
         super().__init__(parent)
         self._app = app
-        self._prompt = prompt or self._show_quit_prompt
+        self._prompt = prompt
         self._callbacks: list[QuitCallback] = []
         self._windows: list[QWidget] = []
         self._quitting = False
@@ -201,13 +200,3 @@ class ApplicationQuitController(QObject):
             return
         if data == b"":
             self.request_quit()
-
-    def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        result = QMessageBox.question(
-            parent,
-            "Close axidev-osk?",
-            "Do you want to close axidev-osk? This will stop OSK input.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return result == QMessageBox.StandardButton.Yes
