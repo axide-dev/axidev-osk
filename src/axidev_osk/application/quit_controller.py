@@ -28,6 +28,10 @@ _logger = logging.getLogger(__name__)
 class ApplicationQuitController(QObject):
     """Coordinates app-wide quit requests before process shutdown.
 
+    The controller intentionally requires an injected prompt instead of
+    owning fallback UI. This keeps prompt composition in the runtime config
+    path and prevents shutdown policy from depending on a hardcoded widget.
+
     Side effects:
         Installs OS signal handlers, owns a heartbeat ``QTimer`` so
         Python signal handlers run promptly under Qt's event loop, and
@@ -47,7 +51,9 @@ class ApplicationQuitController(QObject):
             app: Application instance whose ``exit`` is called at end of
                 shutdown.
             prompt: Confirmation prompt. Receives the active window and
-                returns ``True`` to proceed with shutdown.
+                returns ``True`` to proceed with shutdown. The prompt is
+                required so application UI remains supplied by runtime config
+                rather than a controller-owned fallback dialog.
             parent: Standard ``QObject`` parent.
 
         Returns:

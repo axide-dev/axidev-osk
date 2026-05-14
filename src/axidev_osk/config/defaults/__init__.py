@@ -141,14 +141,46 @@ def _build_default_linux_permission_prompt(app_id: str) -> PromptConfig:
         title="Linux Input Permission",
         message="Keyboard output is blocked by Linux permissions.",
         buttons=(
-            ButtonConfig(id=f"{prompt_id}:button:open_terminal", role="open_terminal", label="Open In Terminal"),
-            ButtonConfig(id=f"{prompt_id}:button:setup_here", role="setup_here", label="Run Setup Here"),
             ButtonConfig(
-                id=f"{prompt_id}:button:already_configured",
+                id=stable_id(
+                    prompt_id,
+                    "button",
+                    "open_terminal",
+                    stable_override="prompt:linux-permission:button:open_terminal",
+                ),
+                role="open_terminal",
+                label="Open In Terminal",
+            ),
+            ButtonConfig(
+                id=stable_id(
+                    prompt_id,
+                    "button",
+                    "setup_here",
+                    stable_override="prompt:linux-permission:button:setup_here",
+                ),
+                role="setup_here",
+                label="Run Setup Here",
+            ),
+            ButtonConfig(
+                id=stable_id(
+                    prompt_id,
+                    "button",
+                    "already_configured",
+                    stable_override="prompt:linux-permission:button:already_configured",
+                ),
                 role="already_configured",
                 label="Already Configured",
             ),
-            ButtonConfig(id=f"{prompt_id}:button:rejected", role="rejected", label="Cancel"),
+            ButtonConfig(
+                id=stable_id(
+                    prompt_id,
+                    "button",
+                    "rejected",
+                    stable_override="prompt:linux-permission:button:rejected",
+                ),
+                role="rejected",
+                label="Cancel",
+            ),
         ),
         prompt_glyph="?",
         hint=(
