@@ -187,7 +187,6 @@ def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, but
         Dispatches ``PromptResolved`` and hides the hosting window.
     """
 
-    result = "accepted" if button.role == "accepted" else "rejected"
-    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=result))
+    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=button.role))
     window = window_child.window()
     window.hide()

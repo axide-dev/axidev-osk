@@ -14,13 +14,11 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..hot_corner import HotCornerConfig, HotCornerWindowToggleController
 from ..styles.theme import apply_theme
-from ..components.prompt import prompt_button_config
 from ..windows.surface import register_surfaces
 from .commands import AppQuit, WindowClose, WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
 from .events import PromptResolved, WindowCloseRequested
-from .identity import stable_id
 from .registries import ComponentRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
@@ -129,86 +127,84 @@ class ApplicationRuntime:
             self._quit_controller.request_quit()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
+        prompt_config = self._config.quit_prompt
         prompt_window = self._window_manager.create_transient(
-            self._build_quit_prompt_window_config(),
+            self._build_prompt_window_config(prompt_config),
             parent=parent,
         )
         event_loop = QEventLoop(prompt_window)
         result = {"accepted": False}
+        unsubscribe = None
 
         def handle_prompt(event: object) -> None:
             if not isinstance(event, PromptResolved):
+                return
+            if event.prompt_id != prompt_config.id:
                 return
             result["accepted"] = event.result == "accepted"
             if event_loop.isRunning():
                 event_loop.quit()
 
-        self._dispatcher.add_event_handler(handle_prompt)
+        unsubscribe = self._dispatcher.add_event_handler(handle_prompt)
         prompt_window.show()
         event_loop.exec()
+        if unsubscribe is not None:
+            unsubscribe()
         prompt_window.close()
         return result["accepted"]
 
-    def _build_quit_prompt_window_config(self) -> WindowConfig:
-        app_id = "app:axidev-osk"
-        window_id = stable_id(app_id, "window", "quit-prompt", stable_override="window:quit-prompt")
-        surface_id = stable_id(window_id, "surface", "prompt", stable_override="surface:quit-prompt")
-        prompt_id = stable_id(surface_id, "prompt", "quit", stable_override="prompt:quit")
-        prompt = PromptConfig(
-            id=prompt_id,
-            message="Do you want to close axidev-osk? This will stop OSK input.",
-            buttons=(
-                prompt_button_config(prompt_id, role="accepted", label="Yes"),
-                prompt_button_config(prompt_id, role="rejected", label="No"),
-            ),
-            prompt_glyph="!",
-            danger=True,
-            hint=(
-                "Tip: if you only want to hide OSK, move your cursor into "
-                "the screen corner; the hot-corner sensor will hide it without "
-                "shutting the app down."
-            ),
+    def _build_prompt_window_config(self, prompt: PromptConfig) -> WindowConfig:
+        keyboard_window = next(
+            window for window in self._config.windows if window.id == self._config.keyboard_window_id
         )
-        keyboard_window = next(window for window in self._config.windows if window.id == self._config.keyboard_window_id)
         return WindowConfig(
-            id=window_id,
-            title="Close axidev-osk?",
+            id=prompt.window_id,
+            title=prompt.title,
             surface=SurfaceConfig(
-                id=surface_id,
+                id=prompt.surface_id,
                 components=(prompt,),
-                margins=(18, 18, 18, 16),
-                spacing=14,
-                minimum_size=(460, 120),
+                margins=prompt.margins,
+                spacing=prompt.spacing,
+                minimum_size=prompt.minimum_size,
             ),
             overlay=replace(keyboard_window.overlay, config=keyboard_window.overlay.config),
             chrome=ChromeConfig(enabled=False),
         )
 
     def _show_linux_permission_prompt(self) -> None:
-        prompt = QMessageBox(self._window_manager.get_or_create(self._config.keyboard_window_id))
-        prompt.setWindowTitle("Linux Input Permission")
-        prompt.setIcon(QMessageBox.Icon.Question)
-        prompt.setText("Keyboard output is blocked by Linux permissions.")
-        prompt.setInformativeText(
-            "Choose Open In Terminal to run the bundled helper in a real terminal window so sudo can prompt there. "
-            "Run Setup Here still tries the helper directly from the app, but some desktops do not surface that prompt correctly. "
-            "If you already ran setup, this session may just need a log out and back in."
+        prompt_config = self._config.linux_permission_prompt
+        parent = self._window_manager.get_or_create(self._config.keyboard_window_id)
+        prompt_window = self._window_manager.create_transient(
+            self._build_prompt_window_config(prompt_config),
+            parent=parent,
         )
-        terminal_button = prompt.addButton("Open In Terminal", QMessageBox.ButtonRole.AcceptRole)
-        setup_button = prompt.addButton("Run Setup Here", QMessageBox.ButtonRole.ActionRole)
-        already_configured_button = prompt.addButton("Already Configured", QMessageBox.ButtonRole.ActionRole)
-        cancel_button = prompt.addButton(QMessageBox.StandardButton.Cancel)
-        prompt.setDefaultButton(terminal_button)
-        prompt.exec()
+        event_loop = QEventLoop(prompt_window)
+        result = {"role": "rejected"}
+        unsubscribe = None
 
-        clicked_button = prompt.clickedButton()
-        if clicked_button is terminal_button:
+        def handle_prompt(event: object) -> None:
+            if not isinstance(event, PromptResolved):
+                return
+            if event.prompt_id != prompt_config.id:
+                return
+            result["role"] = event.result
+            if event_loop.isRunning():
+                event_loop.quit()
+
+        unsubscribe = self._dispatcher.add_event_handler(handle_prompt)
+        prompt_window.show()
+        event_loop.exec()
+        if unsubscribe is not None:
+            unsubscribe()
+        prompt_window.close()
+
+        if result["role"] == "open_terminal":
             self._open_linux_permission_terminal()
-        elif clicked_button is setup_button:
+        elif result["role"] == "setup_here":
             self._run_linux_permission_setup()
-        elif clicked_button is already_configured_button:
+        elif result["role"] == "already_configured":
             QMessageBox.information(
-                prompt.parentWidget(),
+                parent,
                 "Log Out Required",
                 (
                     "The Linux permission setup may already be applied, but this desktop session "
@@ -216,8 +212,6 @@ class ApplicationRuntime:
                     "Log out and back in, then relaunch axidev-osk and test keyboard output again."
                 ),
             )
-        elif clicked_button is cancel_button:
-            return
 
     def _open_linux_permission_terminal(self) -> None:
         # Lazy import: this Linux-only helper drags in subprocess/terminal

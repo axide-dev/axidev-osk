@@ -143,19 +143,31 @@ class PromptConfig:
 
     Attributes:
         id: Deterministic prompt component ID.
+        window_id: Deterministic transient window ID used when hosting this prompt.
+        surface_id: Deterministic transient surface ID used when hosting this prompt.
+        title: User-visible transient window title.
         message: Primary prompt text.
         buttons: Prompt action buttons.
         prompt_glyph: Badge glyph displayed beside the message.
         hint: Optional secondary explanatory copy.
         danger: Whether the prompt should use danger styling.
+        margins: Qt layout margins in pixels ordered left, top, right, bottom.
+        spacing: Qt layout spacing in pixels.
+        minimum_size: Optional lower bound for startup size as ``(width, height)``.
     """
 
     id: str
+    window_id: str
+    surface_id: str
+    title: str
     message: str
     buttons: tuple[ButtonConfig, ...]
     prompt_glyph: str = "!"
     hint: str | None = None
     danger: bool = False
+    margins: tuple[int, int, int, int] = (18, 18, 18, 16)
+    spacing: int = 14
+    minimum_size: tuple[int, int] = (460, 120)
     kind: Literal["prompt"] = "prompt"
 
 
@@ -262,8 +274,12 @@ class AppConfig:
         windows: Windows available to the runtime, keyed by deterministic IDs.
         startup_window_ids: IDs of windows shown during startup.
         keyboard_window_id: ID of the default keyboard surface.
+        quit_prompt: Declarative quit confirmation prompt.
+        linux_permission_prompt: Declarative Linux permission setup prompt.
     """
 
     windows: tuple[WindowConfig, ...]
     startup_window_ids: tuple[str, ...]
     keyboard_window_id: str
+    quit_prompt: PromptConfig
+    linux_permission_prompt: PromptConfig
