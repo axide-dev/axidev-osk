@@ -1,7 +1,6 @@
 """Temporary hot-corner subsystem isolated from window and keyboard logic."""
 
 from .controller import (
-    HiddenWindowState,
     HotCornerConfig,
     HotCornerIndicator,
     HotCornerOverlayController,
@@ -13,7 +12,6 @@ from .controller import (
 )
 
 __all__ = [
-    "HiddenWindowState",
     "HotCornerConfig",
     "HotCornerIndicator",
     "HotCornerOverlayController",

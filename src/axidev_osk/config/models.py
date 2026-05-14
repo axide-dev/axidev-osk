@@ -227,6 +227,27 @@ ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig | PromptConfig | Keybo
 
 
 @dataclass(frozen=True, slots=True)
+class HotCornerConfig:
+    """Hot-corner trigger behavior and runtime window bindings.
+
+    Attributes:
+        dwell_ms: Cursor dwell time required before a corner triggers.
+        poll_interval_ms: Cursor/sensor polling interval in milliseconds.
+        corner_size_px: Edge length of each hot-corner sensor region.
+        indicator_size_px: Edge length of the visual dwell indicator.
+        indicator_margin_px: Pixel margin between the indicator and screen edges.
+        bindings: Mapping of corner ID to managed window IDs toggled by the runtime.
+    """
+
+    dwell_ms: int = 450
+    poll_interval_ms: int = 25
+    corner_size_px: int = 20
+    indicator_size_px: int = 52
+    indicator_margin_px: int = 14
+    bindings: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class SurfaceConfig:
     """Generic root content surface hosted by a window.
 
@@ -276,6 +297,7 @@ class AppConfig:
         keyboard_window_id: ID of the default keyboard surface.
         quit_prompt: Declarative quit confirmation prompt.
         linux_permission_prompt: Declarative Linux permission setup prompt.
+        hot_corner: Hot-corner trigger behavior and window bindings.
     """
 
     windows: tuple[WindowConfig, ...]
@@ -283,3 +305,4 @@ class AppConfig:
     keyboard_window_id: str
     quit_prompt: PromptConfig
     linux_permission_prompt: PromptConfig
+    hot_corner: HotCornerConfig = field(default_factory=HotCornerConfig)

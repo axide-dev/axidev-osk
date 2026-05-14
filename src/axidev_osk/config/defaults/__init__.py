@@ -9,6 +9,7 @@ from ..models import (
     AppConfig,
     ButtonConfig,
     ChromeConfig,
+    HotCornerConfig,
     KeyboardGridConfig,
     KeyboardStatusConfig,
     OverlayConfig,
@@ -69,6 +70,14 @@ def build_default_app_config() -> AppConfig:
         keyboard_window_id=keyboard_window.id,
         quit_prompt=_build_default_quit_prompt(app_id),
         linux_permission_prompt=_build_default_linux_permission_prompt(app_id),
+        hot_corner=HotCornerConfig(
+            bindings={
+                "top_left": [keyboard_window.id],
+                "top_right": [keyboard_window.id],
+                "bottom_left": [keyboard_window.id],
+                "bottom_right": [keyboard_window.id],
+            }
+        ),
     )
 
 

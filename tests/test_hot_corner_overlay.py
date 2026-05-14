@@ -11,11 +11,11 @@ from PySide6.QtWidgets import QApplication
 
 from axidev_osk.hot_corner.controller import (
     _configure_hot_corner_window,
-    HiddenWindowState,
     HotCornerConfig,
     HotCornerWindowToggleController,
     ScreenCorner,
 )
+from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.windows.overlay import layer_shell
 from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
 from axidev_osk.windows.overlay.always_on_top import (
@@ -569,13 +569,16 @@ class HotCornerControllerTests(unittest.TestCase):
         cls.app.quit()
         cls.app.processEvents()
 
+    def setUp(self) -> None:
+        self.dispatcher = Dispatcher()
+
     def test_show_indicator_uses_overlay_controller_for_manual_position(self) -> None:
         overlay = FakeOverlayController()
         with patch(
             "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
             screen = FakeScreen(QRect(100, 200, 800, 600))
@@ -601,98 +604,6 @@ class HotCornerControllerTests(unittest.TestCase):
             controller.stop()
             controller._indicator.close()
 
-    def test_visible_top_level_windows_excludes_indicator(self) -> None:
-        overlay = FakeOverlayController()
-        with patch(
-            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
-            return_value=overlay,
-        ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
-
-        class FakeTopLevelWindow:
-            def __init__(self, *, is_indicator: bool = False) -> None:
-                self._is_indicator = is_indicator
-
-            def isWindow(self) -> bool:
-                return True
-
-            def isVisible(self) -> bool:
-                return True
-
-            def windowType(self) -> Qt.WindowType:
-                return Qt.WindowType.Tool if self._is_indicator else Qt.WindowType.Window
-
-        window = FakeTopLevelWindow()
-        indicator = controller._indicator
-        controller._indicator.hide()
-
-        try:
-            with patch.object(
-                controller._app,
-                "topLevelWidgets",
-                return_value=[window, indicator],
-            ):
-                visible_windows = controller._visible_top_level_windows()
-            self.assertIn(window, visible_windows)
-            self.assertNotIn(indicator, visible_windows)
-        finally:
-            controller.stop()
-            controller._indicator.close()
-            self.app.processEvents()
-
-    def test_restore_windows_reveals_existing_windows_after_one_tick(self) -> None:
-        overlay = FakeOverlayController()
-        with patch(
-            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
-            return_value=overlay,
-        ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
-
-        window = FakeWindow()
-        window.hide()
-        controller._hidden_windows = [HiddenWindowState(window=window, opacity=0.65)]
-
-        try:
-            controller._restore_windows()
-
-            self.assertTrue(window.isVisible())
-            self.assertEqual(window.windowOpacity(), 0.0)
-            self.assertEqual(controller._hidden_windows, [])
-            self.assertEqual(len(controller._pending_restore_windows), 1)
-
-            controller._finalize_restored_windows()
-
-            self.assertEqual(window.windowOpacity(), 0.65)
-            self.assertEqual(controller._pending_restore_windows, [])
-        finally:
-            controller.stop()
-            controller._indicator.close()
-            self.app.processEvents()
-
-    def test_toggle_rehides_pending_restore_windows(self) -> None:
-        overlay = FakeOverlayController()
-        with patch(
-            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
-            return_value=overlay,
-        ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
-
-        window = FakeWindow()
-        window.hide()
-        state = HiddenWindowState(window=window, opacity=1.0)
-        controller._pending_restore_windows = [state]
-
-        try:
-            controller._toggle_app_windows()
-
-            self.assertFalse(window.isVisible())
-            self.assertEqual(controller._pending_restore_windows, [])
-            self.assertEqual(controller._hidden_windows, [state])
-        finally:
-            controller.stop()
-            controller._indicator.close()
-            self.app.processEvents()
-
     def test_sensor_position_uses_corner_size(self) -> None:
         overlay = FakeOverlayController()
         with patch(
@@ -700,7 +611,7 @@ class HotCornerControllerTests(unittest.TestCase):
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(
-                self.app,
+                self.dispatcher,
                 config=HotCornerConfig(corner_size_px=24),
             )
 
@@ -725,7 +636,7 @@ class HotCornerControllerTests(unittest.TestCase):
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(
-                self.app,
+                self.dispatcher,
                 config=HotCornerConfig(corner_size_px=24),
             )
 
@@ -742,7 +653,7 @@ class HotCornerControllerTests(unittest.TestCase):
             "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
             self.assertEqual(len(controller._sensor_handles), len(self.app.screens()) * len(ScreenCorner))
@@ -757,7 +668,7 @@ class HotCornerControllerTests(unittest.TestCase):
             "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
             self.assertEqual(overlay.anchored_moves, [])
@@ -775,7 +686,7 @@ class HotCornerControllerTests(unittest.TestCase):
             "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
             self.assertEqual(len(controller._sensor_handles), len(self.app.screens()) * len(ScreenCorner))
@@ -789,7 +700,7 @@ class HotCornerControllerTests(unittest.TestCase):
             "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
             return_value=overlay,
         ):
-            controller = HotCornerWindowToggleController(self.app, config=HotCornerConfig())
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
             with patch.object(controller, "_poll_active_sensor") as poll_active_sensor, patch.object(
