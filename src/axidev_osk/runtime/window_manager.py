@@ -93,6 +93,12 @@ class WindowManager:
         if window is not None:
             window.hide()
 
+    def is_visible(self, window_id: str) -> bool:
+        """Return whether a managed window currently exists and is visible."""
+
+        window = self._windows.get(window_id)
+        return window is not None and window.isVisible()
+
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""
 

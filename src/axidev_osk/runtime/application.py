@@ -12,13 +12,13 @@ from ..application.quit_controller import ApplicationQuitController
 from ..components import register_components
 from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
-from ..hot_corner import HotCornerConfig, HotCornerWindowToggleController
+from ..hot_corner import HotCornerWindowToggleController
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .commands import AppQuit, WindowClose, WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
-from .events import PromptResolved, WindowCloseRequested
+from .events import HotCornerTriggered, PromptResolved, WindowCloseRequested
 from .registries import ComponentRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
@@ -69,8 +69,8 @@ class ApplicationRuntime:
         self._dispatcher.add_command_handler(WindowClose, lambda command: self._window_manager.close(command.window_id))
         self._dispatcher.add_command_handler(AppQuit, lambda command: self._app.exit(command.exit_code))
         self._hot_corner = HotCornerWindowToggleController(
-            app,
-            config=HotCornerConfig(),
+            self._dispatcher,
+            config=self._config.hot_corner,
             parent=app,
         )
         self._quit_controller = ApplicationQuitController(
@@ -79,6 +79,7 @@ class ApplicationRuntime:
             parent=app,
         )
         self._dispatcher.add_event_handler(self._handle_window_close_requested)
+        self._dispatcher.add_event_handler(self._handle_hot_corner_triggered)
 
     def start(self) -> int:
         """Start services, windows, hot corner, and the Qt event loop.
@@ -125,6 +126,17 @@ class ApplicationRuntime:
 
         if isinstance(event, WindowCloseRequested):
             self._quit_controller.request_quit()
+
+    def _handle_hot_corner_triggered(self, event: object) -> None:
+        """Map hot-corner events to managed window visibility commands."""
+
+        if not isinstance(event, HotCornerTriggered):
+            return
+        for window_id in self._config.hot_corner.bindings.get(event.corner, []):
+            if self._window_manager.is_visible(window_id):
+                self._dispatcher.dispatch_command(WindowHide(window_id))
+            else:
+                self._dispatcher.dispatch_command(WindowShow(window_id))
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

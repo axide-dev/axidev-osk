@@ -62,6 +62,11 @@ class KeyLatchChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class HotCornerTriggered:
+    corner: str
+
+
+@dataclass(frozen=True, slots=True)
 class WindowCloseRequested:
     """A managed window requested application shutdown confirmation.
 
@@ -91,6 +96,7 @@ RuntimeEvent = (
     | ComponentStateChanged
     | BackendKeyStateChanged
     | KeyLatchChanged
+    | HotCornerTriggered
     | WindowCloseRequested
     | PromptResolved
 )
