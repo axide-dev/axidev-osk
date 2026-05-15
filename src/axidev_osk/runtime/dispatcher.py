@@ -6,13 +6,7 @@ from collections.abc import Callable
 
 from typing import TYPE_CHECKING
 
-from .commands import (
-    KeyboardKeyDown,
-    KeyboardKeyUp,
-    KeyboardSyncLatchedKey,
-    RuntimeCommand,
-    StateSet,
-)
+from .commands import RuntimeCommand
 from .events import RuntimeEvent
 
 if TYPE_CHECKING:
@@ -59,25 +53,10 @@ class Dispatcher:
             None.
 
         Side effects:
-            Installs default command handlers.
+            Stores the context for diagnostics and future queue ownership.
         """
 
         self._context = context
-        self._command_handlers.update(
-            {
-                KeyboardKeyDown: lambda command: context.keyboard.key_down(  # type: ignore[union-attr]
-                    command.layout,
-                    command.key_spec,
-                ),
-                KeyboardKeyUp: lambda command: context.keyboard.key_up(command.layout, command.key_spec),  # type: ignore[union-attr]
-                KeyboardSyncLatchedKey: lambda command: context.keyboard.sync_latched_key(  # type: ignore[union-attr]
-                    command.layout,
-                    command.key_spec,
-                    command.latched,
-                ),
-                StateSet: lambda command: context.state.set(command.namespace, command.key, command.value),
-            }
-        )
 
     def add_event_handler(self, handler: EventHandler) -> Unsubscribe:
         """Register an event observer.

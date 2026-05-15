@@ -17,7 +17,7 @@ embedded Python knowledge.
 from __future__ import annotations
 
 from ...models import KeyDisplay, KeySpec
-from ...runtime.identity import stable_id, validate_unique_ids
+from ...runtime.identity import key_component_id, stable_id, validate_unique_ids
 from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
 
@@ -321,14 +321,16 @@ def build_us_iso_layout_config(*, parent_id: str = "default") -> LayoutConfig:
     components: list[KeyConfig | SpacerConfig] = []
     for spec in build_us_iso_layout():
         kind = "spacer" if spec.is_spacer else "key"
-        component_id = stable_id(
+        component_id = key_component_id(
             grid_id,
             kind,
-            spec.row,
-            spec.column,
-            spec.width,
-            spec.height,
-            spec.key_id or spec.io_key or spec.label,
+            row=spec.row,
+            column=spec.column,
+            width=spec.width,
+            height=spec.height,
+            key_id=spec.key_id,
+            io_key=spec.io_key,
+            label=spec.label,
         )
         if spec.is_spacer:
             components.append(SpacerConfig(id=component_id, spec=spec))

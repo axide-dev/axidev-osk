@@ -177,6 +177,7 @@ class KeyStateListenerTests(unittest.TestCase):
         key_button = create_key_button(
             "A",
             state_machine=state_machine,
+            component_id="component:test-key",
             on_release=lambda: calls.append("released"),
         )
         button = key_button.button

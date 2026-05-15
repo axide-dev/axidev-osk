@@ -16,11 +16,10 @@ from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
-from .commands import WindowHide, WindowShow
 from .context import Context
 from .dispatcher import Dispatcher
-from .event_handlers import register_event_handlers
-from .events import HotCornerTriggered, WindowCloseRequested
+from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
+from .events import WindowCloseRequested
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -79,6 +78,9 @@ class ApplicationRuntime:
             surfaces=self._surfaces,
         )
         self._dispatcher.bind_context(self.context)
+        context_handlers = EventHandlerRegistry()
+        register_context_command_handlers(context_handlers)
+        context_handlers.install(self._dispatcher, self.context)
         self._window_manager = WindowManager(self.context)
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
@@ -136,13 +138,7 @@ class ApplicationRuntime:
     def _handle_hot_corner_triggered(self, event: object) -> None:
         """Map hot-corner events to managed window visibility commands."""
 
-        if not isinstance(event, HotCornerTriggered):
-            return
-        for window_id in self._config.hot_corner.bindings.get(event.corner, []):
-            if self._window_manager.is_visible(window_id):
-                self._dispatcher.dispatch_command(WindowHide(window_id))
-            else:
-                self._dispatcher.dispatch_command(WindowShow(window_id))
+        route_hot_corner_triggered(event, self)
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

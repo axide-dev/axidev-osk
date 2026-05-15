@@ -30,6 +30,24 @@ def stable_id(parent_id: str, kind: str, *identity_fields: object, stable_overri
     return f"{kind}-{digest}"
 
 
+def key_component_id(
+    parent_id: str,
+    kind: str,
+    *,
+    row: int,
+    column: int,
+    width: float,
+    height: int,
+    key_id: str | None,
+    io_key: str | None,
+    label: str,
+) -> str:
+    """Return the deterministic component ID for a keyboard grid item."""
+
+    semantic_key = key_id or io_key or label
+    return stable_id(parent_id, kind, row, column, width, height, semantic_key)
+
+
 def validate_unique_ids(ids: Iterable[str], *, scope: str) -> None:
     """Raise a clear validation error when duplicate deterministic IDs exist.
 

@@ -101,11 +101,11 @@ def refresh_key_button(button: QPushButton, state_machine: KeyStateMachine) -> N
 def create_key_button(
     label: str,
     *,
+    component_id: str,
     state_machine: KeyStateMachine | None = None,
     latchable: bool = False,
     initial_latched: bool = False,
     on_state_change: StateListener | None = None,
-    component_id: str | None = None,
     width: float = 1.0,
     secondary_label: str | None = None,
     key_id: str | None = None,
@@ -125,7 +125,7 @@ def create_key_button(
         latchable: Whether the button supports latched/locked behavior.
         initial_latched: Initial latch state when constructing a new machine.
         on_state_change: Optional listener called for every state transition.
-        component_id: Deterministic component ID stored on the Qt widget.
+        component_id: Required deterministic component ID stored on the Qt widget.
         width: Layout width in keyboard units; controls minimum width and the
             ``keyWidth`` Qt dynamic property.
         secondary_label: Optional shifted glyph rendered above the primary.
@@ -155,8 +155,8 @@ def create_key_button(
     machine = state_machine or KeyStateMachine(latchable=latchable, initial_latched=initial_latched)
     set_key_button_label(button, label, secondary_label)
     button.setProperty("componentType", "key")
-    button.setProperty("componentId", component_id or key_id or label)
-    button.setProperty("keyId", key_id or label)
+    button.setProperty("componentId", component_id)
+    button.setProperty("keyId", key_id)
     button.setProperty("ioKey", io_key)
     button.setProperty("profile", profile)
     button.setProperty("layout", layout)

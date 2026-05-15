@@ -19,11 +19,11 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
-from .commands import AppQuit, WindowHide, WindowShow
+from .commands import AppQuit
 from .context import Context
 from .dispatcher import Dispatcher
-from .event_handlers import register_event_handlers
-from .events import HotCornerTriggered, WindowCloseRequested
+from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
+from .events import WindowCloseRequested
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
@@ -61,15 +61,9 @@ class _TestRuntime:
             self._dispatcher.dispatch_command(AppQuit())
 
     def _handle_hot_corner_triggered(self, event: object) -> None:
-        """Mirror production hot-corner visibility command routing."""
+        """Route hot-corner visibility commands through production helper."""
 
-        if not isinstance(event, HotCornerTriggered):
-            return
-        for window_id in self._config.hot_corner.bindings.get(event.corner, []):
-            if self._window_manager.is_visible(window_id):
-                self._dispatcher.dispatch_command(WindowHide(window_id))
-            else:
-                self._dispatcher.dispatch_command(WindowShow(window_id))
+        route_hot_corner_triggered(event, self)
 
 
 def make_test_context(
@@ -131,6 +125,9 @@ def make_test_context(
         surfaces=surfaces or SurfaceRegistry(),
     )
     dispatcher.bind_context(context)
+    context_handlers = EventHandlerRegistry()
+    register_context_command_handlers(context_handlers)
+    context_handlers.install(dispatcher, context)
     if services is None:
         keyboard.bind_context(context)
     else:

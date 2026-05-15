@@ -19,13 +19,13 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [ ] Confirm no old feature-specific implementation remains in parallel with the new modular path. A refactored behavior must replace the old behavior, not wrap or duplicate it.
 - [ ] Confirm reusable components do not own application policy. Components should render config/state snapshots and emit runtime DTOs; runtime/services should apply effects.
 - [ ] Confirm UI-to-runtime communication uses event/command DTOs rather than direct cross-subsystem calls. Direct service calls from widgets should be removed or justified as a temporary boundary with a TODO.
-- [ ] Confirm the synchronous dispatcher is queue-shaped: callers dispatch events/commands and do not depend on immediate handler return values.
-- [ ] Confirm command handlers are registered through the runtime/handler registry rather than hidden inside unrelated objects where possible. Current review focus: default keyboard command handlers in `Dispatcher.bind_context`.
+- [x] Confirm the synchronous dispatcher is queue-shaped: callers dispatch events/commands and do not depend on immediate handler return values.
+- [x] Confirm command handlers are registered through the runtime/handler registry rather than hidden inside unrelated objects where possible. Current review focus: default keyboard command handlers in `Dispatcher.bind_context`.
 - [ ] Confirm deterministic IDs flow through windows, surfaces, layouts, components, state namespaces, Qt dynamic properties, logs, events, and commands.
-- [ ] Confirm all config/runtime IDs are produced by `runtime/identity.py`. Real config builds should not depend on helper fallbacks such as `component_id or key_id or label`.
-- [ ] Confirm duplicate IDs are validated at every config composition boundary, not only in the US ISO grid.
-- [ ] Confirm tests do not preserve duplicated production behavior. Current review focus: `_TestRuntime._handle_hot_corner_triggered` mirrors production hot-corner window-toggle routing.
-- [ ] Confirm naming does not preserve the old hardcoded-window mental model. Current review focus: `KeyboardWidget` may be acceptable as a component implementation name; `MainWindowLayoutTests` should likely be renamed.
+- [x] Confirm all config/runtime IDs are produced by `runtime/identity.py`. Real config builds should not depend on helper fallbacks such as `component_id or key_id or label`.
+- [x] Confirm duplicate IDs are validated at every config composition boundary, not only in the US ISO grid.
+- [x] Confirm tests do not preserve duplicated production behavior. Current review focus: `_TestRuntime._handle_hot_corner_triggered` mirrors production hot-corner window-toggle routing.
+- [x] Confirm naming does not preserve the old hardcoded-window mental model. Current review focus: `KeyboardWidget` may be acceptable as a component implementation name; `MainWindowLayoutTests` should likely be renamed.
 - [ ] Confirm state ownership is central enough for future config reload/profile switching. Local Qt interaction state is acceptable; durable app state should be in `StateStore` or service-owned runtime state with explicit reset semantics.
 
 ## Duplicate Feature Audit
@@ -36,7 +36,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Confirm no extra user-facing windows, layouts, settings, profiles, palettes, or Lua/config-loading features were introduced.
 - [x] Confirm packaging files are untouched by this branch.
 - [ ] Re-check duplicate imports and stale names before final review: no references should remain to removed modules or dedicated window classes.
-- [ ] Decide whether stale test naming such as `MainWindowLayoutTests` should be renamed to avoid preserving the old mental model.
+- [x] Decide whether stale test naming such as `MainWindowLayoutTests` should be renamed to avoid preserving the old mental model.
 
 ## Issue #9 Acceptance TODO
 
@@ -53,7 +53,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [ ] Verify user-visible `on-screen keyboard` wording has been replaced with `OSK`, while internal package names and metadata stay unchanged per issue scope.
 - [ ] Run the full test suite locally before merge.
 
-Current local validation status: blocked in this shell because `pytest` is not installed (`pytest` not found; `python -m pytest` reports `No module named pytest`). GitHub PR checks are currently passing.
+Current local validation status: `pytest` remains unavailable in this shell (`python -m pytest` reports `No module named pytest`). `python -m compileall src tests` and `PYTHONPATH=src python -m unittest discover -s tests` pass locally.
 
 ## Out Of Scope For This PR
 

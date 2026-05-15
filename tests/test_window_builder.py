@@ -89,7 +89,7 @@ def _build_keyboard_window(backend: FakeKeyboardBackend):
     return build_window(config.windows[0], context)
 
 
-class MainWindowLayoutTests(unittest.TestCase):
+class RuntimeWindowLayoutTests(unittest.TestCase):
     """Tests covering the default keyboard window built via ``build_window``."""
     def test_custom_chrome_puts_resize_handle_in_title_bar(self) -> None:
         _app()
@@ -177,7 +177,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         self.assertLessEqual(window.minimumWidth(), window.width())
         self.assertLessEqual(window.minimumHeight(), window.height())
 
-    def test_main_window_uses_center_overlay_placement(self) -> None:
+    def test_keyboard_window_uses_center_overlay_placement(self) -> None:
         _app()
         overlay = FakeOverlayController()
 

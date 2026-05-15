@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Literal
 
 from ..models import KeySpec
+from ..runtime.identity import validate_unique_ids
 
 
 class OverlayPlacement(str, Enum):
@@ -121,6 +122,11 @@ class GridConfig:
     nav_start_column: int
     body_row_count: int = 6
 
+    def __post_init__(self) -> None:
+        """Validate IDs at the grid composition boundary."""
+
+        validate_unique_ids((component.id for component in self.components), scope=f"grid {self.id!r} components")
+
 
 @dataclass(frozen=True, slots=True)
 class LayoutConfig:
@@ -135,6 +141,11 @@ class LayoutConfig:
     id: str
     name: str
     grids: tuple[GridConfig, ...]
+
+    def __post_init__(self) -> None:
+        """Validate IDs at the layout composition boundary."""
+
+        validate_unique_ids((grid.id for grid in self.grids), scope=f"layout {self.id!r} grids")
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +180,11 @@ class PromptConfig:
     spacing: int = 14
     minimum_size: tuple[int, int] = (460, 120)
     kind: Literal["prompt"] = "prompt"
+
+    def __post_init__(self) -> None:
+        """Validate IDs at the prompt composition boundary."""
+
+        validate_unique_ids((button.id for button in self.buttons), scope=f"prompt {self.id!r} buttons")
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +283,11 @@ class SurfaceConfig:
     spacing: int = 8
     minimum_size: tuple[int, int] = (0, 0)
 
+    def __post_init__(self) -> None:
+        """Validate IDs at the surface composition boundary."""
+
+        validate_unique_ids((component.id for component in self.components), scope=f"surface {self.id!r} components")
+
 
 @dataclass(frozen=True, slots=True)
 class WindowConfig:
@@ -306,3 +327,28 @@ class AppConfig:
     quit_prompt: PromptConfig
     linux_permission_prompt: PromptConfig
     hot_corner: HotCornerConfig = field(default_factory=HotCornerConfig)
+
+    def __post_init__(self) -> None:
+        """Validate IDs at the root app composition boundary."""
+
+        validate_unique_ids((window.id for window in self.windows), scope="app windows")
+        validate_unique_ids(
+            (window.surface.id for window in self.windows),
+            scope="app window surfaces",
+        )
+        validate_unique_ids(
+            (
+                *(window.id for window in self.windows),
+                self.quit_prompt.window_id,
+                self.linux_permission_prompt.window_id,
+            ),
+            scope="app window and prompt window IDs",
+        )
+        validate_unique_ids(
+            (
+                *(window.surface.id for window in self.windows),
+                self.quit_prompt.surface_id,
+                self.linux_permission_prompt.surface_id,
+            ),
+            scope="app surface and prompt surface IDs",
+        )
