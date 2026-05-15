@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from ...config.models import ButtonConfig, ComponentConfig, PromptConfig
 from ...runtime.context import Context
@@ -87,11 +87,8 @@ def build_prompt_component(
     widget.setProperty("componentType", "prompt")
     widget.setProperty("componentId", config.id)
     layout = QVBoxLayout(widget)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(14)
 
     message_row = QHBoxLayout()
-    message_row.setContentsMargins(0, 0, 0, 0)
     message_row.setSpacing(14)
     glyph_label = QLabel(config.prompt_glyph, widget)
     glyph_label.setFixedSize(40, 40)
@@ -109,30 +106,34 @@ def build_prompt_component(
     )
     message_row.addWidget(glyph_label, 0, Qt.AlignmentFlag.AlignVCenter)
     message_label = QLabel(config.message, widget)
+    message_label.setTextFormat(Qt.TextFormat.PlainText)
     message_label.setWordWrap(True)
     message_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+    message_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+    message_label.setStyleSheet("QLabel { margin: 0px; padding: 0px; }")
     message_row.addWidget(message_label, 1)
     layout.addLayout(message_row)
 
     if config.hint:
         hint_label = QLabel(config.hint, widget)
+        hint_label.setTextFormat(Qt.TextFormat.PlainText)
         hint_label.setWordWrap(True)
         hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        hint_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         hint_label.setStyleSheet(
             "QLabel {"
             "  color: rgba(220, 220, 220, 0.65);"
-            "  font-size: 10px;"
+            "  font-size: 14px;"
             "  font-style: italic;"
-            "  padding: 4px 8px;"
+            "  margin: 0px;"
+            "  padding: 2px 2px;"
             "  border-left: 2px solid rgba(180, 180, 180, 0.35);"
             "}"
         )
         layout.addWidget(hint_label)
 
     buttons = QHBoxLayout()
-    buttons.setContentsMargins(0, 0, 0, 0)
-    buttons.setSpacing(16)
-    buttons.addStretch(1)
+    buttons.setSpacing(8)
     for button_config in config.buttons:
         button = context.components.build(button_config, context, host=widget)
         if not isinstance(button, QPushButton):
