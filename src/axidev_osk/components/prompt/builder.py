@@ -76,8 +76,8 @@ def build_prompt_component(
         action buttons.
 
     Side effects:
-        Wires button click signals to dispatch ``PromptResolved`` and hide the
-        hosting window.
+        Wires button click signals to dispatch ``PromptResolved``. Prompt
+        window lifecycle remains owned by the runtime prompt flow.
     """
 
     del host
@@ -172,11 +172,11 @@ def prompt_button_config(parent_id: str, *, role: str, label: str) -> ButtonConf
 
 
 def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, button: ButtonConfig) -> None:
-    """Dispatch the prompt resolution event and dismiss the hosting window.
+    """Dispatch the prompt resolution event.
 
     Args:
-        window_child: Any widget inside the prompt window; used to find the
-            hosting top-level window.
+        window_child: Any widget inside the prompt window; accepted so signal
+            wiring can keep a stable signature without owning window lifecycle.
         context: Runtime context used to dispatch the event.
         prompt_id: Stable ID of the resolving prompt component.
         button: Button config describing which action was clicked.
@@ -185,9 +185,8 @@ def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, but
         None.
 
     Side effects:
-        Dispatches ``PromptResolved`` and hides the hosting window.
+        Dispatches ``PromptResolved``.
     """
 
+    del window_child
     context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=button.role))
-    window = window_child.window()
-    window.hide()

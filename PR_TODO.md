@@ -18,7 +18,8 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Confirm every behavior has exactly one implementation path after the refactor: one generic window builder, one prompt component path, one keyboard grid path, one hot-corner service/controller path, one keyboard service/backend path.
 - [x] Confirm no old feature-specific implementation remains in parallel with the new modular path. A refactored behavior must replace the old behavior, not wrap or duplicate it.
   Audit note: startup windows flow through `WindowManager`/`build_window`; prompts flow through `PromptConfig` plus the prompt component and transient generic windows; the keyboard grid flows through `KeyboardGridConfig`/`KeyboardWidget` plus key/spacer builders; hot corner flows through `HotCornerService`/`HotCornerWindowToggleController` to `HotCornerTriggered` and window commands; backend access flows through `KeyboardService` command handlers. Stale-reference search found no references to removed dedicated window/widget/layout modules.
-- [ ] Confirm reusable components do not own application policy. Components should render config/state snapshots and emit runtime DTOs; runtime/services should apply effects.
+- [x] Confirm reusable components do not own application policy. Components should render config/state snapshots and emit runtime DTOs; runtime/services should apply effects.
+  Audit note: component search found prompt buttons still hid their hosting window after dispatching `PromptResolved`. That lifecycle effect was removed; prompt components now only emit the resolution event, and the runtime prompt flow closes transient prompt windows after the waiter resolves. Keyboard grid state remains local interaction/view coordination plus runtime event/command emission; backend effects still go through dispatcher commands and `KeyboardService`.
 - [x] Confirm UI-to-runtime communication uses event/command DTOs rather than direct cross-subsystem calls. Direct service calls from widgets should be removed or justified as a temporary boundary with a TODO.
 - [x] Confirm the synchronous dispatcher is queue-shaped: callers dispatch events/commands and do not depend on immediate handler return values.
 - [x] Confirm command handlers are registered through the runtime/handler registry rather than hidden inside unrelated objects where possible. Current review focus: default keyboard command handlers in `Dispatcher.bind_context`.
@@ -54,7 +55,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [ ] Verify user-visible `on-screen keyboard` wording has been replaced with `OSK`, while internal package names and metadata stay unchanged per issue scope.
 - [ ] Run the full test suite locally before merge.
 
-Current local validation status: `pytest` remains unavailable in this shell (`python -m pytest` reports `No module named pytest`). `python -m compileall src tests` and `PYTHONPATH=src python -m unittest discover -s tests` pass locally.
+Current local validation status: `pytest` remains unavailable in this shell (`python -m pytest` reports `No module named pytest`). `python -m compileall src tests` and `PYTHONPATH=src python -m unittest discover -s tests` pass locally; unittest currently runs 63 tests.
 
 ## Out Of Scope For This PR
 
