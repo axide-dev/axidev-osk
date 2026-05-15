@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
 
-from .models import KeySpec
+from ...models import KeySpec
 
 _logger = logging.getLogger(__name__)
 

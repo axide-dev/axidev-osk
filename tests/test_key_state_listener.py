@@ -10,7 +10,7 @@ from axidev_osk.components.button.key import create_key_button
 from axidev_osk.components.button.state import KeyStateMachine
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
-from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
+from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
 from axidev_osk.runtime.testing import make_test_context
 

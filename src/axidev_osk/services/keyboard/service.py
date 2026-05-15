@@ -8,9 +8,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..keyboard_io import AxidevIoKeyboardBackend, PermissionSetupOutcome
-from ..models import KeySpec
-from ..runtime.events import BackendKeyRegistered, BackendKeyStateChanged, KeyLatchChanged
+from ...models import KeySpec
+from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, KeyLatchChanged
+from .io import AxidevIoKeyboardBackend, PermissionSetupOutcome
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
