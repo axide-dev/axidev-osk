@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from axidev_osk.config.defaults.us_iso import NAV_START
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 
@@ -23,3 +24,58 @@ def test_us_iso_layout_config_preserves_key_geometry_and_ids() -> None:
         (spec.row, spec.column, spec.width) for spec in specs
     ]
     assert len({item.id for item in grid.components}) == len(grid.components)
+
+
+def test_us_iso_layout_config_covers_expected_sections_and_key_sizes() -> None:
+    config = build_us_iso_layout_config()
+    specs = [item.spec for item in config.grids[0].components]
+
+    assert sorted({spec.row for spec in specs}) == [0, 1, 2, 3, 4, 5]
+    assert [spec.label for spec in specs if spec.row == 0] == [
+        "Esc",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+        "F7",
+        "F8",
+        "F9",
+        "F10",
+        "F11",
+        "F12",
+        "PrtSc",
+        "ScrLk",
+        "Pause",
+    ]
+    assert {spec.label for spec in specs if spec.column >= NAV_START} == {
+        "PrtSc",
+        "ScrLk",
+        "Pause",
+        "Ins",
+        "Home",
+        "PgUp",
+        "Del",
+        "End",
+        "PgDn",
+        "↑",
+        "←",
+        "↓",
+        "→",
+    }
+    assert next(spec.width for spec in specs if spec.label == "Backspace") == 2.0
+    assert next(spec.width for spec in specs if spec.label == "Space") == 6.25
+    assert [spec.width for spec in specs if spec.label == "Shift"] == [1.25, 2.75]
+
+
+def test_us_iso_layout_dense_body_columns_match_main_block_width() -> None:
+    config = build_us_iso_layout_config()
+    body_specs = [item.spec for item in config.grids[0].components if item.spec.row > 0]
+    occupied_columns: set[int] = set()
+
+    for spec in body_specs:
+        occupied_columns.update(range(spec.column, spec.column + int(spec.width * 4)))
+
+    assert len([column for column in occupied_columns if column < NAV_START]) == 60
+    assert len([column for column in occupied_columns if column >= NAV_START]) == 12

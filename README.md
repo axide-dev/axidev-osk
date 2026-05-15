@@ -1,6 +1,6 @@
 # Axidev OSK
 
-An on-screen keyboard for Windows and Linux that stays out of your way.
+An OSK for Windows and Linux that stays out of your way.
 
 Axidev OSK gives you a clean, always-on-top keyboard overlay you can pop up when you need it and hide when you don't. It works on Windows, KDE Plasma Wayland, wlroots-based compositors like `niri` and `Hyprland`, and X11.
 

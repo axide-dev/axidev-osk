@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.components import register_components
+from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
 from axidev_osk.runtime.testing import make_test_context
@@ -193,6 +194,46 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         config = configure_overlay.call_args.kwargs["config"]
         self.assertEqual(config.placement, OverlayPlacement.CENTER)
+
+    def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with (
+            patch(
+                "axidev_osk.windows.builder.configure_always_on_top_window",
+                return_value=overlay,
+            ),
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+
+        self.assertEqual(window.property("componentType"), "window")
+        self.assertEqual(window.property("componentId"), "window:keyboard")
+        self.assertEqual(window.centralWidget().property("componentType"), "surface")
+        self.assertEqual(window.centralWidget().property("componentId"), "surface:keyboard")
+
+        keyboard = window.findChild(KeyboardWidget)
+        self.assertIsNotNone(keyboard)
+        self.assertEqual(keyboard.property("componentType"), "grid")
+        self.assertEqual(keyboard.property("componentId"), "component:keyboard-grid")
+        self.assertEqual(keyboard.property("layout"), "us-iso")
+
+        key = next(
+            button
+            for button in window.findChildren(QPushButton)
+            if button.property("ioKey") == "A"
+        )
+        self.assertEqual(key.property("componentType"), "key")
+        self.assertIsInstance(key.property("componentId"), str)
+        self.assertIsNone(key.property("keyId"))
+        self.assertEqual(key.property("ioKey"), "A")
+        self.assertEqual(key.property("interactionState"), "idle")
+        self.assertFalse(key.property("latched"))
+        self.assertFalse(key.property("pressed"))
+        self.assertEqual(key.property("profile"), "default")
+        self.assertEqual(key.property("layout"), "us-iso")
 
 
 if __name__ == "__main__":
