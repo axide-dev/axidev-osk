@@ -47,6 +47,21 @@ class ComponentStateChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class BackendKeyRegistered:
+    """A keyboard key was registered with the backend observation service.
+
+    Attributes:
+        layout: Keyboard layout instance name.
+        component_id: Deterministic key component ID.
+        io_key_name: Canonical backend key name, when the backend can resolve one.
+    """
+
+    layout: str
+    component_id: str
+    io_key_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class BackendKeyStateChanged:
     layout: str
     key_id: str
@@ -94,6 +109,7 @@ RuntimeEvent = (
     ComponentPressed
     | ComponentReleased
     | ComponentStateChanged
+    | BackendKeyRegistered
     | BackendKeyStateChanged
     | KeyLatchChanged
     | HotCornerTriggered

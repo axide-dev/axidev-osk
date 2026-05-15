@@ -7,9 +7,9 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QWidget
 
 from ...config.models import GridConfig, KeyConfig, LayoutConfig
 from ...models import KeySpec
-from ...runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
+from ...runtime.commands import KeyboardKeyDown, KeyboardRegisterKeySpec, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
 from ...runtime.context import Context
-from ...runtime.events import BackendKeyStateChanged, ComponentPressed, ComponentReleased, ComponentStateChanged, KeyLatchChanged
+from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, ComponentPressed, ComponentReleased, ComponentStateChanged, KeyLatchChanged
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import KeyboardMetrics
@@ -22,6 +22,7 @@ class _KeyStateBridge(QObject):
 
     key_state_changed = Signal(str, str, bool, bool)
     key_latch_changed = Signal(str, str, bool)
+    key_registered = Signal(str, str, object)
 
 
 class KeyboardWidget(QFrame):
@@ -67,7 +68,6 @@ class KeyboardWidget(QFrame):
         super().__init__()
         self._metrics = metrics or KeyboardMetrics()
         self._context = context
-        self._keyboard = context.keyboard
         self._layout_config = layout_config
         self._latch_groups: dict[str, list[KeyStateMachine]] = {
             "shift": [],
@@ -80,6 +80,7 @@ class KeyboardWidget(QFrame):
         self._syncing_latch_keys: set[str] = set()
         self._hold_visual_modifiers: set[str] = set()
         self._buttons_by_spec: list[tuple[QPushButton, KeySpec]] = []
+        self._buttons_by_component_id: dict[str, QPushButton] = {}
         self._state_machines_by_key_id: dict[str, list[KeyStateMachine]] = {}
         self._key_state_bridge = _KeyStateBridge(self)
         self._event_unsubscribe: Unsubscribe | None = None
@@ -265,7 +266,6 @@ class KeyboardWidget(QFrame):
         """
 
         latched = bool(spec.key_id is not None and self._context.state.get(self._latch_namespace(), spec.key_id, False))
-        listened_key_name = self._keyboard.register_key_spec(self._layout_config.name, spec)
         state_key = self._state_key_for_spec(spec)
         # Late-bound holder so ``on_state_change`` (constructed before the
         # button exists) can reach the state machine after construction.
@@ -315,15 +315,6 @@ class KeyboardWidget(QFrame):
         button = key_button.button
         state_machine = key_button.state_machine
         machine_ref[0] = state_machine
-        # Durable runtime ownership of the state machine lives in the
-        # central state store, namespaced per layout+component_id. Widgets
-        # and listeners read snapshots; the store is the source of truth
-        # for future config reloads and profile switches (AGENTS.md).
-        self._context.state.set(
-            f"key_state_machines:{self._layout_config.name}",
-            component_id,
-            state_machine,
-        )
         if state_key is not None:
             self._state_machines_by_key_id.setdefault(state_key, []).append(state_machine)
             snapshot = self._context.state.get(f"keyboard.key_states:{self._layout_config.name}", state_key, {})
@@ -335,25 +326,34 @@ class KeyboardWidget(QFrame):
             if spec.holds_when_latched:
                 self._hold_visual_modifiers.add(spec.key_id)
             self._latch_groups.setdefault(spec.key_id, []).append(state_machine)
-        if listened_key_name is not None:
-            button.setProperty("ioKeyName", listened_key_name)
         if spec.height > 1:
             button.setMinimumHeight(self._metrics.span_height(spec.height))
 
         self._buttons_by_spec.append((button, spec))
+        self._buttons_by_component_id[component_id] = button
+        self._dispatch_command(KeyboardRegisterKeySpec(self._layout_config.name, component_id, spec))
         return button
 
     def _handle_key_press(self, component_id: str, spec: KeySpec) -> None:
         """Dispatch a press event/command through the runtime."""
 
         self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
-        self._context.dispatcher.dispatch_command(KeyboardKeyDown(self._layout_config.name, spec))
+        self._context.dispatcher.dispatch_command(KeyboardKeyDown(self._layout_config.name, spec, component_id))
 
     def _handle_key_release(self, component_id: str, spec: KeySpec) -> None:
         """Dispatch a release event/command through the runtime."""
 
         self._dispatch_event(ComponentReleased(component_id=component_id))
-        self._context.dispatcher.dispatch_command(KeyboardKeyUp(self._layout_config.name, spec))
+        self._context.dispatcher.dispatch_command(KeyboardKeyUp(self._layout_config.name, spec, component_id))
+
+    def _handle_key_registered(self, layout: str, component_id: str, io_key_name: object) -> None:
+        """Apply backend registration metadata returned through runtime events."""
+
+        if layout != self._layout_config.name or not isinstance(io_key_name, str):
+            return
+        button = self._buttons_by_component_id.get(component_id)
+        if button is not None:
+            button.setProperty("ioKeyName", io_key_name)
 
     def _handle_backend_key_state_change(self, layout: str, key_id: str, pressed: bool, latched: bool) -> None:
         """Apply a backend key state change to all matching button state machines."""
@@ -382,9 +382,12 @@ class KeyboardWidget(QFrame):
 
         self._key_state_bridge.key_state_changed.connect(self._handle_backend_key_state_change)
         self._key_state_bridge.key_latch_changed.connect(self._handle_key_latch_change)
+        self._key_state_bridge.key_registered.connect(self._handle_key_registered)
 
         def handle_event(event: object) -> None:
-            if isinstance(event, BackendKeyStateChanged):
+            if isinstance(event, BackendKeyRegistered):
+                self._key_state_bridge.key_registered.emit(event.layout, event.component_id, event.io_key_name)
+            elif isinstance(event, BackendKeyStateChanged):
                 self._key_state_bridge.key_state_changed.emit(event.layout, event.key_id, event.pressed, event.latched)
             elif isinstance(event, KeyLatchChanged):
                 self._key_state_bridge.key_latch_changed.emit(event.layout, event.key_id, event.latched)
@@ -448,7 +451,7 @@ class KeyboardWidget(QFrame):
         if key_id in self._syncing_latch_keys:
             return
 
-        self._dispatch_command(KeyboardSyncLatchedKey(self._layout_config.name, spec, currently_latched))
+        self._dispatch_command(KeyboardSyncLatchedKey(self._layout_config.name, spec, currently_latched, component_id))
 
         self._syncing_latch_keys.add(key_id)
         try:

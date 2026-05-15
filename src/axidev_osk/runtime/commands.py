@@ -8,6 +8,21 @@ from ..models import KeySpec
 
 
 @dataclass(frozen=True, slots=True)
+class KeyboardRegisterKeySpec:
+    """Command registering a key for backend state observation.
+
+    Attributes:
+        layout: Keyboard layout instance name.
+        component_id: Deterministic key component ID.
+        key_spec: Key semantics to observe.
+    """
+
+    layout: str
+    component_id: str
+    key_spec: KeySpec
+
+
+@dataclass(frozen=True, slots=True)
 class KeyboardKeyDown:
     """Command requesting keyboard output for a key press.
 
@@ -18,6 +33,7 @@ class KeyboardKeyDown:
 
     layout: str
     key_spec: KeySpec
+    component_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +47,7 @@ class KeyboardKeyUp:
 
     layout: str
     key_spec: KeySpec
+    component_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +63,7 @@ class KeyboardSyncLatchedKey:
     layout: str
     key_spec: KeySpec
     latched: bool
+    component_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,4 +125,4 @@ class AppQuit:
     exit_code: int = 0
 
 
-RuntimeCommand = KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | WindowShow | WindowHide | WindowClose | AppQuit
+RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | WindowShow | WindowHide | WindowClose | AppQuit

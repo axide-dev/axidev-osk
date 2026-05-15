@@ -18,7 +18,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [ ] Confirm every behavior has exactly one implementation path after the refactor: one generic window builder, one prompt component path, one keyboard grid path, one hot-corner service/controller path, one keyboard service/backend path.
 - [ ] Confirm no old feature-specific implementation remains in parallel with the new modular path. A refactored behavior must replace the old behavior, not wrap or duplicate it.
 - [ ] Confirm reusable components do not own application policy. Components should render config/state snapshots and emit runtime DTOs; runtime/services should apply effects.
-- [ ] Confirm UI-to-runtime communication uses event/command DTOs rather than direct cross-subsystem calls. Direct service calls from widgets should be removed or justified as a temporary boundary with a TODO.
+- [x] Confirm UI-to-runtime communication uses event/command DTOs rather than direct cross-subsystem calls. Direct service calls from widgets should be removed or justified as a temporary boundary with a TODO.
 - [x] Confirm the synchronous dispatcher is queue-shaped: callers dispatch events/commands and do not depend on immediate handler return values.
 - [x] Confirm command handlers are registered through the runtime/handler registry rather than hidden inside unrelated objects where possible. Current review focus: default keyboard command handlers in `Dispatcher.bind_context`.
 - [ ] Confirm deterministic IDs flow through windows, surfaces, layouts, components, state namespaces, Qt dynamic properties, logs, events, and commands.
@@ -26,7 +26,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Confirm duplicate IDs are validated at every config composition boundary, not only in the US ISO grid.
 - [x] Confirm tests do not preserve duplicated production behavior. Current review focus: `_TestRuntime._handle_hot_corner_triggered` mirrors production hot-corner window-toggle routing.
 - [x] Confirm naming does not preserve the old hardcoded-window mental model. Current review focus: `KeyboardWidget` may be acceptable as a component implementation name; `MainWindowLayoutTests` should likely be renamed.
-- [ ] Confirm state ownership is central enough for future config reload/profile switching. Local Qt interaction state is acceptable; durable app state should be in `StateStore` or service-owned runtime state with explicit reset semantics.
+- [x] Confirm state ownership is central enough for future config reload/profile switching. Local Qt interaction state is acceptable; durable app state should be in `StateStore` or service-owned runtime state with explicit reset semantics.
 
 ## Duplicate Feature Audit
 
@@ -35,7 +35,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Confirm bundled US ISO layout is represented once through config data: `config/defaults/us_iso.py` replaces the old `layouts/us_iso.py` path.
 - [x] Confirm no extra user-facing windows, layouts, settings, profiles, palettes, or Lua/config-loading features were introduced.
 - [x] Confirm packaging files are untouched by this branch.
-- [ ] Re-check duplicate imports and stale names before final review: no references should remain to removed modules or dedicated window classes.
+- [x] Re-check duplicate imports and stale names before final review: no references should remain to removed modules or dedicated window classes.
 - [x] Decide whether stale test naming such as `MainWindowLayoutTests` should be renamed to avoid preserving the old mental model.
 
 ## Issue #9 Acceptance TODO
@@ -44,8 +44,8 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [ ] Verify quit confirmation is a normal prompt window built from config, with no dedicated confirm-window class.
 - [ ] Verify keyboard layout parity tests cover current US ISO rows, dense columns, nav block, function row, and key sizing.
 - [ ] Verify components expose the required Qt dynamic properties, including `componentType`, `componentId`, `keyId`, `ioKey`, `interactionState`, `latched`, `pressed`, `profile`, and `layout` where applicable.
-- [ ] Verify widgets do not directly call backend services; backend access should flow through `Context`, dispatcher commands, and services.
-- [ ] Verify durable state lives in the runtime state store, not as the source of truth inside reusable widgets/components.
+- [x] Verify widgets do not directly call backend services; backend access should flow through `Context`, dispatcher commands, and services.
+- [x] Verify durable state lives in the runtime state store, not as the source of truth inside reusable widgets/components.
 - [ ] Verify hot corner remains isolated and only crosses into the runtime through explicit callbacks/events.
 - [ ] Verify deterministic IDs are computed only in `runtime/identity.py` and duplicate IDs fail validation clearly.
 - [ ] Verify platform branching is contained in dedicated low-level platform/overlay/permission modules and not spread through higher-level orchestration.

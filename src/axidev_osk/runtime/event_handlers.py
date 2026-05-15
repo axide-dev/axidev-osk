@@ -7,6 +7,7 @@ from typing import Protocol
 from .commands import (
     AppQuit,
     KeyboardKeyDown,
+    KeyboardRegisterKeySpec,
     KeyboardKeyUp,
     KeyboardSyncLatchedKey,
     StateSet,
@@ -28,6 +29,14 @@ class _WindowVisibilityManager(Protocol):
 def register_context_command_handlers(registry: EventHandlerRegistry) -> None:
     """Register context-level command handlers in deterministic order."""
 
+    registry.register_command_handler(
+        KeyboardRegisterKeySpec,
+        lambda context: lambda command: context.keyboard.register_key_spec(
+            command.layout,
+            command.key_spec,
+            component_id=command.component_id,
+        ),
+    )
     registry.register_command_handler(
         KeyboardKeyDown,
         lambda context: lambda command: context.keyboard.key_down(command.layout, command.key_spec),

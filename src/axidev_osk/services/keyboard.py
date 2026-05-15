@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..keyboard_io import AxidevIoKeyboardBackend, PermissionSetupOutcome
 from ..models import KeySpec
-from ..runtime.events import BackendKeyStateChanged, KeyLatchChanged
+from ..runtime.events import BackendKeyRegistered, BackendKeyStateChanged, KeyLatchChanged
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
@@ -146,7 +146,7 @@ class KeyboardService:
 
         return self._backend.setup_permissions()
 
-    def register_key_spec(self, layout: str, spec: KeySpec) -> str | None:
+    def register_key_spec(self, layout: str, spec: KeySpec, *, component_id: str | None = None) -> str | None:
         """Register a key spec for backend state updates and return its backend key name."""
 
         key_name = self._backend.key_name_for_spec(spec)
@@ -166,6 +166,14 @@ class KeyboardService:
                 registrations.append(registration)
             if self._backend.is_key_down(key_name):
                 self._emit_key_state(layout, state_key, pressed=True, latched=latched)
+        if component_id is not None and self._context is not None:
+            self._context.dispatcher.dispatch_event(
+                BackendKeyRegistered(
+                    layout=layout,
+                    component_id=component_id,
+                    io_key_name=key_name,
+                )
+            )
         return key_name
 
     def is_latched(self, layout: str, key_id: str) -> bool:
