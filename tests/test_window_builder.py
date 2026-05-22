@@ -218,7 +218,8 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertIsNotNone(keyboard)
         self.assertEqual(keyboard.property("componentType"), "grid")
         self.assertEqual(keyboard.property("componentId"), "component:keyboard-grid")
-        self.assertEqual(keyboard.property("layout"), "us-iso")
+        self.assertEqual(keyboard.property("layout"), "layout:us-iso")
+        self.assertEqual(keyboard.property("layoutName"), "us-iso")
 
         key = next(
             button
@@ -233,7 +234,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertFalse(key.property("latched"))
         self.assertFalse(key.property("pressed"))
         self.assertEqual(key.property("profile"), "default")
-        self.assertEqual(key.property("layout"), "us-iso")
+        self.assertEqual(key.property("layout"), "layout:us-iso")
 
 
 if __name__ == "__main__":

@@ -12,12 +12,12 @@ class KeyboardRegisterKeySpec:
     """Command registering a key for backend state observation.
 
     Attributes:
-        layout: Keyboard layout instance name.
+        layout_id: Deterministic keyboard layout instance ID.
         component_id: Deterministic key component ID.
         key_spec: Key semantics to observe.
     """
 
-    layout: str
+    layout_id: str
     component_id: str
     key_spec: KeySpec
 
@@ -27,11 +27,11 @@ class KeyboardKeyDown:
     """Command requesting keyboard output for a key press.
 
     Attributes:
-        layout: Keyboard layout instance name.
+        layout_id: Deterministic keyboard layout instance ID.
         key_spec: Key semantics to emit.
     """
 
-    layout: str
+    layout_id: str
     key_spec: KeySpec
     component_id: str | None = None
 
@@ -41,11 +41,11 @@ class KeyboardKeyUp:
     """Command requesting release of a key press owned by the keyboard service.
 
     Attributes:
-        layout: Keyboard layout instance name.
+        layout_id: Deterministic keyboard layout instance ID.
         key_spec: Key semantics to release.
     """
 
-    layout: str
+    layout_id: str
     key_spec: KeySpec
     component_id: str | None = None
 
@@ -55,12 +55,12 @@ class KeyboardSyncLatchedKey:
     """Command requesting backend synchronization for a latched modifier.
 
     Attributes:
-        layout: Keyboard layout instance name.
+        layout_id: Deterministic keyboard layout instance ID.
         key_spec: Latchable key semantics.
         latched: Desired latched state.
     """
 
-    layout: str
+    layout_id: str
     key_spec: KeySpec
     latched: bool
     component_id: str | None = None

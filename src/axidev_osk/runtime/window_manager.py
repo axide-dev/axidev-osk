@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import WindowConfig
 from ..windows.builder import RuntimeWindow, build_window
 from .context import Context
+
+_logger = logging.getLogger(__name__)
 
 
 class WindowManager:
@@ -49,6 +53,7 @@ class WindowManager:
         config = self._configs.get(window_id)
         if config is None:
             raise ValueError(f"No window config registered for {window_id!r}")
+        _logger.info("Building runtime window %s with surface %s", config.id, config.surface.id)
         window = build_window(config, self._context, parent=parent)
         self._windows[window_id] = window
         return window
@@ -67,6 +72,7 @@ class WindowManager:
             Builds Qt widgets.
         """
 
+        _logger.info("Building transient runtime window %s with surface %s", config.id, config.surface.id)
         return build_window(config, self._context, parent=parent)
 
     def show(self, window_id: str) -> RuntimeWindow:
@@ -83,6 +89,7 @@ class WindowManager:
         """
 
         window = self.get_or_create(window_id)
+        _logger.info("Showing runtime window %s", window_id)
         window.show()
         return window
 
@@ -91,6 +98,7 @@ class WindowManager:
 
         window = self._windows.get(window_id)
         if window is not None:
+            _logger.info("Hiding runtime window %s", window_id)
             window.hide()
 
     def is_visible(self, window_id: str) -> bool:
@@ -104,6 +112,7 @@ class WindowManager:
 
         window = self._windows.pop(window_id, None)
         if window is not None:
+            _logger.info("Closing runtime window %s", window_id)
             window.close()
 
     def all_windows(self) -> list[RuntimeWindow]:

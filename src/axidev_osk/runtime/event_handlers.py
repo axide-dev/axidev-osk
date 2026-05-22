@@ -32,23 +32,23 @@ def register_context_command_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_command_handler(
         KeyboardRegisterKeySpec,
         lambda context: lambda command: context.keyboard.register_key_spec(
-            command.layout,
+            command.layout_id,
             command.key_spec,
             component_id=command.component_id,
         ),
     )
     registry.register_command_handler(
         KeyboardKeyDown,
-        lambda context: lambda command: context.keyboard.key_down(command.layout, command.key_spec),
+        lambda context: lambda command: context.keyboard.key_down(command.layout_id, command.key_spec),
     )
     registry.register_command_handler(
         KeyboardKeyUp,
-        lambda context: lambda command: context.keyboard.key_up(command.layout, command.key_spec),
+        lambda context: lambda command: context.keyboard.key_up(command.layout_id, command.key_spec),
     )
     registry.register_command_handler(
         KeyboardSyncLatchedKey,
         lambda context: lambda command: context.keyboard.sync_latched_key(
-            command.layout,
+            command.layout_id,
             command.key_spec,
             command.latched,
         ),

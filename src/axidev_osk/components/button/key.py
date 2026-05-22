@@ -132,7 +132,7 @@ def create_key_button(
         key_id: Modifier identity string (e.g. ``"shift"``).
         io_key: Backend input key name forwarded to the keyboard service.
         profile: Active profile string written to the ``profile`` Qt property.
-        layout: Active layout name written to the ``layout`` Qt property.
+        layout: Active deterministic layout ID written to the ``layout`` Qt property.
         on_press: Optional callback fired on Qt ``pressed``.
         on_release: Optional callback fired on Qt ``released`` after the
             internal state machine processes the release and toggles latch.
