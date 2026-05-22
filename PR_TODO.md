@@ -23,7 +23,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Confirm UI-to-runtime communication uses event/command DTOs rather than direct cross-subsystem calls. Direct service calls from widgets should be removed or justified as a temporary boundary with a TODO.
 - [x] Confirm the synchronous dispatcher is queue-shaped: callers dispatch events/commands and do not depend on immediate handler return values.
 - [x] Confirm command handlers are registered through the runtime/handler registry rather than hidden inside unrelated objects where possible. Current review focus: default keyboard command handlers in `Dispatcher.bind_context`.
-- [ ] Confirm deterministic IDs flow through windows, surfaces, layouts, components, state namespaces, Qt dynamic properties, logs, events, and commands.
+- [x] Confirm deterministic IDs flow through windows, surfaces, layouts, components, state namespaces, Qt dynamic properties, logs, events, and commands.
 - [x] Confirm all config/runtime IDs are produced by `runtime/identity.py`. Real config builds should not depend on helper fallbacks such as `component_id or key_id or label`.
 - [x] Confirm duplicate IDs are validated at every config composition boundary, not only in the US ISO grid.
 - [x] Confirm tests do not preserve duplicated production behavior. Current review focus: `_TestRuntime._handle_hot_corner_triggered` mirrors production hot-corner window-toggle routing.
