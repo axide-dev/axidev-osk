@@ -1,3 +1,5 @@
+"""Linux keyboard permission setup prompt and terminal launch helpers."""
+
 from __future__ import annotations
 
 import os
@@ -39,10 +41,14 @@ class LinuxPermissionController:
         self._build_prompt_window_config = build_prompt_window_config
 
     def prompt_if_needed(self) -> None:
+        """Schedule the permission prompt when the keyboard service requires setup."""
+
         if self._keyboard.needs_permission_setup:
             QTimer.singleShot(0, self.show_prompt)
 
     def show_prompt(self) -> None:
+        """Show the configured permission prompt and apply the selected action."""
+
         prompt_config = self._config.linux_permission_prompt
         parent = self._window_manager.get_or_create(self._config.keyboard_window_id)
         prompt_window = self._window_manager.create_transient(
@@ -120,6 +126,8 @@ class LinuxPermissionController:
 
 
 def launch_permission_script_in_terminal(script_path: Path) -> bool:
+    """Launch the permission helper in an available terminal emulator."""
+
     if os.name == "nt":
         return False
 

@@ -44,6 +44,8 @@ def key(
     repeats: bool = True,
     display_variants: tuple[KeyDisplay, ...] = (),
 ) -> KeySpec:
+    """Build a key spec with default keyboard-layout behavior."""
+
     return KeySpec(
         label=label,
         row=row,
@@ -73,6 +75,8 @@ def held_modifier(
     io_key: str,
     latched_io_key: str | None = None,
 ) -> KeySpec:
+    """Build a latchable modifier that keeps its backend key held."""
+
     return key(
         label,
         row=row,
@@ -89,10 +93,14 @@ def held_modifier(
 
 
 def spacer(*, row: int, column: int, width: float = 1.0, height: int = 1) -> KeySpec:
+    """Build a spacer spec that reserves grid space without a key widget."""
+
     return key("", row=row, column=column, width=width, height=height, is_spacer=True)
 
 
 def u(value: int) -> int:
+    """Convert logical layout units to sparse grid columns."""
+
     return value * UNIT
 
 
@@ -112,6 +120,8 @@ def shifted_key(
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
 ) -> KeySpec:
+    """Build a key with an alternate display while shift is active."""
+
     return key(
         label,
         row=row,
@@ -143,6 +153,8 @@ def letter_key(
     height: int = 1,
     repeats: bool = True,
 ) -> KeySpec:
+    """Build a letter key with shift and caps-aware display variants."""
+
     lower_label = label.lower()
     upper_label = label.upper()
     return key(
@@ -169,6 +181,8 @@ def letter_key(
 
 
 def build_us_iso_layout() -> list[KeySpec]:
+    """Return the bundled US ISO layout as ordered key specs."""
+
     return [
         key("Esc", row=0, column=u(0), io_key="Escape"),
         key("F1", row=0, column=u(2)),

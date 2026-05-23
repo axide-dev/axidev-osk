@@ -57,12 +57,16 @@ def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> Non
 
 
 def configure_hot_corner_overlay(window: QWidget) -> "HotCornerOverlayController":
+    """Configure ``window`` for hot-corner overlay behavior."""
+
     controller = HotCornerOverlayController(window)
     controller.configure_window()
     return controller
 
 
 class HotCornerOverlayController:
+    """Platform-specific overlay controller for hot-corner helper windows."""
+
     def __init__(self, window: QWidget) -> None:
         self._window = window
         self._backend = self._detect_backend()
@@ -73,9 +77,13 @@ class HotCornerOverlayController:
 
     @property
     def backend(self) -> OverlayBackend:
+        """Overlay backend selected for the managed helper window."""
+
         return self._backend
 
     def configure_window(self) -> None:
+        """Apply non-activating overlay window flags."""
+
         self._window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -95,6 +103,8 @@ class HotCornerOverlayController:
             self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
+        """Move the helper window to an absolute screen position."""
+
         target = QPoint(position)
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry()
@@ -113,6 +123,8 @@ class HotCornerOverlayController:
         self._window.move(target)
 
     def handle_show(self) -> bool:
+        """Apply backend-specific show-time configuration."""
+
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             return self._apply_wayland_layer_shell_if_needed()
         return True
@@ -169,6 +181,8 @@ def _read_hot_corner_backend() -> OverlayBackend | None:
 
 
 class ScreenCorner(str, Enum):
+    """Stable IDs for screen corners that can trigger dwell actions."""
+
     TOP_LEFT = "top_left"
     TOP_RIGHT = "top_right"
     BOTTOM_LEFT = "bottom_left"
@@ -177,6 +191,15 @@ class ScreenCorner(str, Enum):
 
 @dataclass(slots=True)
 class HotCornerSensorHandle:
+    """Runtime objects owned for a single hot-corner sensor window.
+
+    Attributes:
+        corner: Corner observed by the sensor window.
+        screen: Screen that hosts the sensor window.
+        window: Input sensor widget.
+        overlay: Platform overlay controller for the sensor widget.
+    """
+
     corner: ScreenCorner
     screen: QScreen
     window: "HotCornerSensorWindow"
@@ -184,6 +207,8 @@ class HotCornerSensorHandle:
 
 
 class HotCornerIndicator(QWidget):
+    """Small visual progress indicator shown during hot-corner dwell."""
+
     def __init__(
         self,
         *,
@@ -199,6 +224,8 @@ class HotCornerIndicator(QWidget):
         _configure_hot_corner_window(self, accepts_input=False)
 
     def set_progress(self, progress: float) -> None:
+        """Set dwell progress as a value clamped between 0.0 and 1.0."""
+
         clamped_progress = max(0.0, min(progress, 1.0))
         if abs(clamped_progress - self._progress) < 0.001:
             return
@@ -206,6 +233,8 @@ class HotCornerIndicator(QWidget):
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
+        """Paint the circular dwell progress indicator."""
+
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -242,6 +271,8 @@ class HotCornerIndicator(QWidget):
 
 
 class HotCornerSensorWindow(QWidget):
+    """Input sensor window that emits enter/leave signals for one corner."""
+
     entered = Signal()
     left = Signal()
 
@@ -251,14 +282,20 @@ class HotCornerSensorWindow(QWidget):
         _configure_hot_corner_window(self, accepts_input=True)
 
     def enterEvent(self, event: object) -> None:
+        """Emit ``entered`` when the pointer enters the sensor."""
+
         del event
         self.entered.emit()
 
     def leaveEvent(self, event: object) -> None:
+        """Emit ``left`` when the pointer leaves the sensor."""
+
         del event
         self.left.emit()
 
     def paintEvent(self, event: QPaintEvent) -> None:
+        """Suppress painting; the sensor is input-only."""
+
         del event
 
 
@@ -306,10 +343,14 @@ class HotCornerWindowToggleController(QObject):
         self._timer.timeout.connect(self._poll)
 
     def start(self) -> None:
+        """Start hot-corner sensing and dwell polling."""
+
         self._show_sensor_windows()
         self._timer.start()
 
     def stop(self) -> None:
+        """Stop sensing, hide helper windows, and clear dwell state."""
+
         self._timer.stop()
         self._indicator.hide()
         self._hide_sensor_windows()

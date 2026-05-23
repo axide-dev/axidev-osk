@@ -45,7 +45,11 @@ _COMMON_QT_PLUGIN_ROOTS = (
     Path("/usr/local/lib64/qt6/plugins"),
     Path("/usr/local/lib/qt6/plugins"),
 )
+
+
 def configure_wayland_layer_shell_environment() -> bool:
+    """Configure Qt to use layer-shell when the session and plugin support it."""
+
     if not is_wayland_session():
         return False
 
@@ -78,6 +82,8 @@ def apply_wayland_layer_shell(
     exclusion_zone: int,
     margins: QMargins,
 ) -> bool:
+    """Apply layer-shell properties to a realized Qt window handle."""
+
     if not is_wayland_session():
         return False
 
@@ -104,6 +110,8 @@ def apply_wayland_layer_shell(
 
 
 def is_wayland_session() -> bool:
+    """Return whether the current Linux session appears to be Wayland."""
+
     if not sys.platform.startswith("linux"):
         return False
     if os.environ.get("WAYLAND_DISPLAY"):
@@ -131,6 +139,8 @@ def _find_layer_shell_plugin_root() -> Path | None:
 
 
 def find_qt_platform_plugin_root() -> Path | None:
+    """Find a Qt plugin root containing the xcb platform plugin."""
+
     seen_roots: set[Path] = set()
 
     for plugin_root in _candidate_plugin_roots():
@@ -197,6 +207,8 @@ def _runtime_qt_plugin_roots() -> list[Path]:
 
 
 def prepend_plugin_root(plugin_root: Path) -> None:
+    """Prepend a Qt plugin root to ``QT_PLUGIN_PATH`` if needed."""
+
     existing = [entry for entry in os.environ.get("QT_PLUGIN_PATH", "").split(os.pathsep) if entry]
     root_str = str(plugin_root)
     if root_str in existing:

@@ -1,3 +1,5 @@
+"""Adapter around axidev_io keyboard output and key-state observation."""
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +21,14 @@ Unsubscribe = Callable[[], None]
 
 @dataclass(frozen=True)
 class KeyPressHandle:
+    """Backend key press handle tracked until release.
+
+    Attributes:
+        key_name: Canonical backend key name.
+        mods: Optional backend modifier chord sent with the key.
+        repeats: Whether the backend should auto-repeat the press.
+    """
+
     key_name: str
     mods: str | None = None
     repeats: bool = True
@@ -26,6 +36,16 @@ class KeyPressHandle:
 
 @dataclass(frozen=True)
 class PermissionSetupOutcome:
+    """Result from attempting keyboard permission setup.
+
+    Attributes:
+        already_granted: Whether permissions were already available.
+        helper_applied: Whether a helper changed system/user permissions.
+        requires_logout: Whether the current desktop session must be refreshed.
+        helper_path: Optional helper script path that was applied.
+        error_text: Optional user-facing failure text.
+    """
+
     already_granted: bool
     helper_applied: bool
     requires_logout: bool
@@ -34,6 +54,8 @@ class PermissionSetupOutcome:
 
 
 class AxidevIoKeyboardBackend:
+    """Keyboard backend facade used by the runtime keyboard service."""
+
     def __init__(self) -> None:
         self._keyboard: Any | None = None
         self._ready = False
@@ -47,32 +69,46 @@ class AxidevIoKeyboardBackend:
 
     @property
     def ready(self) -> bool:
+        """Whether keyboard output is initialized and available."""
+
         return self._ready
 
     @property
     def status_text(self) -> str:
+        """Human-readable backend status for UI display."""
+
         return self._status_text
 
     @property
     def needs_permission_setup(self) -> bool:
+        """Whether Linux input permissions must be configured before use."""
+
         return self._needs_permission_setup
 
     @property
     def permission_setup_text(self) -> str:
+        """Human-readable instructions for resolving permission issues."""
+
         return self._build_permission_setup_text()
 
     @property
     def permission_setup_script_path(self) -> Path | None:
+        """Bundled permission helper path, when available."""
+
         return self._permission_script_path()
 
     @property
     def permission_setup_command(self) -> str:
+        """Shell command the user can run to configure permissions."""
+
         script_path = self._permission_script_path()
         if script_path is not None:
             return self._permission_setup_command(script_path)
         return "bash ./vendor/axidev-io-python/vendor/axidev-io/scripts/setup_uinput_permissions.sh"
 
     def setup_permissions(self) -> PermissionSetupOutcome:
+        """Attempt to apply keyboard permission setup through axidev_io."""
+
         try:
             from axidev_io import keyboard
         except Exception as exc:
@@ -167,6 +203,8 @@ class AxidevIoKeyboardBackend:
         )
 
     def initialize(self) -> bool:
+        """Initialize axidev_io keyboard output and state observation."""
+
         if self._ready:
             return True
 
@@ -203,6 +241,8 @@ class AxidevIoKeyboardBackend:
         return True
 
     def shutdown(self) -> None:
+        """Release held keys and shut down the backend."""
+
         if self._keyboard is None:
             return
 
@@ -219,6 +259,8 @@ class AxidevIoKeyboardBackend:
             self._clear_pressed_key_names()
 
     def add_key_state_listener(self, listener: KeyStateListener) -> Unsubscribe:
+        """Register a backend key-state listener and return an unsubscribe callback."""
+
         with self._key_state_lock:
             self._key_state_listeners.append(listener)
         active = True
@@ -237,6 +279,8 @@ class AxidevIoKeyboardBackend:
         return unsubscribe
 
     def is_key_down(self, key_name: str) -> bool:
+        """Return whether a canonical backend key is currently pressed."""
+
         canonical_name = self._canonical_key_name(key_name)
         if canonical_name is None:
             return False
@@ -245,12 +289,16 @@ class AxidevIoKeyboardBackend:
             return canonical_name in self._pressed_key_names
 
     def key_name_for_spec(self, spec: KeySpec) -> str | None:
+        """Resolve a key spec to a canonical backend key name."""
+
         key_name = self._resolve_key_name(spec)
         if key_name is None:
             return None
         return self._canonical_key_name(key_name)
 
     def sync_latched_key(self, spec: KeySpec, latched: bool, press_handle: object | None = None) -> object | None:
+        """Synchronize backend held-key state for a latchable key."""
+
         if (
             not self._ready
             or self._keyboard is None
@@ -298,6 +346,8 @@ class AxidevIoKeyboardBackend:
             return press_handle
 
     def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
+        """Emit a key press for ``spec`` and return a handle for release."""
+
         if not self._ready or self._keyboard is None:
             return None
         if spec.latchable and not spec.holds_when_latched:
@@ -318,6 +368,8 @@ class AxidevIoKeyboardBackend:
             return None
 
     def key_up(self, press: object | None) -> None:
+        """Release a key press previously returned by ``key_down``."""
+
         if not self._ready or self._keyboard is None or not isinstance(press, KeyPressHandle):
             return
 

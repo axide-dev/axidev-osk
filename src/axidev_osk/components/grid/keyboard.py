@@ -1,3 +1,5 @@
+"""Keyboard grid widget that builds key buttons from declarative layout config."""
+
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -51,7 +51,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Verify hot corner remains isolated and only crosses into the runtime through explicit callbacks/events.
 - [x] Verify deterministic IDs are computed only in `runtime/identity.py` and duplicate IDs fail validation clearly.
 - [x] Verify platform branching is contained in dedicated low-level platform/overlay/permission modules and not spread through higher-level orchestration.
-- [ ] Verify public modules, classes, functions, and DTO fields have consistent docstrings and type hints.
+- [x] Verify public modules, classes, functions, and DTO fields have consistent docstrings and type hints.
 - [x] Verify user-visible `on-screen keyboard` wording has been replaced with `OSK`, while internal package names and metadata stay unchanged per issue scope.
 - [ ] Run the full test suite locally before merge.
 

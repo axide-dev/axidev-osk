@@ -63,6 +63,15 @@ class BackendKeyRegistered:
 
 @dataclass(frozen=True, slots=True)
 class BackendKeyStateChanged:
+    """Observed backend key state changed for a registered key.
+
+    Attributes:
+        layout_id: Deterministic keyboard layout instance ID.
+        key_id: Logical key group for the changed key.
+        pressed: Whether the physical/backend key is currently pressed.
+        latched: Whether the runtime considers the key latched.
+    """
+
     layout_id: str
     key_id: str
     pressed: bool
@@ -71,6 +80,14 @@ class BackendKeyStateChanged:
 
 @dataclass(frozen=True, slots=True)
 class KeyLatchChanged:
+    """Runtime latch state changed for a logical key.
+
+    Attributes:
+        layout_id: Deterministic keyboard layout instance ID.
+        key_id: Logical key group for the latchable key.
+        latched: New latched state.
+    """
+
     layout_id: str
     key_id: str
     latched: bool
@@ -78,6 +95,12 @@ class KeyLatchChanged:
 
 @dataclass(frozen=True, slots=True)
 class HotCornerTriggered:
+    """A configured hot corner completed its dwell trigger.
+
+    Attributes:
+        corner: Stable corner ID that triggered.
+    """
+
     corner: str
 
 

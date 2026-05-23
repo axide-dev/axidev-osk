@@ -1,3 +1,5 @@
+"""Application entry point for the Axidev OSK executable."""
+
 from __future__ import annotations
 
 import ctypes

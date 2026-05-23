@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject
 
+from ..runtime.context import Context
 
 from .controller import HotCornerWindowToggleController
 
@@ -17,7 +18,7 @@ class HotCornerService:
         self._parent = parent
         self._controller: HotCornerWindowToggleController | None = None
 
-    def start(self, context) -> None:
+    def start(self, context: Context) -> None:
         """Create and start the controller from runtime config."""
 
         self._controller = HotCornerWindowToggleController(
