@@ -75,7 +75,7 @@ class ApplicationRuntimePromptTests(unittest.TestCase):
             patch.object(runtime._window_manager, "get_or_create", return_value=parent),
             patch.object(runtime._window_manager, "create_transient", side_effect=create_transient),
         ):
-            runtime._show_linux_permission_prompt()
+            runtime._linux_permissions.show_prompt()
 
         self.assertEqual(created[0].title, sentinel)
 
