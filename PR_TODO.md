@@ -43,12 +43,12 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 ## Issue #9 Acceptance TODO
 
 - [x] Verify startup still builds the same keyboard overlay through the generic window builder.
-- [ ] Verify quit confirmation is a normal prompt window built from config, with no dedicated confirm-window class.
+- [x] Verify quit confirmation is a normal prompt window built from config, with no dedicated confirm-window class.
 - [x] Verify keyboard layout parity tests cover current US ISO rows, dense columns, nav block, function row, and key sizing.
-- [ ] Verify components expose the required Qt dynamic properties, including `componentType`, `componentId`, `keyId`, `ioKey`, `interactionState`, `latched`, `pressed`, `profile`, and `layout` where applicable.
+- [x] Verify components expose the required Qt dynamic properties, including `componentType`, `componentId`, `keyId`, `ioKey`, `interactionState`, `latched`, `pressed`, `profile`, and `layout` where applicable.
 - [x] Verify widgets do not directly call backend services; backend access should flow through `Context`, dispatcher commands, and services.
 - [x] Verify durable state lives in the runtime state store, not as the source of truth inside reusable widgets/components.
-- [ ] Verify hot corner remains isolated and only crosses into the runtime through explicit callbacks/events.
+- [x] Verify hot corner remains isolated and only crosses into the runtime through explicit callbacks/events.
 - [ ] Verify deterministic IDs are computed only in `runtime/identity.py` and duplicate IDs fail validation clearly.
 - [ ] Verify platform branching is contained in dedicated low-level platform/overlay/permission modules and not spread through higher-level orchestration.
 - [ ] Verify public modules, classes, functions, and DTO fields have consistent docstrings and type hints.
