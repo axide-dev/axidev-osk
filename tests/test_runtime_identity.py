@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from axidev_osk.runtime.identity import prompt_button_id, stable_id, validate_unique_ids
+from axidev_osk.runtime.identity import key_component_id, prompt_button_id, stable_id, validate_unique_ids
 
 
 class RuntimeIdentityTests(unittest.TestCase):
@@ -22,6 +22,32 @@ class RuntimeIdentityTests(unittest.TestCase):
 
     def test_stable_id_override_returns_explicit_id(self) -> None:
         self.assertEqual(stable_id("parent", "component", "value", stable_override="component:explicit"), "component:explicit")
+
+    def test_key_component_id_collides_for_duplicate_grid_position(self) -> None:
+        first = key_component_id(
+            "grid:example",
+            "key",
+            row=1,
+            column=2,
+            width=1.0,
+            height=1,
+            key_id="a",
+            io_key="A",
+            label="A",
+        )
+        second = key_component_id(
+            "grid:example",
+            "key",
+            row=1,
+            column=2,
+            width=1.0,
+            height=1,
+            key_id="b",
+            io_key="B",
+            label="B",
+        )
+
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

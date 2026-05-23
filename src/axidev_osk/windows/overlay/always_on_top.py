@@ -18,7 +18,6 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from enum import Enum
 from typing import TypeVar
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
@@ -30,8 +29,9 @@ from PySide6.QtWidgets import QWidget
 # them without importing Qt-bound modules. We re-export them here so
 # existing callers keep working.
 from ...config.models import AlwaysOnTopWindowConfig, OverlayPlacement
+from ...platform.overlay import OVERLAY_BACKEND_ENV, OVERLAY_DEBUG_ENV, OverlayBackend, read_selected_overlay_backend
 
-from .layer_shell import (
+from ...platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
     ANCHOR_RIGHT,
@@ -46,22 +46,10 @@ from .layer_shell import (
 )
 
 
-OVERLAY_BACKEND_ENV = "AXIDEV_OSK_OVERLAY_BACKEND"
-OVERLAY_DEBUG_ENV = "AXIDEV_OSK_OVERLAY_DEBUG"
 TWindow = TypeVar("TWindow", bound=QWidget)
 
 
 _logger = logging.getLogger(__name__)
-
-
-class OverlayBackend(str, Enum):
-    """Supported platform strategies for overlay windows."""
-
-    NATIVE = "native"
-    WINDOWS_NATIVE = "windows-native"
-    WAYLAND_LAYER_SHELL = "wayland-layer-shell"
-    X11_UTILITY = "x11-utility"
-    X11_UTILITY_BRIDGE = "x11-utility-bridge"
 
 
 if sys.platform == "win32":
@@ -697,14 +685,7 @@ def _set_overlay_backend(backend: OverlayBackend) -> OverlayBackend:
 
 
 def _read_selected_backend() -> OverlayBackend | None:
-    raw_value = os.environ.get(OVERLAY_BACKEND_ENV, "")
-    if not raw_value:
-        return None
-
-    try:
-        return OverlayBackend(raw_value)
-    except ValueError:
-        return None
+    return read_selected_overlay_backend()
 
 
 def _overlay_debug_enabled() -> bool:

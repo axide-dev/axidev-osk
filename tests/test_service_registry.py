@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.registries import ServiceRegistry
+from axidev_osk.runtime.registries import ComponentRegistry, ServiceRegistry, SurfaceRegistry
 from axidev_osk.services.keyboard import KeyboardService
 
 
@@ -80,6 +80,20 @@ class ServiceRegistryTests(unittest.TestCase):
             self.assertEqual(runtime.start(), 0)
 
         self.assertEqual(calls, ["start:first", "start:second", "stop:first", "stop:second"])
+
+
+class RegistryErrorTests(unittest.TestCase):
+    def test_component_registry_reports_missing_kind(self) -> None:
+        registry = ComponentRegistry()
+
+        with self.assertRaisesRegex(ValueError, "No component registered for kind 'missing-component'"):
+            registry.build(SimpleNamespace(kind="missing-component"), None)  # type: ignore[arg-type]
+
+    def test_surface_registry_reports_missing_kind(self) -> None:
+        registry = SurfaceRegistry()
+
+        with self.assertRaisesRegex(ValueError, "No surface registered for kind 'missing-surface'"):
+            registry.build(SimpleNamespace(kind="missing-surface"), None)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

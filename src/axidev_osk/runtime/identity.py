@@ -44,8 +44,8 @@ def key_component_id(
 ) -> str:
     """Return the deterministic component ID for a keyboard grid item."""
 
-    semantic_key = key_id or io_key or label
-    return stable_id(parent_id, kind, row, column, width, height, semantic_key)
+    del key_id, io_key, label
+    return stable_id(parent_id, kind, row, column, width, height)
 
 
 def prompt_button_id(parent_id: str, role: str) -> str:

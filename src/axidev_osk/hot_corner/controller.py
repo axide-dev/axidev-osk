@@ -19,7 +19,6 @@ detected overlay backend:
 
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -31,7 +30,7 @@ from PySide6.QtWidgets import QWidget
 from ..config.models import HotCornerConfig
 from ..runtime.dispatcher import Dispatcher
 from ..runtime.events import HotCornerTriggered
-from ..windows.overlay.layer_shell import (
+from ..platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
     ANCHOR_TOP,
@@ -39,7 +38,7 @@ from ..windows.overlay.layer_shell import (
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
 )
-from ..windows.overlay.always_on_top import OVERLAY_BACKEND_ENV, OverlayBackend
+from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
 from ..styles.theme import ThemePalette, build_theme_palette
 
 
@@ -130,8 +129,8 @@ class HotCornerOverlayController:
         return True
 
     def _detect_backend(self) -> OverlayBackend:
-        platform = QGuiApplication.platformName().lower() if QGuiApplication.instance() is not None else ""
-        selected = _read_hot_corner_backend()
+        platform = qt_platform_name()
+        selected = read_selected_overlay_backend()
         if platform == "wayland" and selected == OverlayBackend.WAYLAND_LAYER_SHELL:
             return selected
         if platform == "xcb":
@@ -168,16 +167,6 @@ class HotCornerOverlayController:
         if screen is None:
             return QRect(0, 0, 1920, 1080)
         return screen.geometry()
-
-
-def _read_hot_corner_backend() -> OverlayBackend | None:
-    raw_value = os.environ.get(OVERLAY_BACKEND_ENV, "")
-    if not raw_value:
-        return None
-    try:
-        return OverlayBackend(raw_value)
-    except ValueError:
-        return None
 
 
 class ScreenCorner(str, Enum):

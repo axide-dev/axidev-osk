@@ -1,10 +1,15 @@
 """Component package and registry wiring."""
 
+from importlib import import_module
+
 from ..runtime.registries import ComponentRegistry
-from .button import register as register_button
-from .grid.builder import register as register_grid
-from .key import register as register_key
-from .prompt import register as register_prompt
+
+_BUNDLED_COMPONENT_MODULES = (
+    "axidev_osk.components.key",
+    "axidev_osk.components.grid.builder",
+    "axidev_osk.components.button",
+    "axidev_osk.components.prompt",
+)
 
 
 def register_components(registry: ComponentRegistry) -> None:
@@ -20,10 +25,9 @@ def register_components(registry: ComponentRegistry) -> None:
         Mutates the registry.
     """
 
-    register_key(registry)
-    register_grid(registry)
-    register_button(registry)
-    register_prompt(registry)
+    for module_name in _BUNDLED_COMPONENT_MODULES:
+        module = import_module(module_name)
+        module.register(registry)
 
 
 __all__ = ["register_components"]

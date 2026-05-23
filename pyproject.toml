@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "axidev-osk"
 version = "0.14.0"
-description = "A PySide6 OSK with a US ISO-style layout."
+description = "A PySide6 on-screen keyboard with a US ISO-style layout."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"

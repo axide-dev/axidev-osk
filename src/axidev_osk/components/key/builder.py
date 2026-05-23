@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ...config.models import ComponentConfig, KeyboardMetrics, KeyConfig, SpacerConfig
 from ...runtime.context import Context
 from ...runtime.registries import ComponentRegistry
-from ..grid.keyboard import KeyboardWidget
+
+
+@runtime_checkable
+class KeyboardGridHost(Protocol):
+    """Host interface required by key and spacer component builders."""
+
+    @property
+    def key_metrics(self) -> KeyboardMetrics:
+        """Pixel metrics inherited by child key/spacer components."""
+
+    def build_key_from_config(self, config: KeyConfig, context: Context) -> QWidget:
+        """Build a key child using the owning grid's runtime wiring."""
 
 
 def register(registry: ComponentRegistry) -> None:
@@ -53,9 +66,9 @@ def build_key_component(
 
     if not isinstance(config, KeyConfig):
         raise TypeError(f"Expected KeyConfig, got {type(config).__name__}")
-    if not isinstance(host, KeyboardWidget):
+    if not isinstance(host, KeyboardGridHost):
         raise RuntimeError(
-            "Key components must be built with a KeyboardWidget host; "
+            "Key components must be built with a keyboard grid host; "
             "the parent grid is responsible for forwarding host=self."
         )
     return host.build_key_from_config(config, context)
@@ -86,9 +99,7 @@ def build_spacer_component(
     del context
     if not isinstance(config, SpacerConfig):
         raise TypeError(f"Expected SpacerConfig, got {type(config).__name__}")
-    metrics: KeyboardMetrics = (
-        host._metrics if isinstance(host, KeyboardWidget) else KeyboardMetrics()  # noqa: SLF001
-    )
+    metrics = host.key_metrics if isinstance(host, KeyboardGridHost) else KeyboardMetrics()
     spacer = QWidget()
     spacer.setProperty("componentType", "spacer")
     spacer.setProperty("componentId", config.id)

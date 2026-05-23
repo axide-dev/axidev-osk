@@ -113,6 +113,12 @@ class KeyboardWidget(QFrame):
         self._refresh_key_legends()
         self.destroyed.connect(lambda _object=None: self._unsubscribe_from_runtime_key_state())
 
+    @property
+    def key_metrics(self) -> KeyboardMetrics:
+        """Return metrics inherited by child key and spacer builders."""
+
+        return self._metrics
+
     def _add_grid(self, container: QGridLayout, grid: GridConfig) -> int:
         """Place a single grid's components into the Qt container.
 
