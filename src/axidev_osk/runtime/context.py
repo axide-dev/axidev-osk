@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..config.models import AppConfig
-from ..services.keyboard import KeyboardService
 from .registries import ComponentRegistry, SurfaceRegistry
 from .state_store import StateStore
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
+    from ..services.keyboard import KeyboardService
 
 
 @dataclass(slots=True)
@@ -29,7 +29,7 @@ class Context:
 
     config: AppConfig
     dispatcher: "Dispatcher"
-    keyboard: KeyboardService
+    keyboard: "KeyboardService"
     state: StateStore
     components: ComponentRegistry
     surfaces: SurfaceRegistry
