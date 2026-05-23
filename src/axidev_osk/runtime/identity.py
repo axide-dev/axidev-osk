@@ -48,6 +48,12 @@ def key_component_id(
     return stable_id(parent_id, kind, row, column, width, height, semantic_key)
 
 
+def prompt_button_id(parent_id: str, role: str) -> str:
+    """Return the deterministic component ID for a prompt action button."""
+
+    return stable_id(parent_id, "button", role, stable_override=f"{parent_id}:button:{role}")
+
+
 def validate_unique_ids(ids: Iterable[str], *, scope: str) -> None:
     """Raise a clear validation error when duplicate deterministic IDs exist.
 
