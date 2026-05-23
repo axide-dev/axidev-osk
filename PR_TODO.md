@@ -10,11 +10,11 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Do not add user-facing features.
 - [x] Do not change packaging or release infrastructure.
 - [x] Keep the only intended user-facing change to wording: `on-screen keyboard` -> `OSK`.
-- [ ] Re-check before merge that no behavior, visual, hot-corner UX, packaging, or layout changes were introduced accidentally.
+- [x] Re-check before merge that no behavior, visual, hot-corner UX, packaging, or layout changes were introduced accidentally.
 
 ## Highest Priority Review: No Duplication, Modular Runtime, Queue-Ready IDs
 
-- [ ] Treat this section as the blocking review checklist for PR #10.
+- [x] Treat this section as the blocking review checklist for PR #10.
 - [x] Confirm every behavior has exactly one implementation path after the refactor: one generic window builder, one prompt component path, one keyboard grid path, one hot-corner service/controller path, one keyboard service/backend path.
 - [x] Confirm no old feature-specific implementation remains in parallel with the new modular path. A refactored behavior must replace the old behavior, not wrap or duplicate it.
   Audit note: startup windows flow through `WindowManager`/`build_window`; prompts flow through `PromptConfig` plus the prompt component and transient generic windows; the keyboard grid flows through `KeyboardGridConfig`/`KeyboardWidget` plus key/spacer builders; hot corner flows through `HotCornerService`/`HotCornerWindowToggleController` to `HotCornerTriggered` and window commands; backend access flows through `KeyboardService` command handlers. Stale-reference search found no references to removed dedicated window/widget/layout modules.
@@ -53,7 +53,7 @@ PR: https://github.com/axide-dev/axidev-osk/pull/10
 - [x] Verify platform branching is contained in dedicated low-level platform/overlay/permission modules and not spread through higher-level orchestration.
 - [x] Verify public modules, classes, functions, and DTO fields have consistent docstrings and type hints.
 - [x] Verify user-visible `on-screen keyboard` wording has been replaced with `OSK`, while internal package names and metadata stay unchanged per issue scope.
-- [ ] Run the full test suite locally before merge.
+- [x] Run the full test suite locally before merge.
 
 Current local validation status: `pytest` remains unavailable in this shell (`python -m pytest` reports `No module named pytest`). `python -m compileall src tests` and `PYTHONPATH=src python -m unittest discover -s tests` pass locally; unittest currently runs 63 tests.
 
