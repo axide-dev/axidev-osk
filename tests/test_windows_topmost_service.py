@@ -45,7 +45,7 @@ class WindowsTopmostServiceTests(unittest.TestCase):
             service._handle_window_event(1, 2, 3, 4, 5, 6, 7)
             service._handle_window_event(1, 2, 3, 4, 5, 6, 7)
 
-        single_shot.assert_called_once_with(50, service._refresh_topmost_windows)
+        single_shot.assert_called_once_with(100, service._refresh_topmost_windows)
 
         service._refresh_topmost_windows()
 

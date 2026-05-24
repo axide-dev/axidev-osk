@@ -18,6 +18,7 @@ _EVENT_MIN = 0x00000001
 _EVENT_MAX = 0x7FFFFFFF
 _WINEVENT_OUTOFCONTEXT = 0x0000
 _WINEVENT_SKIPOWNPROCESS = 0x0002
+_REFRESH_DELAY_MS = 100
 
 
 class WindowsTopmostService(QObject):
@@ -112,7 +113,7 @@ class WindowsTopmostService(QObject):
         if self._pending:
             return
         self._pending = True
-        QTimer.singleShot(50, self._refresh_topmost_windows)
+        QTimer.singleShot(_REFRESH_DELAY_MS, self._refresh_topmost_windows)
 
     def _refresh_topmost_windows(self) -> None:
         self._pending = False
