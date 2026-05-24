@@ -15,6 +15,7 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
+from ..services.windows_topmost import WindowsTopmostService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
@@ -83,6 +84,9 @@ class ApplicationRuntime:
         register_context_command_handlers(context_handlers)
         context_handlers.install(self._dispatcher, self.context)
         self._window_manager = WindowManager(self.context)
+        for service in self._services.services():
+            if isinstance(service, WindowsTopmostService):
+                service.set_reapply_always_on_top(self._window_manager.reapply_always_on_top_windows)
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
             app,

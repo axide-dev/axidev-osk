@@ -85,6 +85,17 @@ class RuntimeWindow(QMainWindow):
 
         self._quit_controller_managed = managed
 
+    @property
+    def always_on_top(self) -> bool:
+        """Return whether this window is configured as an always-on-top overlay."""
+
+        return self._config.overlay.always_on_top
+
+    def reapply_always_on_top(self) -> None:
+        """Ask the overlay controller to reassert platform topmost state."""
+
+        self._overlay.reapply_always_on_top()
+
     def apply_startup_size(self, *, minimum_size: tuple[int, int] = (0, 0)) -> None:
         """Resize the window to its polished minimum size.
 

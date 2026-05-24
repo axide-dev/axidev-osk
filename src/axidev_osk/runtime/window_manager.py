@@ -119,3 +119,10 @@ class WindowManager:
         """Return all live managed windows."""
 
         return list(self._windows.values())
+
+    def reapply_always_on_top_windows(self) -> None:
+        """Reassert topmost state for live windows configured as overlays."""
+
+        for window in self._windows.values():
+            if window.always_on_top:
+                window.reapply_always_on_top()
