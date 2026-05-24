@@ -40,8 +40,10 @@ class WindowsTopmostService(QObject):
         """Install the Win32 event hook on Windows; no-op elsewhere."""
 
         if sys.platform != "win32":
+            _logger.debug("Skipping Windows topmost service on platform %s", sys.platform)
             return
         if self._hook is not None:
+            _logger.debug("Windows topmost event hook is already installed")
             return
         self._dispatcher = context.dispatcher
 
@@ -84,12 +86,16 @@ class WindowsTopmostService(QObject):
             self._hook = None
             self._callback = None
             _logger.warning("Unable to install Windows topmost event hook")
+            return
+
+        _logger.info("Installed Windows topmost event hook")
 
     def stop(self) -> None:
         """Remove the Win32 event hook if it was installed."""
 
         if sys.platform == "win32" and self._hook is not None:
             ctypes.windll.user32.UnhookWinEvent(ctypes.c_void_p(self._hook))
+            _logger.info("Removed Windows topmost event hook")
         self._hook = None
         self._callback = None
         self._pending = False
@@ -109,9 +115,11 @@ class WindowsTopmostService(QObject):
         if self._pending:
             return
         self._pending = True
+        _logger.debug("Observed Windows window-manager event; scheduling topmost refresh")
         QTimer.singleShot(_REFRESH_DELAY_MS, self._refresh_topmost_windows)
 
     def _refresh_topmost_windows(self) -> None:
         self._pending = False
         if self._dispatcher is not None:
+            _logger.debug("Dispatching window-manager-observed event for topmost refresh")
             self._dispatcher.dispatch_event(WindowManagerEventObserved())

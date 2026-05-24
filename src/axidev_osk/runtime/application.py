@@ -148,6 +148,7 @@ class ApplicationRuntime:
         """Refresh configured topmost windows after platform window events."""
 
         if isinstance(event, WindowManagerEventObserved):
+            _logger.debug("Handling window-manager event by refreshing topmost windows")
             self._window_manager.reapply_always_on_top_windows()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
