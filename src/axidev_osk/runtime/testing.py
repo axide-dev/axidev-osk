@@ -23,7 +23,7 @@ from .commands import AppQuit
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
-from .events import WindowCloseRequested
+from .events import WindowCloseRequested, WindowManagerEventObserved
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
@@ -64,6 +64,12 @@ class _TestRuntime:
         """Route hot-corner visibility commands through production helper."""
 
         route_hot_corner_triggered(event, self)
+
+    def _handle_window_manager_event_observed(self, event: object) -> None:
+        """Refresh topmost windows for tests using default handlers."""
+
+        if isinstance(event, WindowManagerEventObserved):
+            self._window_manager.reapply_always_on_top_windows()
 
 
 def make_test_context(

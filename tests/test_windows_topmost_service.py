@@ -5,7 +5,10 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication
 
+from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.runtime.events import HotCornerTriggered, WindowManagerEventObserved
 from axidev_osk.runtime.window_manager import WindowManager
+from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.services.windows_topmost import WindowsTopmostService
 
 
@@ -38,8 +41,11 @@ class WindowsTopmostServiceTests(unittest.TestCase):
 
     def test_window_event_debounces_topmost_refresh(self) -> None:
         _app()
-        reapply = Mock()
-        service = WindowsTopmostService(reapply)
+        dispatcher = Dispatcher()
+        events: list[object] = []
+        dispatcher.add_event_handler(events.append)
+        service = WindowsTopmostService()
+        service._dispatcher = dispatcher
 
         with patch("axidev_osk.services.windows_topmost.QTimer.singleShot") as single_shot:
             service._handle_window_event(1, 2, 3, 4, 5, 6, 7)
@@ -49,7 +55,25 @@ class WindowsTopmostServiceTests(unittest.TestCase):
 
         service._refresh_topmost_windows()
 
-        reapply.assert_called_once_with()
+        self.assertEqual(events, [WindowManagerEventObserved()])
+
+    def test_runtime_handler_refreshes_topmost_windows_for_window_manager_event(self) -> None:
+        window_manager = Mock()
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._window_manager = window_manager
+
+        runtime._handle_window_manager_event_observed(WindowManagerEventObserved())
+
+        window_manager.reapply_always_on_top_windows.assert_called_once_with()
+
+    def test_runtime_handler_ignores_other_events(self) -> None:
+        window_manager = Mock()
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._window_manager = window_manager
+
+        runtime._handle_window_manager_event_observed(HotCornerTriggered(corner="bottom_left"))
+
+        window_manager.reapply_always_on_top_windows.assert_not_called()
 
 
 if __name__ == "__main__":

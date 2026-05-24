@@ -5,11 +5,12 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
-from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QTimer
 
 from ..runtime.context import Context
+from ..runtime.dispatcher import Dispatcher
+from ..runtime.events import WindowManagerEventObserved
 
 
 _logger = logging.getLogger(__name__)
@@ -26,29 +27,23 @@ class WindowsTopmostService(QObject):
 
     def __init__(
         self,
-        reapply_always_on_top: Callable[[], None] | None = None,
         *,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._reapply_always_on_top = reapply_always_on_top
+        self._dispatcher: Dispatcher | None = None
         self._hook: int | None = None
         self._callback: object | None = None
         self._pending = False
 
-    def set_reapply_always_on_top(self, callback: Callable[[], None]) -> None:
-        """Bind the runtime-owned topmost refresh callback."""
-
-        self._reapply_always_on_top = callback
-
     def start(self, context: Context) -> None:
         """Install the Win32 event hook on Windows; no-op elsewhere."""
 
-        del context
         if sys.platform != "win32":
             return
         if self._hook is not None:
             return
+        self._dispatcher = context.dispatcher
 
         callback_type = ctypes.WINFUNCTYPE(
             None,
@@ -98,6 +93,7 @@ class WindowsTopmostService(QObject):
         self._hook = None
         self._callback = None
         self._pending = False
+        self._dispatcher = None
 
     def _handle_window_event(
         self,
@@ -117,5 +113,5 @@ class WindowsTopmostService(QObject):
 
     def _refresh_topmost_windows(self) -> None:
         self._pending = False
-        if self._reapply_always_on_top is not None:
-            self._reapply_always_on_top()
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch_event(WindowManagerEventObserved())

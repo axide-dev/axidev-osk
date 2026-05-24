@@ -15,13 +15,12 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
-from ..services.windows_topmost import WindowsTopmostService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
-from .events import WindowCloseRequested
+from .events import WindowCloseRequested, WindowManagerEventObserved
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -84,9 +83,6 @@ class ApplicationRuntime:
         register_context_command_handlers(context_handlers)
         context_handlers.install(self._dispatcher, self.context)
         self._window_manager = WindowManager(self.context)
-        for service in self._services.services():
-            if isinstance(service, WindowsTopmostService):
-                service.set_reapply_always_on_top(self._window_manager.reapply_always_on_top_windows)
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
             app,
@@ -147,6 +143,12 @@ class ApplicationRuntime:
         """Map hot-corner events to managed window visibility commands."""
 
         route_hot_corner_triggered(event, self)
+
+    def _handle_window_manager_event_observed(self, event: object) -> None:
+        """Refresh configured topmost windows after platform window events."""
+
+        if isinstance(event, WindowManagerEventObserved):
+            self._window_manager.reapply_always_on_top_windows()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

@@ -80,6 +80,7 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     )
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
+    registry.register_event_handler(lambda runtime: runtime._handle_window_manager_event_observed)
 
 
 def route_hot_corner_triggered(event: object, runtime: object) -> None:
