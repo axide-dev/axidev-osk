@@ -1,3 +1,16 @@
+"""Cross-platform "always on top" overlay backend dispatch.
+
+Selects an overlay strategy per platform/session — Wayland layer-shell,
+X11 utility windows (or the bridge variant), Win32 ``SetWindowPos`` /
+``WS_EX_TOPMOST``, and a generic Qt fallback — behind a single
+``OverlayBackend`` enum. Platform-specific branching is contained here
+so callers stay platform-agnostic.
+
+Per the project's architectural rules, platform branching lives only in
+leaf intent-named functions; higher-level callers should pick a backend
+from ``OverlayBackend`` and let this module map to the right primitive.
+"""
+
 from __future__ import annotations
 
 import ctypes
@@ -5,15 +18,20 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import Enum
 from typing import TypeVar
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
-from .layer_shell import (
+# AlwaysOnTopWindowConfig and OverlayPlacement are pure data DTOs and live
+# in the config layer so config files (and a future Lua config) can build
+# them without importing Qt-bound modules. We re-export them here so
+# existing callers keep working.
+from ...config.models import AlwaysOnTopWindowConfig, OverlayPlacement
+from ...platform.overlay import OVERLAY_BACKEND_ENV, OVERLAY_DEBUG_ENV, OverlayBackend, read_selected_overlay_backend
+
+from ...platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
     ANCHOR_RIGHT,
@@ -28,32 +46,10 @@ from .layer_shell import (
 )
 
 
-OVERLAY_BACKEND_ENV = "AXIDEV_OSK_OVERLAY_BACKEND"
-OVERLAY_DEBUG_ENV = "AXIDEV_OSK_OVERLAY_DEBUG"
 TWindow = TypeVar("TWindow", bound=QWidget)
 
 
 _logger = logging.getLogger(__name__)
-
-
-class OverlayBackend(str, Enum):
-    NATIVE = "native"
-    WINDOWS_NATIVE = "windows-native"
-    WAYLAND_LAYER_SHELL = "wayland-layer-shell"
-    X11_UTILITY = "x11-utility"
-    X11_UTILITY_BRIDGE = "x11-utility-bridge"
-
-
-class OverlayPlacement(str, Enum):
-    CENTER = "center"
-    TOP_RIGHT = "top-right"
-
-
-@dataclass(slots=True)
-class AlwaysOnTopWindowConfig:
-    placement: OverlayPlacement = OverlayPlacement.TOP_RIGHT
-    screen_margin: int = 16
-    manage_position: bool = True
 
 
 if sys.platform == "win32":
@@ -107,6 +103,8 @@ def prepare_always_on_top_window_environment(
     prefer_layer_shell: bool = True,
     prefer_x11_bridge: bool = True,
 ) -> OverlayBackend:
+    """Select and configure the best overlay backend for the current session."""
+
     if sys.platform == "win32":
         return _set_overlay_backend(OverlayBackend.WINDOWS_NATIVE)
 
@@ -149,12 +147,16 @@ def configure_always_on_top_window(
     *,
     config: AlwaysOnTopWindowConfig | None = None,
 ) -> "AlwaysOnTopWindowController":
+    """Configure ``window`` as an always-on-top overlay."""
+
     controller = AlwaysOnTopWindowController(window, config=config)
     controller.configure_window()
     return controller
 
 
 def configure_plain_window(window: QWidget) -> "PlainWindowController":
+    """Configure ``window`` with normal desktop window behavior."""
+
     controller = PlainWindowController(window)
     controller.configure_window()
     return controller
@@ -165,12 +167,16 @@ def create_always_on_top_window(
     *,
     config: AlwaysOnTopWindowConfig | None = None,
 ) -> tuple[TWindow, "AlwaysOnTopWindowController"]:
+    """Create a window and configure it as an always-on-top overlay."""
+
     window = window_factory()
     controller = configure_always_on_top_window(window, config=config)
     return window, controller
 
 
 class AlwaysOnTopWindowController:
+    """Backend-aware controller for a managed overlay window."""
+
     def __init__(
         self,
         window: QWidget,
@@ -192,10 +198,14 @@ class AlwaysOnTopWindowController:
 
     @property
     def backend(self) -> OverlayBackend:
+        """Overlay backend selected for the managed window."""
+
         return self._backend
 
     @property
     def uses_custom_chrome(self) -> bool:
+        """Whether this backend requires app-provided frameless chrome."""
+
         return self._backend in {
             OverlayBackend.WAYLAND_LAYER_SHELL,
             OverlayBackend.X11_UTILITY,
@@ -203,6 +213,8 @@ class AlwaysOnTopWindowController:
         }
 
     def configure_window(self) -> None:
+        """Apply base Qt flags and attributes for overlay behavior."""
+
         self._window.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -226,6 +238,8 @@ class AlwaysOnTopWindowController:
         )
 
     def handle_show(self) -> bool:
+        """Apply backend-specific adjustments after the window is shown."""
+
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             self._apply_windows_window_styles()
             self._position_floating_window_if_needed()
@@ -252,6 +266,8 @@ class AlwaysOnTopWindowController:
         return False
 
     def prepare_show(self) -> bool:
+        """Apply backend-specific adjustments before showing the window."""
+
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             return self._sync_wayland_layer_shell()
         if self._backend in {OverlayBackend.WINDOWS_NATIVE, OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
@@ -260,6 +276,8 @@ class AlwaysOnTopWindowController:
         return False
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
+        """Move the overlay to an absolute screen position."""
+
         target = QPoint(position)
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry(for_layer_shell=True)
@@ -297,6 +315,8 @@ class AlwaysOnTopWindowController:
         anchors: int,
         screen_geometry: QRect | None = None,
     ) -> None:
+        """Move the overlay using explicit layer-shell anchors when available."""
+
         if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
             self.move_to(position, screen_geometry=screen_geometry)
             return
@@ -327,6 +347,8 @@ class AlwaysOnTopWindowController:
         )
 
     def move_by(self, dx: int, dy: int) -> None:
+        """Move the overlay by a bounded delta."""
+
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._move_layer_shell_by(dx, dy)
             return
@@ -341,6 +363,8 @@ class AlwaysOnTopWindowController:
         self._floating_position_initialized = True
 
     def resize_by(self, dx: int, dy: int) -> None:
+        """Resize the overlay by a bounded delta."""
+
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._resize_layer_shell_by(dx, dy)
             return
@@ -588,18 +612,26 @@ class AlwaysOnTopWindowController:
 
 
 class PlainWindowController:
+    """No-op controller for ordinary non-overlay windows."""
+
     def __init__(self, window: QWidget) -> None:
         self._window = window
 
     @property
     def backend(self) -> OverlayBackend:
+        """Return the native backend marker for plain windows."""
+
         return OverlayBackend.NATIVE
 
     @property
     def uses_custom_chrome(self) -> bool:
+        """Plain windows use platform-provided chrome."""
+
         return False
 
     def configure_window(self) -> None:
+        """Apply normal focus, background, and window flag behavior."""
+
         self._window.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._window.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self._window.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
@@ -610,15 +642,23 @@ class PlainWindowController:
         self._window.setWindowFlag(Qt.WindowType.Tool, False)
 
     def handle_show(self) -> bool:
+        """Return false because plain windows need no show adjustment."""
+
         return False
 
     def prepare_show(self) -> bool:
+        """Return false because plain windows need no pre-show adjustment."""
+
         return False
 
     def move_by(self, _dx: int, _dy: int) -> None:
+        """Ignore overlay move requests for plain windows."""
+
         return
 
     def resize_by(self, _dx: int, _dy: int) -> None:
+        """Ignore overlay resize requests for plain windows."""
+
         return
 
 
@@ -645,14 +685,7 @@ def _set_overlay_backend(backend: OverlayBackend) -> OverlayBackend:
 
 
 def _read_selected_backend() -> OverlayBackend | None:
-    raw_value = os.environ.get(OVERLAY_BACKEND_ENV, "")
-    if not raw_value:
-        return None
-
-    try:
-        return OverlayBackend(raw_value)
-    except ValueError:
-        return None
+    return read_selected_overlay_backend()
 
 
 def _overlay_debug_enabled() -> bool:

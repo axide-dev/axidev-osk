@@ -1,6 +1,24 @@
+"""Bundled US ISO keyboard layout, expressed as plain config DTOs.
+
+This module is the canonical example of a default layout produced by
+the Python side of the project. It exists to:
+
+- ship a working layout out of the box;
+- exercise the same ``LayoutConfig`` / ``GridConfig`` / ``KeyConfig``
+  data path that user configs will use;
+- act as a parity reference for the future Lua config loader.
+
+It is intentionally pure data: no Qt, no widgets, no registries. When
+the Lua config layer lands (issue #8), this file should be replicable
+as a Lua bundled config and treated as a fallback default rather than
+embedded Python knowledge.
+"""
+
 from __future__ import annotations
 
-from ..models import KeyDisplay, KeySpec
+from ...models import KeyDisplay, KeySpec
+from ...runtime.identity import key_component_id, stable_id, validate_unique_ids
+from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
 
 UNIT = 4
@@ -26,6 +44,8 @@ def key(
     repeats: bool = True,
     display_variants: tuple[KeyDisplay, ...] = (),
 ) -> KeySpec:
+    """Build a key spec with default keyboard-layout behavior."""
+
     return KeySpec(
         label=label,
         row=row,
@@ -55,6 +75,8 @@ def held_modifier(
     io_key: str,
     latched_io_key: str | None = None,
 ) -> KeySpec:
+    """Build a latchable modifier that keeps its backend key held."""
+
     return key(
         label,
         row=row,
@@ -71,10 +93,14 @@ def held_modifier(
 
 
 def spacer(*, row: int, column: int, width: float = 1.0, height: int = 1) -> KeySpec:
+    """Build a spacer spec that reserves grid space without a key widget."""
+
     return key("", row=row, column=column, width=width, height=height, is_spacer=True)
 
 
 def u(value: int) -> int:
+    """Convert logical layout units to sparse grid columns."""
+
     return value * UNIT
 
 
@@ -94,6 +120,8 @@ def shifted_key(
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
 ) -> KeySpec:
+    """Build a key with an alternate display while shift is active."""
+
     return key(
         label,
         row=row,
@@ -125,6 +153,8 @@ def letter_key(
     height: int = 1,
     repeats: bool = True,
 ) -> KeySpec:
+    """Build a letter key with shift and caps-aware display variants."""
+
     lower_label = label.lower()
     upper_label = label.upper()
     return key(
@@ -151,6 +181,8 @@ def letter_key(
 
 
 def build_us_iso_layout() -> list[KeySpec]:
+    """Return the bundled US ISO layout as ordered key specs."""
+
     return [
         key("Esc", row=0, column=u(0), io_key="Escape"),
         key("F1", row=0, column=u(2)),
@@ -283,3 +315,42 @@ def build_us_iso_layout() -> list[KeySpec]:
         key("↓", row=5, column=NAV_START + u(1), io_key="Down"),
         key("→", row=5, column=NAV_START + u(2), io_key="Right"),
     ]
+
+
+def build_us_iso_layout_config(*, parent_id: str = "default") -> LayoutConfig:
+    """Build the bundled US ISO keyboard as pure layout/grid/component data.
+
+    Args:
+        parent_id: Parent config ID used when deriving deterministic IDs.
+
+    Returns:
+        Layout config containing one grid with key and spacer component DTOs.
+
+    Side effects:
+        Raises ``ValueError`` if deterministic IDs collide.
+    """
+
+    layout_id = stable_id(parent_id, "layout", "us_iso", stable_override="layout:us-iso")
+    grid_id = stable_id(layout_id, "grid", "keyboard", stable_override="grid:us-iso:keyboard")
+    components: list[KeyConfig | SpacerConfig] = []
+    for spec in build_us_iso_layout():
+        kind = "spacer" if spec.is_spacer else "key"
+        component_id = key_component_id(
+            grid_id,
+            kind,
+            row=spec.row,
+            column=spec.column,
+            width=spec.width,
+            height=spec.height,
+            key_id=spec.key_id,
+            io_key=spec.io_key,
+            label=spec.label,
+        )
+        if spec.is_spacer:
+            components.append(SpacerConfig(id=component_id, spec=spec))
+            continue
+        components.append(KeyConfig(id=component_id, spec=spec))
+
+    validate_unique_ids((component.id for component in components), scope="US ISO keyboard grid")
+    grid = GridConfig(id=grid_id, components=tuple(components), nav_start_column=NAV_START)
+    return LayoutConfig(id=layout_id, name="us-iso", grids=(grid,))

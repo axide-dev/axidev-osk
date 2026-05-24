@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
+from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
 
 
 class KeyboardIoPermissionTests(unittest.TestCase):
@@ -54,7 +54,7 @@ class KeyboardIoPermissionTests(unittest.TestCase):
 
         with (
             patch.dict("sys.modules", {"axidev_io": fake_module}),
-            patch("axidev_osk.keyboard_io.sys.platform", "linux"),
+            patch("axidev_osk.services.keyboard.io.sys.platform", "linux"),
             patch.object(backend, "_permission_script_path", return_value=Path("/tmp/setup_uinput_permissions.sh")),
             patch.object(backend, "_run_permission_setup_script", return_value="/tmp/setup_uinput_permissions.sh") as run_helper,
         ):

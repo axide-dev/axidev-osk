@@ -1,3 +1,5 @@
+"""Application theme palette, font, and stylesheet helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +22,26 @@ BODY_FONT_FAMILIES = [
 
 @dataclass(frozen=True)
 class ThemePalette:
+    """Qt colors used by the application stylesheet.
+
+    Attributes:
+        shell_fill: Main overlay background color.
+        shell_edge: Border color for shell surfaces.
+        shell_bar: Custom chrome/title bar background color.
+        shell_bar_hover: Hover color for chrome controls.
+        accent: Primary brand/accent color.
+        key_fill: Default key background color.
+        key_hover: Key hover background color.
+        key_pressed: Key pressed background color.
+        key_edge: Key border color.
+        active_fill: Active or latched key background color.
+        active_edge: Active or latched key border color.
+        text: Primary text color.
+        disabled_text: Muted text color.
+        disabled_fill: Disabled key background color.
+        disabled_edge: Disabled key border color.
+    """
+
     shell_fill: QColor
     shell_edge: QColor
     shell_bar: QColor
@@ -38,6 +60,8 @@ class ThemePalette:
 
 
 def build_theme_palette() -> ThemePalette:
+    """Return the default application color palette."""
+
     return ThemePalette(
         shell_fill=QColor("#0B0B10"),
         shell_edge=QColor("#242433"),
@@ -62,6 +86,8 @@ def _rgba(color: QColor, alpha: int) -> str:
 
 
 def build_application_font() -> QFont:
+    """Return the default application font stack and sizing."""
+
     font = QFont()
     font.setFamilies(BODY_FONT_FAMILIES)
     font.setPixelSize(14)
@@ -75,6 +101,8 @@ def build_application_font() -> QFont:
 
 
 def apply_theme(app: QApplication) -> None:
+    """Apply the default palette, font, and stylesheet to ``app``."""
+
     palette = build_theme_palette()
     qt_palette = QPalette(app.palette())
     qt_palette.setColor(QPalette.ColorRole.Window, palette.shell_fill)
@@ -93,6 +121,8 @@ def apply_theme(app: QApplication) -> None:
 
 
 def build_stylesheet() -> str:
+    """Return the Qt stylesheet generated from the default palette."""
+
     palette = build_theme_palette()
     shell_fill = palette.shell_fill.name()
     shell_edge = palette.shell_edge.name()

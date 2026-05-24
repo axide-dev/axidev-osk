@@ -1,2 +1,1 @@
-"""AxiDev on-screen keyboard package."""
-
+"""Axidev OSK package."""

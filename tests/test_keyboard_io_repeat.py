@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
+from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
 
 

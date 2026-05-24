@@ -6,11 +6,13 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from axidev_osk.components.key_button import create_key_button
-from axidev_osk.components.key_state_machine import KeyStateMachine
-from axidev_osk.components.keyboard_widget import KeyboardWidget
-from axidev_osk.keyboard_io import AxidevIoKeyboardBackend
+from axidev_osk.components.button.key import create_key_button
+from axidev_osk.components.button.state import KeyStateMachine
+from axidev_osk.components.grid.keyboard import KeyboardWidget
+from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
+from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
 from axidev_osk.models import KeySpec
+from axidev_osk.runtime.testing import make_test_context
 
 
 def _app() -> QApplication:
@@ -66,11 +68,11 @@ class FakeWidgetKeyboardBackend:
     def key_down(self, spec: KeySpec, latched_keys):
         return SimpleNamespace(spec=spec)
 
-    def key_up(self, active_press) -> None:
+    def key_up(self, press_handle) -> None:
         return None
 
-    def sync_latched_key(self, spec: KeySpec, latched: bool, active_press=None):
-        return active_press
+    def sync_latched_key(self, spec: KeySpec, latched: bool, press_handle=None):
+        return press_handle
 
     def emit_key_state(self, key_name: str, pressed: bool) -> None:
         if pressed:
@@ -153,7 +155,8 @@ class KeyStateListenerTests(unittest.TestCase):
     def test_keyboard_widget_reflects_backend_key_state_for_sent_io_key(self) -> None:
         _app()
         backend = FakeWidgetKeyboardBackend(pressed_key_names={"A"})
-        widget = KeyboardWidget(backend)
+        context = make_test_context(backend)
+        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
         self.addCleanup(widget.close)
 
         button = self._button_for_io_key(widget, "A")
@@ -171,11 +174,13 @@ class KeyStateListenerTests(unittest.TestCase):
         _app()
         calls: list[str] = []
         state_machine = KeyStateMachine()
-        button = create_key_button(
+        key_button = create_key_button(
             "A",
             state_machine=state_machine,
+            component_id="component:test-key",
             on_release=lambda: calls.append("released"),
         )
+        button = key_button.button
         self.addCleanup(button.close)
 
         button.pressed.emit()

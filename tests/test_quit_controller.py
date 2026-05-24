@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QApplication, QWidget
 
 from axidev_osk.application.quit_controller import ApplicationQuitController
@@ -17,8 +16,6 @@ def _app() -> QApplication:
 
 
 class FakeWindow(QWidget):
-    close_requested = Signal()
-
     def __init__(self) -> None:
         super().__init__()
         self.managed = False
@@ -52,7 +49,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         callback.assert_not_called()
         exit_app.assert_not_called()
 
-    def test_registered_window_close_signal_requests_quit(self) -> None:
+    def test_register_window_marks_window_managed_and_unmanages_on_quit(self) -> None:
         app = _app()
         window = FakeWindow()
         callback = Mock()
@@ -63,7 +60,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         self.assertTrue(window.managed)
 
         with patch.object(app, "exit"):
-            window.close_requested.emit()
+            controller.request_quit()
 
         self.assertFalse(window.managed)
         callback.assert_called_once_with()

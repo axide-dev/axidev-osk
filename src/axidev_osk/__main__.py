@@ -1,3 +1,5 @@
+"""Module entry point for ``python -m axidev_osk``."""
+
 from __future__ import annotations
 
 import sys

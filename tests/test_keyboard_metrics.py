@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from axidev_osk.components.keyboard_metrics import DEFAULT_KEYBOARD_METRICS
+from axidev_osk.components.grid import DEFAULT_KEYBOARD_METRICS
 
 
 def test_keyboard_metrics_match_compact_layout_defaults() -> None:

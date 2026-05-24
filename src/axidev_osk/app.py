@@ -1,3 +1,5 @@
+"""Application entry point for the Axidev OSK executable."""
+
 from __future__ import annotations
 
 import ctypes
@@ -7,11 +9,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from PySide6.QtWidgets import QApplication
 
-from .application.hot_corner import HotCornerConfig, HotCornerWindowToggleController
-from .application.main_window import MainWindow
-from .application.overlay_window import prepare_always_on_top_window_environment
-from .application.quit_controller import ApplicationQuitController
-from .styles.theme import apply_theme
+from .runtime.application import ApplicationRuntime
+from .windows.overlay import prepare_always_on_top_window_environment
 
 
 _logger = logging.getLogger(__name__)
@@ -37,25 +36,28 @@ def _package_version() -> str:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+    """Run the Axidev OSK Qt application.
+
+    Args:
+        None.
+
+    Returns:
+        QApplication exit code.
+
+    Side effects:
+        Initializes process metadata, overlay environment, runtime services, and Qt windows.
+    """
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] [%(name)s] (%(filename)s:%(lineno)d) %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     _set_process_name("axidev-osk")
     _logger.info("Starting axidev-osk v%s", _package_version())
     prepare_always_on_top_window_environment()
     app = QApplication(sys.argv)
     app.setApplicationName("axidev-osk")
     app.setQuitOnLastWindowClosed(False)
-    apply_theme(app)
-    hot_corner = HotCornerWindowToggleController(
-        app,
-        config=HotCornerConfig(),
-        parent=app,
-    )
-    window = MainWindow()
-    quit_controller = ApplicationQuitController(app, parent=app)
-    quit_controller.register_window(window)
-    quit_controller.register_quit_callback(hot_corner.stop)
-    quit_controller.register_quit_callback(window.shutdown)
-    quit_controller.install_signal_handlers()
-    hot_corner.start()
-    window.show()
-    return app.exec()
+    runtime = ApplicationRuntime(app)
+    return runtime.start()
