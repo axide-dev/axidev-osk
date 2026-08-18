@@ -15,8 +15,9 @@ from ..runtime.events import WindowManagerEventObserved
 
 _logger = logging.getLogger(__name__)
 
-_EVENT_MIN = 0x00000001
-_EVENT_MAX = 0x7FFFFFFF
+_EVENT_OBJECT_REORDER = 0x8004
+_OBJID_CLIENT = -4
+_CHILDID_SELF = 0
 _WINEVENT_OUTOFCONTEXT = 0x0000
 _WINEVENT_SKIPOWNPROCESS = 0x0002
 _REFRESH_DELAY_MS = 100
@@ -34,7 +35,11 @@ class WindowsTopmostService(QObject):
         self._dispatcher: Dispatcher | None = None
         self._hook: int | None = None
         self._callback: object | None = None
-        self._pending = False
+        self._desktop_window: int | None = None
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(_REFRESH_DELAY_MS)
+        self._refresh_timer.timeout.connect(self._refresh_topmost_windows)
 
     def start(self, context: Context) -> None:
         """Install the Win32 event hook on Windows; no-op elsewhere."""
@@ -70,10 +75,14 @@ class WindowsTopmostService(QObject):
             ctypes.c_uint,
         ]
         set_win_event_hook.restype = ctypes.c_void_p
+        get_desktop_window = user32.GetDesktopWindow
+        get_desktop_window.argtypes = []
+        get_desktop_window.restype = ctypes.c_void_p
+        self._desktop_window = int(get_desktop_window() or 0)
         self._hook = int(
             set_win_event_hook(
-                _EVENT_MIN,
-                _EVENT_MAX,
+                _EVENT_OBJECT_REORDER,
+                _EVENT_OBJECT_REORDER,
                 None,
                 self._callback,
                 0,
@@ -85,6 +94,8 @@ class WindowsTopmostService(QObject):
         if self._hook == 0:
             self._hook = None
             self._callback = None
+            self._desktop_window = None
+            self._dispatcher = None
             _logger.warning("Unable to install Windows topmost event hook")
             return
 
@@ -93,12 +104,13 @@ class WindowsTopmostService(QObject):
     def stop(self) -> None:
         """Remove the Win32 event hook if it was installed."""
 
+        self._refresh_timer.stop()
         if sys.platform == "win32" and self._hook is not None:
             ctypes.windll.user32.UnhookWinEvent(ctypes.c_void_p(self._hook))
             _logger.info("Removed Windows topmost event hook")
         self._hook = None
         self._callback = None
-        self._pending = False
+        self._desktop_window = None
         self._dispatcher = None
 
     def _handle_window_event(
@@ -111,15 +123,20 @@ class WindowsTopmostService(QObject):
         event_thread: int,
         event_time: int,
     ) -> None:
-        del hook, event, hwnd, object_id, child_id, event_thread, event_time
-        if self._pending:
+        del hook, event_thread, event_time
+        if (
+            event != _EVENT_OBJECT_REORDER
+            or int(hwnd or 0) != self._desktop_window
+            or object_id != _OBJID_CLIENT
+            or child_id != _CHILDID_SELF
+        ):
             return
-        self._pending = True
-        _logger.debug("Observed Windows window-manager event; scheduling topmost refresh")
-        QTimer.singleShot(_REFRESH_DELAY_MS, self._refresh_topmost_windows)
+        if self._refresh_timer.isActive():
+            return
+        _logger.debug("Observed Windows desktop reorder; scheduling topmost refresh")
+        self._refresh_timer.start()
 
     def _refresh_topmost_windows(self) -> None:
-        self._pending = False
         if self._dispatcher is not None:
-            _logger.debug("Dispatching window-manager-observed event for topmost refresh")
+            _logger.debug("Dispatching window-manager observation for topmost refresh")
             self._dispatcher.dispatch_event(WindowManagerEventObserved())

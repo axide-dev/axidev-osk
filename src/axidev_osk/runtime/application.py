@@ -20,7 +20,7 @@ from ..windows.surface import register_surfaces
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
-from .events import WindowCloseRequested, WindowManagerEventObserved
+from .events import WindowCloseRequested
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -144,13 +144,6 @@ class ApplicationRuntime:
 
         route_hot_corner_triggered(event, self)
 
-    def _handle_window_manager_event_observed(self, event: object) -> None:
-        """Refresh configured topmost windows after platform window events."""
-
-        if isinstance(event, WindowManagerEventObserved):
-            _logger.debug("Handling window-manager event by refreshing topmost windows")
-            self._window_manager.reapply_always_on_top_windows()
-
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt
         prompt_window = self._window_manager.create_transient(
@@ -183,4 +176,3 @@ class ApplicationRuntime:
             overlay=replace(keyboard_window.overlay, config=keyboard_window.overlay.config),
             chrome=ChromeConfig(enabled=False),
         )
-

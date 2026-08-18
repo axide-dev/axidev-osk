@@ -385,7 +385,16 @@ class AlwaysOnTopWindowController:
             return
         if not self._window.isVisible():
             return
-        self._apply_windows_window_styles()
+        hwnd = int(self._window.winId())
+        _set_window_pos(
+            hwnd,
+            _HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_NOOWNERZORDER,
+        )
 
     def _detect_backend(self) -> OverlayBackend:
         if sys.platform == "win32":
