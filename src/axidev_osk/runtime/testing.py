@@ -65,7 +65,6 @@ class _TestRuntime:
 
         route_hot_corner_triggered(event, self)
 
-
 def make_test_context(
     keyboard_backend: Any,
     *,

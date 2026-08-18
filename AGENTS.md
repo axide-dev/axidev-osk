@@ -28,6 +28,7 @@ The Lua configuration layer is not implemented yet. That does not reduce its imp
 6. New APIs should be designed so a future Lua config can describe and assemble them.
 7. Runtime subsystems should communicate through the central event/command queue, not direct cross-subsystem calls.
 8. Durable application state belongs to the main process/runtime state store, not individual widgets, components, or Lua globals.
+9. Services, UI widgets, backend adapters, timers, and platform integrations must not call window managers, widgets, backends, Lua callbacks, or other subsystems directly when a runtime event or command can represent the interaction.
 
 ## Mental Model
 
@@ -62,6 +63,7 @@ When adding or refactoring code, keep these boundaries clear:
 - Prefer interfaces that allow multiple instances of the same window/surface type.
 - Prefer names that describe reusable concepts like `surface`, `grid`, `panel`, `component`, or `controller` when accurate.
 - Prefer event/command messages over direct calls between UI, backend, Lua, and application orchestration.
+- Treat runtime events and commands as the default integration boundary between subsystems; direct calls are acceptable only inside one subsystem's own implementation or when adapting an event/command in the main runtime.
 - Prefer main-owned state updates that can be reset, replayed, logged, and cleaned up during config reloads or profile switches.
 
 ## Avoid
@@ -73,6 +75,7 @@ When adding or refactoring code, keep these boundaries clear:
 - writing new code that makes multi-window composition harder
 - mixing backend emission logic into button rendering code
 - letting UI widgets directly invoke backend services or Lua callbacks when an event can be routed through the queue instead
+- letting services directly invoke window managers, windows, widgets, backend adapters, or other services instead of emitting a runtime event or command
 - adding hidden shared runtime state to reusable layouts; reused layouts should instantiate fresh runtime state
 
 ## Lua Readiness
@@ -103,6 +106,8 @@ The target runtime architecture is queue-driven:
 - Lua callbacks do not directly mutate widgets, backend objects, or durable state. They receive context and event objects, then return or enqueue commands.
 
 Use this model even when the current implementation is still simpler. New work should move the app toward explicit events, commands, and state-store updates rather than direct object-to-object coupling.
+
+When a subsystem observes something, it should emit an event DTO. When a subsystem wants something to happen, it should dispatch a command DTO. The main runtime/orchestration layer owns translating those events and commands into concrete calls on window managers, services, state stores, and platform adapters. Do not wire services directly to windows or window managers, and do not wire UI components directly to backend services, unless the call remains entirely inside the same subsystem and cannot reasonably cross the runtime event/command boundary.
 
 Durable state should be namespaced by app/profile/window/layout/component identity, but owned centrally by the main process. Components render state snapshots and emit events; they should not be the source of truth for application state. Profile switches, config reloads, and runtime resets should be able to cleanly discard all non-preserved state from this central store.
 

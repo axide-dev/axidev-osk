@@ -176,4 +176,3 @@ class ApplicationRuntime:
             overlay=replace(keyboard_window.overlay, config=keyboard_window.overlay.config),
             chrome=ChromeConfig(enabled=False),
         )
-

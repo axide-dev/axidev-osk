@@ -378,6 +378,24 @@ class AlwaysOnTopWindowController:
         self._window.resize(next_width, next_height)
         self._floating_position_initialized = True
 
+    def reapply_always_on_top(self) -> None:
+        """Reassert topmost behavior for visible Windows-native overlays."""
+
+        if self._backend != OverlayBackend.WINDOWS_NATIVE:
+            return
+        if not self._window.isVisible():
+            return
+        hwnd = int(self._window.winId())
+        _set_window_pos(
+            hwnd,
+            _HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_NOOWNERZORDER,
+        )
+
     def _detect_backend(self) -> OverlayBackend:
         if sys.platform == "win32":
             return OverlayBackend.WINDOWS_NATIVE
@@ -658,6 +676,11 @@ class PlainWindowController:
 
     def resize_by(self, _dx: int, _dy: int) -> None:
         """Ignore overlay resize requests for plain windows."""
+
+        return
+
+    def reapply_always_on_top(self) -> None:
+        """Plain windows do not participate in overlay topmost refreshes."""
 
         return
 
