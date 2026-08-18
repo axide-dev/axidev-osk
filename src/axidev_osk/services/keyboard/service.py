@@ -129,6 +129,7 @@ class KeyboardService:
         self._shutdown = True
         started_at = time.perf_counter()
         _logger.info("Shutting down keyboard backend")
+        self._release_press_handles()
         self._backend.shutdown()
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
 
@@ -192,7 +193,7 @@ class KeyboardService:
         layouts = set(self._layouts)
         layouts.update(layout for layout, _key_id in self._press_handles)
         layouts.update(layout for layout, _key_id in self._latched_keys)
-        self._press_handles.clear()
+        self._release_press_handles()
         self._latched_keys.clear()
         if self._context is None:
             return
@@ -207,7 +208,7 @@ class KeyboardService:
         press_handle = self._backend.key_down(spec, latched_keys)
         state_key = self._state_key_for_spec(spec)
         if state_key is not None and press_handle is not None:
-            self._press_handles[(layout_id, state_key)] = press_handle
+            self._press_handles[self._press_handle_key(layout_id, spec, state_key)] = press_handle
             self._emit_key_state(layout_id, state_key, pressed=True, latched=self._is_spec_latched(layout_id, spec))
 
     def key_up(self, layout_id: str, spec: KeySpec) -> None:
@@ -215,9 +216,12 @@ class KeyboardService:
 
         state_key = self._state_key_for_spec(spec)
         latched = self._is_spec_latched(layout_id, spec)
-        press_handle = self._press_handles.pop((layout_id, state_key), None) if state_key is not None else None
-        if not (spec.holds_when_latched and latched):
-            self._backend.key_up(press_handle)
+        press_handle = (
+            self._press_handles.pop(self._press_handle_key(layout_id, spec, state_key), None)
+            if state_key is not None
+            else None
+        )
+        self._backend.key_up(press_handle)
         if state_key is not None:
             self._emit_key_state(
                 layout_id,
@@ -227,20 +231,15 @@ class KeyboardService:
             )
 
     def sync_latched_key(self, layout_id: str, spec: KeySpec, latched: bool) -> None:
-        """Synchronize a latched modifier with backend held-key state."""
+        """Synchronize logical latch state without changing backend activity."""
 
-        state_key = self._state_key_for_spec(spec)
         if spec.key_id is not None:
             self._set_latch_state(layout_id, spec.key_id, latched)
-        press_handle = self._press_handles.get((layout_id, state_key)) if state_key is not None else None
-        synced_press = self._backend.sync_latched_key(spec, latched, press_handle)
-        if state_key is not None:
-            if synced_press is None:
-                self._press_handles.pop((layout_id, state_key), None)
-            else:
-                self._press_handles[(layout_id, state_key)] = synced_press
-            if spec.holds_when_latched:
-                self._emit_key_state(layout_id, state_key, pressed=latched, latched=latched)
+
+    def _release_press_handles(self) -> None:
+        for press_handle in tuple(self._press_handles.values()):
+            self._backend.key_up(press_handle)
+        self._press_handles.clear()
 
     def _handle_backend_key_state_change(self, key_name: str, pressed: bool) -> None:
         for layout_id, spec in self._specs_by_key_name.get(key_name, []):
@@ -293,6 +292,12 @@ class KeyboardService:
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
         return spec.io_key or spec.label or spec.key_id
+
+    @staticmethod
+    def _press_handle_key(layout_id: str, spec: KeySpec, state_key: str) -> tuple[str, str]:
+        if spec.holds_when_latched and spec.key_id is not None:
+            return layout_id, spec.key_id
+        return layout_id, state_key
 
     def _is_spec_latched(self, layout_id: str, spec: KeySpec) -> bool:
         return bool(spec.key_id is not None and self.is_latched(layout_id, spec.key_id))

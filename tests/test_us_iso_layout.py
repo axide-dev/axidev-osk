@@ -13,6 +13,13 @@ def test_super_keys_use_platform_neutral_labels_and_io_keys() -> None:
     assert [spec.io_key for spec in super_specs] == ["SuperLeft", "SuperRight"]
 
 
+def test_held_modifiers_opt_into_backend_repeat() -> None:
+    held_modifiers = [spec for spec in build_us_iso_layout() if spec.holds_when_latched]
+
+    assert held_modifiers
+    assert all(spec.repeats for spec in held_modifiers)
+
+
 def test_us_iso_layout_config_preserves_key_geometry_and_ids() -> None:
     specs = build_us_iso_layout()
     config = build_us_iso_layout_config()
