@@ -20,6 +20,12 @@ class KeyInteractionState(str, Enum):
     LATCHED = "latched"
     LATCHED_PRESSED = "latched_pressed"
 
+    @property
+    def is_active(self) -> bool:
+        """Whether this UX state requires the backend key to stay down."""
+
+        return self is not KeyInteractionState.IDLE
+
 
 @dataclass(frozen=True, slots=True)
 class KeyStateChange:
@@ -86,6 +92,12 @@ class KeyStateMachine:
             KeyInteractionState.LATCHED_PRESSED,
         }
 
+    @property
+    def is_active(self) -> bool:
+        """Whether pressed or latched state keeps this key active."""
+
+        return self._state.is_active
+
     def add_listener(self, listener: StateListener) -> None:
         """Register a synchronous state-change listener."""
 
@@ -100,6 +112,17 @@ class KeyStateMachine:
         """Transition out of the pressed state when needed."""
 
         self.set_pressed(False, reason="release")
+
+    def release_and_toggle_latched(self) -> None:
+        """Finish a latchable click without publishing an idle handoff state."""
+
+        if not self._latchable:
+            self.release()
+            return
+        self._transition_to(
+            self._compose_state(pressed=False, latched=not self.is_latched),
+            "release_and_toggle_latched",
+        )
 
     def set_pressed(self, pressed: bool, *, reason: str = "set_pressed") -> None:
         """Set the pressed dimension while preserving latch state."""

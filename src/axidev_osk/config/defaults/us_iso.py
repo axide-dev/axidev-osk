@@ -38,7 +38,6 @@ def key(
     key_id: str | None = None,
     latchable: bool = False,
     io_key: str | None = None,
-    latched_io_key: str | None = None,
     holds_when_latched: bool = False,
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
@@ -57,7 +56,6 @@ def key(
         key_id=key_id,
         latchable=latchable,
         io_key=io_key,
-        latched_io_key=latched_io_key,
         holds_when_latched=holds_when_latched,
         honors_latched_modifiers=honors_latched_modifiers,
         repeats=repeats,
@@ -73,7 +71,6 @@ def held_modifier(
     width: float,
     key_id: str,
     io_key: str,
-    latched_io_key: str | None = None,
 ) -> KeySpec:
     """Build a latchable modifier that keeps its backend key held."""
 
@@ -85,10 +82,9 @@ def held_modifier(
         key_id=key_id,
         latchable=True,
         io_key=io_key,
-        latched_io_key=latched_io_key or io_key,
         holds_when_latched=True,
         honors_latched_modifiers=False,
-        repeats=False,
+        repeats=True,
     )
 
 
@@ -115,7 +111,6 @@ def shifted_key(
     key_id: str | None = None,
     latchable: bool = False,
     io_key: str | None = None,
-    latched_io_key: str | None = None,
     holds_when_latched: bool = False,
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
@@ -131,7 +126,6 @@ def shifted_key(
         key_id=key_id,
         latchable=latchable,
         io_key=io_key,
-        latched_io_key=latched_io_key,
         holds_when_latched=holds_when_latched,
         honors_latched_modifiers=honors_latched_modifiers,
         repeats=repeats,
@@ -276,7 +270,6 @@ def build_us_iso_layout() -> list[KeySpec]:
             width=2.75,
             key_id="shift",
             io_key="ShiftRight",
-            latched_io_key="ShiftLeft",
         ),
         key("↑", row=4, column=NAV_START + u(1), io_key="Up"),
         held_modifier(
@@ -299,7 +292,6 @@ def build_us_iso_layout() -> list[KeySpec]:
             width=1.25,
             key_id="super",
             io_key="SuperRight",
-            latched_io_key="SuperLeft",
         ),
         key("Menu", row=5, column=50, width=1.25, io_key="Menu"),
         held_modifier(
@@ -309,7 +301,6 @@ def build_us_iso_layout() -> list[KeySpec]:
             width=1.25,
             key_id="ctrl",
             io_key="CtrlRight",
-            latched_io_key="CtrlLeft",
         ),
         key("←", row=5, column=NAV_START, io_key="Left"),
         key("↓", row=5, column=NAV_START + u(1), io_key="Down"),
