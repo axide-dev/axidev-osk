@@ -37,7 +37,6 @@ class KeySpec:
         key_id: Logical key identity used for shared state.
         latchable: Whether this key can stay logically active after release.
         io_key: Backend key name emitted for normal presses.
-        latched_io_key: Backend key name held while latched.
         holds_when_latched: Whether the backend key should stay held while latched.
         honors_latched_modifiers: Whether display resolution should account for active latches.
         repeats: Whether holding this key should produce repeat events.
@@ -54,7 +53,6 @@ class KeySpec:
     key_id: str | None = None
     latchable: bool = False
     io_key: str | None = None
-    latched_io_key: str | None = None
     holds_when_latched: bool = False
     honors_latched_modifiers: bool = True
     repeats: bool = True

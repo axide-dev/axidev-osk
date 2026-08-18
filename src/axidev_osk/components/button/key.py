@@ -182,9 +182,10 @@ def create_key_button(
             on_press()
 
     def handle_release() -> None:
-        machine.release()
         if machine.latchable:
-            machine.toggle_latched()
+            machine.release_and_toggle_latched()
+        else:
+            machine.release()
         if on_release is not None:
             on_release()
 

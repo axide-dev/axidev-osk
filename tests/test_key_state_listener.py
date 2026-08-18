@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from axidev_osk.components.button.key import create_key_button
-from axidev_osk.components.button.state import KeyStateMachine
+from axidev_osk.components.button.state import KeyInteractionState, KeyStateMachine
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
@@ -85,6 +85,31 @@ class FakeWidgetKeyboardBackend:
 
 
 class KeyStateListenerTests(unittest.TestCase):
+    def test_latchable_release_hands_pressed_state_directly_to_latched(self) -> None:
+        machine = KeyStateMachine(latchable=True)
+        changes = []
+        machine.add_listener(changes.append)
+
+        machine.press()
+        changes.clear()
+        machine.release_and_toggle_latched()
+
+        self.assertEqual(machine.state, KeyInteractionState.LATCHED)
+        self.assertTrue(machine.is_active)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].previous, KeyInteractionState.PRESSED)
+        self.assertEqual(changes[0].current, KeyInteractionState.LATCHED)
+
+        machine.press()
+        changes.clear()
+        machine.release_and_toggle_latched()
+
+        self.assertEqual(machine.state, KeyInteractionState.IDLE)
+        self.assertFalse(machine.is_active)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].previous, KeyInteractionState.LATCHED_PRESSED)
+        self.assertEqual(changes[0].current, KeyInteractionState.IDLE)
+
     def test_backend_listener_updates_pressed_key_registry(self) -> None:
         backend = AxidevIoKeyboardBackend()
         fake_listener = FakeNativeListener()

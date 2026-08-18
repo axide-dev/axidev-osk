@@ -12,8 +12,26 @@ from threading import RLock
 from typing import Any, Mapping
 
 from ...models import KeySpec
+from ...runtime.diagnostics import keyboard_debug_enabled
 
 _logger = logging.getLogger(__name__)
+
+_MODIFIER_KEY_NAMES = frozenset(
+    {
+        "shift",
+        "shiftleft",
+        "shiftright",
+        "ctrl",
+        "ctrlleft",
+        "ctrlright",
+        "alt",
+        "altleft",
+        "altright",
+        "super",
+        "superleft",
+        "superright",
+    }
+)
 
 KeyStateListener = Callable[[str, bool], None]
 Unsubscribe = Callable[[], None]
@@ -61,7 +79,6 @@ class AxidevIoKeyboardBackend:
         self._ready = False
         self._status_text = "Keyboard output is unavailable."
         self._needs_permission_setup = False
-        self._held_latch_presses: dict[str, KeyPressHandle] = {}
         self._pressed_key_names: set[str] = set()
         self._key_state_listeners: list[KeyStateListener] = []
         self._listener_unsubscribe: Unsubscribe | None = None
@@ -220,7 +237,10 @@ class AxidevIoKeyboardBackend:
             return False
 
         try:
-            keyboard.initialize(key_delay_us=2000, log_level="debug")
+            keyboard.initialize(
+                key_delay_us=2000,
+                log_level="debug" if keyboard_debug_enabled() else "info",
+            )
         except Exception as exc:
             if self._is_linux_permission_error(exc):
                 self._needs_permission_setup = True
@@ -247,7 +267,6 @@ class AxidevIoKeyboardBackend:
             return
 
         try:
-            self._release_all_latch_presses()
             self._stop_key_state_listener()
             self._keyboard.shutdown()
         except Exception as exc:
@@ -255,7 +274,6 @@ class AxidevIoKeyboardBackend:
         finally:
             self._keyboard = None
             self._ready = False
-            self._held_latch_presses.clear()
             self._clear_pressed_key_names()
 
     def add_key_state_listener(self, listener: KeyStateListener) -> Unsubscribe:
@@ -296,55 +314,6 @@ class AxidevIoKeyboardBackend:
             return None
         return self._canonical_key_name(key_name)
 
-    def sync_latched_key(self, spec: KeySpec, latched: bool, press_handle: object | None = None) -> object | None:
-        """Synchronize backend held-key state for a latchable key."""
-
-        if (
-            not self._ready
-            or self._keyboard is None
-            or not spec.holds_when_latched
-            or spec.key_id is None
-        ):
-            return press_handle
-
-        resolved_press_handle = press_handle if isinstance(press_handle, KeyPressHandle) else None
-        try:
-            held_press = self._held_latch_presses.get(spec.key_id)
-            if latched:
-                if held_press is not None:
-                    if resolved_press_handle is held_press:
-                        return None
-                    return press_handle
-
-                if resolved_press_handle is not None:
-                    self._held_latch_presses[spec.key_id] = resolved_press_handle
-                    return None
-
-                press = self._resolve_latched_press(spec)
-                if press is None:
-                    return press_handle
-
-                self._send_key_down(press)
-                self._set_key_down(press.key_name, True)
-                self._held_latch_presses[spec.key_id] = press
-                return press_handle
-
-            if held_press is None:
-                return press_handle
-
-            if held_press.mods is None:
-                self._keyboard.sender.key_up(held_press.key_name)
-            else:
-                self._keyboard.sender.key_up(held_press.key_name, mods=held_press.mods)
-            self._set_key_down(held_press.key_name, False)
-            del self._held_latch_presses[spec.key_id]
-            if resolved_press_handle is held_press:
-                return None
-            return press_handle
-        except Exception as exc:
-            _logger.exception("axidev_io latch sync failed for %r: %s", spec.label, exc)
-            return press_handle
-
     def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
         """Emit a key press for ``spec`` and return a handle for release."""
 
@@ -352,16 +321,17 @@ class AxidevIoKeyboardBackend:
             return None
         if spec.latchable and not spec.holds_when_latched:
             return None
-        if spec.holds_when_latched and spec.key_id is not None and spec.key_id in self._held_latch_presses:
-            return None
-
         try:
             press = self._resolve_key_press(spec, latched_keys)
             if press is None:
                 return None
 
+            if spec.holds_when_latched:
+                self._debug_modifier("request-down", key_id=spec.key_id, press=self._describe_press(press))
             self._send_key_down(press)
             self._set_key_down(press.key_name, True)
+            if spec.holds_when_latched:
+                self._debug_modifier("press-active", key_id=spec.key_id, press=self._describe_press(press))
             return press
         except Exception as exc:
             _logger.exception("axidev_io key_down failed for %r: %s", spec.label, exc)
@@ -374,11 +344,15 @@ class AxidevIoKeyboardBackend:
             return
 
         try:
+            if _is_modifier_key_name(press.key_name):
+                self._debug_modifier("request-up", key_id=None, press=self._describe_press(press))
             if press.mods is None:
                 self._keyboard.sender.key_up(press.key_name)
             else:
                 self._keyboard.sender.key_up(press.key_name, mods=press.mods)
             self._set_key_down(press.key_name, False)
+            if _is_modifier_key_name(press.key_name):
+                self._debug_modifier("press-released", key_id=None, press=self._describe_press(press))
         except Exception as exc:
             _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
 
@@ -389,12 +363,6 @@ class AxidevIoKeyboardBackend:
 
         mods = self._resolve_sender_modifiers(spec, latched_keys)
         return KeyPressHandle(key_name=key_name, mods=mods, repeats=spec.repeats)
-
-    def _resolve_latched_press(self, spec: KeySpec) -> KeyPressHandle | None:
-        key_name = spec.latched_io_key or spec.io_key
-        if key_name is None:
-            return None
-        return KeyPressHandle(key_name=key_name, repeats=False)
 
     def _send_key_down(self, press: KeyPressHandle) -> None:
         if self._keyboard is None:
@@ -407,6 +375,18 @@ class AxidevIoKeyboardBackend:
                 mods=press.mods,
                 repeat=press.repeats,
             )
+
+    def _debug_modifier(self, action: str, **context: object) -> None:
+        if not keyboard_debug_enabled():
+            return
+        details = ", ".join(f"{key}={value!r}" for key, value in context.items())
+        _logger.info("keyboard modifier %s: %s", action, details)
+
+    @staticmethod
+    def _describe_press(press: KeyPressHandle | None) -> str | None:
+        if press is None:
+            return None
+        return f"{press.key_name} mods={press.mods!r} repeat={press.repeats}"
 
     def _resolve_key_name(self, spec: KeySpec) -> str | None:
         if spec.io_key is not None:
@@ -436,7 +416,7 @@ class AxidevIoKeyboardBackend:
 
         shift = bool(latched_keys.get("shift", False))
         caps = bool(latched_keys.get("caps", False))
-        shift_is_held = "shift" in self._held_latch_presses
+        shift_is_held = self.is_key_down("ShiftLeft") or self.is_key_down("ShiftRight")
         modifiers: list[str] = []
 
         if len(spec.label) == 1 and spec.label.isalpha():
@@ -578,17 +558,6 @@ class AxidevIoKeyboardBackend:
             except Exception as exc:
                 _logger.exception("axidev_io key state listener failed for %r: %s", key_name, exc)
 
-    def _release_all_latch_presses(self) -> None:
-        if self._keyboard is None:
-            return
 
-        for key_id, press in tuple(self._held_latch_presses.items()):
-            try:
-                if press.mods is None:
-                    self._keyboard.sender.key_up(press.key_name)
-                else:
-                    self._keyboard.sender.key_up(press.key_name, mods=press.mods)
-                self._set_key_down(press.key_name, False)
-            except Exception as exc:
-                _logger.exception("axidev_io key_up failed for latched key %r: %s", key_id, exc)
-        self._held_latch_presses.clear()
+def _is_modifier_key_name(key_name: str) -> bool:
+    return key_name.replace("_", "").replace("-", "").lower() in _MODIFIER_KEY_NAMES
