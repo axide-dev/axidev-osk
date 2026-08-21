@@ -164,16 +164,6 @@ def _build_default_linux_permission_prompt(app_id: str) -> PromptConfig:
                 id=stable_id(
                     prompt_id,
                     "button",
-                    "setup_here",
-                    stable_override="prompt:linux-permission:button:setup_here",
-                ),
-                role="setup_here",
-                label="Run Setup Here",
-            ),
-            ButtonConfig(
-                id=stable_id(
-                    prompt_id,
-                    "button",
                     "already_configured",
                     stable_override="prompt:linux-permission:button:already_configured",
                 ),
@@ -193,8 +183,7 @@ def _build_default_linux_permission_prompt(app_id: str) -> PromptConfig:
         ),
         prompt_glyph="?",
         hint=(
-            "Choose Open In Terminal to run the bundled helper in a real terminal window so sudo can prompt there. "
-            "Run Setup Here still tries the helper directly from the app, but some desktops do not surface that prompt correctly. "
+            "Choose Open In Terminal to run permission setup where sudo can prompt. "
             "If you already ran setup, this session may just need a log out and back in."
         ),
         minimum_size=(560, 150),

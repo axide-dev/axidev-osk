@@ -34,7 +34,7 @@ sudo pacman -S --needed qt6-wayland layer-shell-qt pyside6 \
 curl -L https://raw.githubusercontent.com/axide-dev/axidev-osk/main/packaging/linux/install.sh | sudo bash
 ```
 
-After installing, log out and back in once so the new `input` group membership takes effect, then run `axidev-osk`.
+After installing, log out and back in once so the new `uinput` group membership takes effect, then run `axidev-osk`.
 
 To uninstall:
 
@@ -58,6 +58,32 @@ python -m pip install -e .\vendor\axidev-io-python
 python -m pip install -e .
 axidev-osk
 ```
+
+## Command Line
+
+Running `axidev-osk` without arguments starts the keyboard exactly as before. Passing any argument selects the headless command line instead, without importing Qt or starting the application runtime.
+
+Linux permission commands default to the invoking user. Administrators can prepare another local account with `--user NAME`.
+
+```bash
+axidev-osk linux setup-permissions
+axidev-osk linux status-permissions
+axidev-osk linux remove-permissions
+```
+
+Permission setup creates a dedicated `uinput` group, installs the udev rule, and adds the selected user. Log out and back in after a new membership is added. Permission removal disables the Axidev OSK rule but preserves the shared group and its memberships.
+
+Linux autostart uses the desktop-session XDG autostart standard. It starts the current visible keyboard after the selected user logs into a graphical desktop.
+
+```bash
+axidev-osk linux setup-autostart
+axidev-osk linux status-autostart
+axidev-osk linux remove-autostart
+```
+
+These autostart commands support regular user desktop sessions. Login-screen greeters run under display-manager-specific accounts and environments, so GDM, SDDM, and other greeters require separate adapters that are not implemented yet.
+
+On Windows, replacing `osk.exe` or another protected system binary is not supported. Future Windows integration should use supported accessibility registration and startup mechanisms instead of modifying Windows system files.
 
 ## Wayland Notes
 

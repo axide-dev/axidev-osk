@@ -17,4 +17,4 @@ The package depends on system `pyside6`, `qt6-wayland`, and `layer-shell-qt`. Th
 
 ## uinput Permissions
 
-The install hook reloads udev and reminds the user to join the `input` group. It does not add a user automatically because package hooks do not reliably know which desktop user should receive input-device permissions.
+The install hook reloads udev and tells the user to run `axidev-osk linux setup-permissions`. It does not add a user automatically because package hooks do not reliably know which desktop user should receive input-device permissions.

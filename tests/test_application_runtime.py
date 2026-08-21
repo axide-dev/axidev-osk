@@ -38,6 +38,14 @@ class FakePromptWindow(QWidget):
 
 
 class ApplicationRuntimePromptTests(unittest.TestCase):
+    def test_linux_permission_prompt_has_one_setup_action(self) -> None:
+        prompt = build_default_app_config().linux_permission_prompt
+
+        roles = [button.role for button in prompt.buttons]
+
+        self.assertEqual(roles.count("open_terminal"), 1)
+        self.assertNotIn("setup_here", roles)
+
     def test_quit_prompt_uses_configured_title(self) -> None:
         sentinel = "Sentinel Quit Prompt"
         config = build_default_app_config()

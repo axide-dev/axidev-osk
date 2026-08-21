@@ -50,12 +50,15 @@ install -Dpm0644 packaging/linux/resources/70-axidev-io-uinput.rules \
     %{buildroot}%{_udevrulesdir}/70-axidev-io-uinput.rules
 
 %post
-getent group input >/dev/null || groupadd -r input
+getent group uinput >/dev/null || groupadd -r uinput
 udevadm control --reload-rules >/dev/null 2>&1 || :
 udevadm trigger /dev/uinput >/dev/null 2>&1 || :
 
 %postun
 if [ "$1" -eq 0 ]; then
+    if [ "$(readlink /etc/udev/rules.d/70-axidev-io-uinput.rules 2>/dev/null || :)" = "/dev/null" ]; then
+        rm -f /etc/udev/rules.d/70-axidev-io-uinput.rules
+    fi
     rm -f %{_udevrulesdir}/70-axidev-io-uinput.rules
     udevadm control --reload-rules >/dev/null 2>&1 || :
     udevadm trigger /dev/uinput >/dev/null 2>&1 || :

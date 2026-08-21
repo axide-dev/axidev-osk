@@ -46,7 +46,7 @@ The install path is intentionally simple:
 
 - **Everything the application owns lives under `/opt/axidev-osk/`.** Wiping that directory removes the program. There is no per-user data managed by the installer at this stage.
 - **The launcher in `/usr/local/bin/`** is a one-line shim that exec's `/opt/axidev-osk/.venv/bin/python -m axidev_osk`. The application performs its own environment discovery (Wayland vs X11, layer-shell plugin location, etc.); the shim does not pass extra environment variables.
-- **The udev rule** allows non-root processes to write to `/dev/uinput` when they belong to the `input` group. The installer adds the invoking user to the `input` group when it is missing.
+- **The udev rule** allows non-root processes to write to `/dev/uinput` when they belong to the dedicated `uinput` group. The installer adds the invoking user to that group when it is missing.
 
 PySide6, Qt6, layer-shell-qt, libinput, libudev, and libxkbcommon are **not** bundled with the install. They are loaded from the system at runtime so that the Qt and layer-shell-qt versions match (a mismatch causes hard-to-diagnose ABI segfaults). The Linux dependency list lives in `linux/README.md` and in the top-level `README.md` install commands.
 
@@ -65,14 +65,14 @@ If anything fails before the swap, the previous install remains untouched and `a
 Re-running `install.sh` on a system that already has the correct configuration touches only what needs to change:
 
 - The `/opt/axidev-osk/` swap always happens (the new release replaces the old).
-- The `input` group is created only if missing.
+- The `uinput` group is created only if missing.
 - The udev rule file is rewritten only if its contents differ from the expected value.
 - `udevadm` is reloaded only when the rule actually changed.
-- The user is added to the `input` group only if not already a member.
+- The user is added to the `uinput` group only if not already a member.
 
 ### Uninstall
 
-`/opt/axidev-osk/packaging/linux/uninstall.sh` removes `/opt/axidev-osk/`, `/usr/local/bin/axidev-osk`, and the udev rule. It does **not** touch the user's `input` group membership, since that group is shared with other parts of the system.
+`/opt/axidev-osk/packaging/linux/uninstall.sh` removes `/opt/axidev-osk/`, `/usr/local/bin/axidev-osk`, and the udev rule. It does **not** touch the user's `uinput` group membership, since that group can be shared with other software.
 
 ## Windows
 

@@ -30,7 +30,6 @@ class FakeKeyboardBackend:
         self.status_text = "ready"
         self.needs_permission_setup = False
         self.permission_setup_text = ""
-        self.permission_setup_script_path = None
         self._pressed_key_names = pressed_key_names or set()
         self._listeners = []
         self.key_down = Mock(return_value=SimpleNamespace(name="press"))
@@ -41,9 +40,6 @@ class FakeKeyboardBackend:
         return True
 
     def shutdown(self) -> None:
-        return None
-
-    def setup_permissions(self):
         return None
 
     def add_key_state_listener(self, listener):

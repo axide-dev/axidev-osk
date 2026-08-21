@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-axidev-osk = "axidev_osk.app:main"
+axidev-osk = "axidev_osk.__main__:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

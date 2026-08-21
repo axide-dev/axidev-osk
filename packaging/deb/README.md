@@ -27,4 +27,4 @@ The package depends on system `python3-pyside6`, `qt6-wayland`, and `layer-shell
 
 ## uinput Permissions
 
-The post-install script ensures the `input` group exists, reloads udev, and reminds the user to join the `input` group. It does not choose a desktop user automatically because package maintainer scripts run as root without reliable user context.
+The post-install script ensures the `uinput` group exists, reloads udev, and tells the user to run `axidev-osk linux setup-permissions`. It does not choose a desktop user automatically because package maintainer scripts run as root without reliable user context.

@@ -17,13 +17,13 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "iy" ];
-      description = "Users to add to the input group for /dev/uinput access.";
+      description = "Users to add to the uinput group for /dev/uinput access.";
     };
   };
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ cfg.package ];
     services.udev.packages = [ cfg.package ];
-    users.groups.input.members = cfg.users;
+    users.groups.uinput.members = cfg.users;
   };
 }
