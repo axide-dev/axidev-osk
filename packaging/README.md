@@ -77,17 +77,23 @@ Re-running `install.sh` on a system that already has the correct configuration t
 
 ## Windows
 
-The trusted local development flow lives in [`windows/`](./windows/README.md).
-It builds, signs, trusts, installs, and verifies a UIAccess executable under
-`C:\Program Files\Axidev OSK`. It does not produce an end-user installer.
+The release bootstrap downloads the latest source archive, creates a Windows
+Python environment, and runs the trusted installer in
+[`windows/`](./windows/README.md). The installer builds, locally signs, trusts,
+installs, and verifies a UIAccess executable under
+`C:\Program Files\Axidev OSK`. It also creates the current user's Start Menu
+shortcut.
+
+This remains a trusted local installer, not an officially signed end-user
+package. Windows users can run the one-line release command in the top-level
+[`README.md`](../README.md) or follow the manual source flow in
+[`MANUAL_INSTALL.md`](./MANUAL_INSTALL.md).
 
 The intended distribution shape remains:
 
 - A signed MSI, likely built with WiX, that installs under `C:\Program Files\Axidev OSK\`.
 - A Start Menu entry and an optional "Start at login" toggle that registers the launcher with the Windows startup mechanism.
 - An uninstaller registered with Windows so the program shows up in *Apps & Features* and can be cleanly removed.
-
-For now, Windows users follow the manual install in [`MANUAL_INSTALL.md`](./MANUAL_INSTALL.md).
 
 ## Manual / source install
 

@@ -1,5 +1,5 @@
 Name:           axidev-osk
-Version:        0.12.0
+Version:        0.16.0
 Release:        1%{?dist}
 Summary:        On-screen keyboard overlay for Windows and Linux
 
@@ -73,5 +73,8 @@ fi
 %{_udevrulesdir}/70-axidev-io-uinput.rules
 
 %changelog
+* Fri Aug 21 2026 Axidev <contact@axide.dev> - 0.16.0-1
+- Release Axidev OSK 0.16.0.
+
 * Sun May 03 2026 Axidev <contact@axide.dev> - 0.12.0-1
 - Add initial RPM packaging recipe.
