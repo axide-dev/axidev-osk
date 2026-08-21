@@ -20,6 +20,7 @@ packaging/
     resources/
       launcher.sh                     # placed at /usr/local/bin/axidev-osk
       70-axidev-io-uinput.rules       # placed at /etc/udev/rules.d/...
+  windows/                # trusted local UIAccess development install
   nix/                   # NixOS module documentation
   rpm/                   # Fedora/RPM spec
 ```
@@ -76,9 +77,13 @@ Re-running `install.sh` on a system that already has the correct configuration t
 
 ## Windows
 
-Not yet implemented. The intended shape:
+The trusted local development flow lives in [`windows/`](./windows/README.md).
+It builds, signs, trusts, installs, and verifies a UIAccess executable under
+`C:\Program Files\Axidev OSK`. It does not produce an end-user installer.
 
-- A signed installer (likely Inno Setup or WiX) that places the application under `C:\Program Files\Axidev OSK\`.
+The intended distribution shape remains:
+
+- A signed MSI, likely built with WiX, that installs under `C:\Program Files\Axidev OSK\`.
 - A Start Menu entry and an optional "Start at login" toggle that registers the launcher with the Windows startup mechanism.
 - An uninstaller registered with Windows so the program shows up in *Apps & Features* and can be cleanly removed.
 

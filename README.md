@@ -46,18 +46,28 @@ For a manual source-based install (development, custom layouts, or distributions
 
 ### Windows
 
-Requirements: Python 3.10+
+Requirements: Windows 10 or newer, Python 3.10+, and PowerShell 5.1.
 
 ```powershell
-curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
-Expand-Archive -Path axidev-osk-source.zip -DestinationPath .
-cd axidev-osk
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .\vendor\axidev-io-python
-python -m pip install -e .
-axidev-osk
+$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
+Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
 ```
+
+The installer downloads the latest release and installs Axidev OSK under
+`C:\Program Files\Axidev OSK`. Windows asks for UAC approval because the
+development installer trusts a local signing certificate and enables UIAccess.
+See the [Windows install guide](./packaging/windows/README.md) for details.
+
+To uninstall:
+
+```powershell
+$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
+Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Uninstall
+```
+
+A production-signed MSI remains planned for public distribution.
 
 ## Wayland Notes
 

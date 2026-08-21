@@ -25,6 +25,14 @@ class FakeWindow(QWidget):
 
 
 class ApplicationQuitControllerTests(unittest.TestCase):
+    def test_stdin_eof_handler_allows_windowed_executable_without_stdin(self) -> None:
+        controller = ApplicationQuitController(_app(), prompt=lambda _parent: True)
+
+        with patch("axidev_osk.application.quit_controller.sys.stdin", None):
+            controller._install_stdin_eof_handler()
+
+        self.assertIsNone(controller._stdin_notifier)
+
     def test_request_quit_runs_callbacks_after_confirmation(self) -> None:
         app = _app()
         callback = Mock()

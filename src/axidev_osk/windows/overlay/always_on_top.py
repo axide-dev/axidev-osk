@@ -1,8 +1,7 @@
 """Cross-platform "always on top" overlay backend dispatch.
 
 Selects an overlay strategy per platform/session — Wayland layer-shell,
-X11 utility windows (or the bridge variant), Win32 ``SetWindowPos`` /
-``WS_EX_TOPMOST``, and a generic Qt fallback — behind a single
+X11 utility windows (or the bridge variant), native Windows flags, and a generic Qt fallback — behind a single
 ``OverlayBackend`` enum. Platform-specific branching is contained here
 so callers stay platform-agnostic.
 
@@ -51,51 +50,16 @@ TWindow = TypeVar("TWindow", bound=QWidget)
 
 _logger = logging.getLogger(__name__)
 
+_WM_NCACTIVATE = 0x0086
 
-if sys.platform == "win32":
-    _GWL_EXSTYLE = -20
-    _HWND_TOPMOST = -1
-    _SWP_NOMOVE = 0x0002
-    _SWP_NOSIZE = 0x0001
-    _SWP_NOACTIVATE = 0x0010
-    _SWP_FRAMECHANGED = 0x0020
-    _SWP_NOOWNERZORDER = 0x0200
-    _WS_EX_NOACTIVATE = 0x08000000
-    _DWMWA_WINDOW_CORNER_PREFERENCE = 33
-    _DWMWA_BORDER_COLOR = 34
-    _DWMWCP_DONOTROUND = 1
-    _DWMWA_COLOR_NONE = 0xFFFFFFFE
 
-    _user32 = ctypes.windll.user32
-    _dwmapi = ctypes.windll.dwmapi
-    _get_window_long_ptr = _user32.GetWindowLongPtrW
-    _set_window_long_ptr = _user32.SetWindowLongPtrW
-    _set_window_pos = _user32.SetWindowPos
-    _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
-
-    _get_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int]
-    _get_window_long_ptr.restype = ctypes.c_longlong
-    _set_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_longlong]
-    _set_window_long_ptr.restype = ctypes.c_longlong
-    _set_window_pos.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_uint,
-    ]
-    _set_window_pos.restype = ctypes.c_int
-    _dwm_set_window_attribute.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint,
-        ctypes.c_void_p,
-        ctypes.c_uint,
-    ]
-    _dwm_set_window_attribute.restype = ctypes.c_long
-else:
-    _dwm_set_window_attribute = None
+def _set_windows_native_chrome_inactive(hwnd: int) -> None:
+    if sys.platform != "win32":
+        return
+    send_message = ctypes.windll.user32.SendMessageW
+    send_message.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+    send_message.restype = ctypes.c_ssize_t
+    send_message(hwnd, _WM_NCACTIVATE, 0, 0)
 
 
 def prepare_always_on_top_window_environment(
@@ -241,8 +205,8 @@ class AlwaysOnTopWindowController:
         """Apply backend-specific adjustments after the window is shown."""
 
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
-            self._apply_windows_window_styles()
             self._position_floating_window_if_needed()
+            QTimer.singleShot(0, self._set_windows_chrome_inactive)
             return True
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
@@ -377,24 +341,6 @@ class AlwaysOnTopWindowController:
         next_height = max(self._window.minimumHeight(), min(self._window.height() + dy, max_height))
         self._window.resize(next_width, next_height)
         self._floating_position_initialized = True
-
-    def reapply_always_on_top(self) -> None:
-        """Reassert topmost behavior for visible Windows-native overlays."""
-
-        if self._backend != OverlayBackend.WINDOWS_NATIVE:
-            return
-        if not self._window.isVisible():
-            return
-        hwnd = int(self._window.winId())
-        _set_window_pos(
-            hwnd,
-            _HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_NOOWNERZORDER,
-        )
 
     def _detect_backend(self) -> OverlayBackend:
         if sys.platform == "win32":
@@ -557,6 +503,13 @@ class AlwaysOnTopWindowController:
         self._window.move(target_x, target_y)
         self._floating_position_initialized = True
 
+    def _set_windows_chrome_inactive(self) -> None:
+        if self._backend != OverlayBackend.WINDOWS_NATIVE:
+            return
+        if not self._window.isVisible():
+            return
+        _set_windows_native_chrome_inactive(int(self._window.winId()))
+
     def _current_screen_geometry(self, *, for_layer_shell: bool = False) -> QRect:
         screen = self._window.screen()
         if screen is None:
@@ -577,49 +530,6 @@ class AlwaysOnTopWindowController:
             return
         details = ", ".join(f"{key}={value!r}" for key, value in context.items())
         _logger.warning("overlay %s: %s", message, details)
-
-    def _apply_windows_window_styles(self) -> None:
-        hwnd = int(self._window.winId())
-        ex_style = _get_window_long_ptr(hwnd, _GWL_EXSTYLE)
-
-        if ex_style & _WS_EX_NOACTIVATE == 0:
-            _set_window_long_ptr(hwnd, _GWL_EXSTYLE, ex_style | _WS_EX_NOACTIVATE)
-
-        _set_window_pos(
-            hwnd,
-            _HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            _SWP_NOMOVE
-            | _SWP_NOSIZE
-            | _SWP_NOACTIVATE
-            | _SWP_FRAMECHANGED
-            | _SWP_NOOWNERZORDER,
-        )
-        self._apply_windows_frameless_chrome(hwnd)
-
-    def _apply_windows_frameless_chrome(self, hwnd: int) -> None:
-        if _dwm_set_window_attribute is None:
-            return
-        if not bool(self._window.windowFlags() & Qt.WindowType.FramelessWindowHint):
-            return
-
-        corner_preference = ctypes.c_uint(_DWMWCP_DONOTROUND)
-        border_color = ctypes.c_uint(_DWMWA_COLOR_NONE)
-        _dwm_set_window_attribute(
-            hwnd,
-            _DWMWA_WINDOW_CORNER_PREFERENCE,
-            ctypes.byref(corner_preference),
-            ctypes.sizeof(corner_preference),
-        )
-        _dwm_set_window_attribute(
-            hwnd,
-            _DWMWA_BORDER_COLOR,
-            ctypes.byref(border_color),
-            ctypes.sizeof(border_color),
-        )
 
     @staticmethod
     def _qt_platform() -> str:
@@ -678,12 +588,6 @@ class PlainWindowController:
         """Ignore overlay resize requests for plain windows."""
 
         return
-
-    def reapply_always_on_top(self) -> None:
-        """Plain windows do not participate in overlay topmost refreshes."""
-
-        return
-
 
 def _configure_x11_bridge_environment() -> bool:
     if not os.environ.get("DISPLAY"):

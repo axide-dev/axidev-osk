@@ -15,7 +15,7 @@ from .commands import (
     WindowHide,
     WindowShow,
 )
-from .events import HotCornerTriggered, WindowManagerEventObserved
+from .events import HotCornerTriggered
 from .registries import EventHandlerRegistry
 
 
@@ -80,9 +80,6 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     )
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
-    registry.register_event_handler(
-        lambda runtime: lambda event: route_window_manager_event_observed(event, runtime)
-    )
 
 
 def route_hot_corner_triggered(event: object, runtime: object) -> None:
@@ -98,10 +95,3 @@ def route_hot_corner_triggered(event: object, runtime: object) -> None:
             dispatcher.dispatch_command(WindowHide(window_id))
         else:
             dispatcher.dispatch_command(WindowShow(window_id))
-
-
-def route_window_manager_event_observed(event: object, runtime: object) -> None:
-    """Refresh managed overlays after a relevant platform observation."""
-
-    if isinstance(event, WindowManagerEventObserved):
-        runtime._window_manager.reapply_always_on_top_windows()  # noqa: SLF001
