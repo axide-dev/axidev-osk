@@ -49,9 +49,7 @@ For a manual source-based install (development, custom layouts, or distributions
 Requirements: Windows 10 or newer, Python 3.10+, and PowerShell 5.1.
 
 ```powershell
-$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
-Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1' | iex"
 ```
 
 The installer downloads the latest release and installs Axidev OSK under
@@ -62,9 +60,7 @@ See the [Windows install guide](./packaging/windows/README.md) for details.
 To uninstall:
 
 ```powershell
-$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
-Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1'))) -Uninstall"
 ```
 
 A production-signed MSI remains planned for public distribution.

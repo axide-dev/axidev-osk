@@ -13,9 +13,7 @@ install location.
 Run the release bootstrap in Windows PowerShell:
 
 ```powershell
-$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
-Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1' | iex"
 ```
 
 The bootstrap downloads the latest source release, creates a private Python
@@ -70,9 +68,7 @@ the future MSI installer.
 If you used the release bootstrap, run:
 
 ```powershell
-$installer = "$env:TEMP\axidev-osk-windows-install.ps1"
-Invoke-WebRequest https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1 -OutFile $installer
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Uninstall
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1'))) -Uninstall"
 ```
 
 For a source build, run the paired cleanup script:
