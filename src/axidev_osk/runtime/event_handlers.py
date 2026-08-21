@@ -25,6 +25,9 @@ class _WindowVisibilityManager(Protocol):
     def is_visible(self, window_id: str) -> bool:
         """Return whether the managed window is currently visible."""
 
+    def is_minimized(self, window_id: str) -> bool:
+        """Return whether the managed window is currently minimized."""
+
 
 def register_context_command_handlers(registry: EventHandlerRegistry) -> None:
     """Register context-level command handlers in deterministic order."""
@@ -91,7 +94,9 @@ def route_hot_corner_triggered(event: object, runtime: object) -> None:
     dispatcher = runtime._dispatcher  # noqa: SLF001
     window_manager: _WindowVisibilityManager = runtime._window_manager  # noqa: SLF001
     for window_id in config.hot_corner.bindings.get(event.corner, []):
-        if window_manager.is_visible(window_id):
+        if window_manager.is_minimized(window_id):
+            dispatcher.dispatch_command(WindowShow(window_id))
+        elif window_manager.is_visible(window_id):
             dispatcher.dispatch_command(WindowHide(window_id))
         else:
             dispatcher.dispatch_command(WindowShow(window_id))

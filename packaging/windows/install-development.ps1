@@ -120,7 +120,8 @@ function Invoke-DevelopmentAdmin([string]$Mode) {
         "-Mode", $Mode,
         "-SourceDirectory", "`"$StagedBundle`"",
         "-CertificatePath", "`"$ExportedCertificate`"",
-        "-CertificateThumbprint", $Certificate.Thumbprint
+        "-CertificateThumbprint", $Certificate.Thumbprint,
+        "-ShortcutPath", "`"$ShortcutPath`""
     )
     $process = Start-Process -FilePath $PowerShell -Verb RunAs -Wait -PassThru -ArgumentList $arguments
     if ($process.ExitCode -ne 0) {
@@ -186,6 +187,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "development-admin.ps1") -Destination $AdminScript
     $PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $InstalledExecutable = Join-Path $env:ProgramFiles "Axidev OSK\axidev-osk.exe"
+    $ShortcutPath = Join-Path ([Environment]::GetFolderPath("Programs")) "Axidev OSK.lnk"
 
     try {
         Invoke-DevelopmentAdmin "Install"

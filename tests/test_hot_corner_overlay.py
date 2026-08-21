@@ -365,7 +365,9 @@ class OverlayWindowControllerTests(unittest.TestCase):
             AlwaysOnTopWindowController,
             "_detect_backend",
             return_value=OverlayBackend.WINDOWS_NATIVE,
-        ):
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top._set_windows_taskbar_style",
+        ) as set_taskbar_style:
             controller = AlwaysOnTopWindowController(window)
             controller.configure_window()
 
@@ -374,6 +376,7 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertIn((Qt.WindowType.WindowDoesNotAcceptFocus, True), window.flags)
         self.assertIn((Qt.WidgetAttribute.WA_ShowWithoutActivating, True), window.attributes)
         self.assertNotIn((Qt.WindowType.FramelessWindowHint, True), window.flags)
+        set_taskbar_style.assert_called_once_with(1)
 
     def test_windows_native_overlay_resets_chrome_inactive_after_show(self) -> None:
         window = FakeWindow()

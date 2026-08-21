@@ -52,9 +52,10 @@ Requirements: Windows 10 or newer, Python 3.10+, and PowerShell 5.1.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1' | iex"
 ```
 
-The installer downloads the latest release and installs Axidev OSK under
-`C:\Program Files\Axidev OSK`. Windows asks for UAC approval because the
-development installer trusts a local signing certificate and enables UIAccess.
+The installer downloads the latest release, installs Axidev OSK under
+`C:\Program Files\Axidev OSK`, and adds it to the current user's Start Menu.
+Windows asks for UAC approval because the development installer trusts a local
+signing certificate and enables UIAccess.
 See the [Windows install guide](./packaging/windows/README.md) for details.
 
 To uninstall:

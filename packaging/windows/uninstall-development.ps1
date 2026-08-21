@@ -13,11 +13,13 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "development-admin.ps1") -Destination $AdminScript
 
     $PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $ShortcutPath = Join-Path ([Environment]::GetFolderPath("Programs")) "Axidev OSK.lnk"
     $AdminArguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$AdminScript`"",
-        "-Mode", "Uninstall"
+        "-Mode", "Uninstall",
+        "-ShortcutPath", "`"$ShortcutPath`""
     )
     $AdminProcess = Start-Process -FilePath $PowerShell -Verb RunAs -Wait -PassThru -ArgumentList $AdminArguments
     if ($AdminProcess.ExitCode -ne 0) {

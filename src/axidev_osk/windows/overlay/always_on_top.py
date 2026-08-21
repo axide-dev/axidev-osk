@@ -50,7 +50,26 @@ TWindow = TypeVar("TWindow", bound=QWidget)
 
 _logger = logging.getLogger(__name__)
 
+_GWL_EXSTYLE = -20
 _WM_NCACTIVATE = 0x0086
+_WS_EX_TOOLWINDOW = 0x00000080
+_WS_EX_APPWINDOW = 0x00040000
+_WS_EX_NOACTIVATE = 0x08000000
+
+
+def _set_windows_taskbar_style(hwnd: int) -> None:
+    if sys.platform != "win32":
+        return
+    get_window_long_ptr = ctypes.windll.user32.GetWindowLongPtrW
+    get_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    get_window_long_ptr.restype = ctypes.c_ssize_t
+    set_window_long_ptr = ctypes.windll.user32.SetWindowLongPtrW
+    set_window_long_ptr.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+    set_window_long_ptr.restype = ctypes.c_ssize_t
+    current_style = get_window_long_ptr(hwnd, _GWL_EXSTYLE)
+    taskbar_style = (current_style | _WS_EX_APPWINDOW | _WS_EX_NOACTIVATE) & ~_WS_EX_TOOLWINDOW
+    if taskbar_style != current_style:
+        set_window_long_ptr(hwnd, _GWL_EXSTYLE, taskbar_style)
 
 
 def _set_windows_native_chrome_inactive(hwnd: int) -> None:
@@ -192,6 +211,9 @@ class AlwaysOnTopWindowController:
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE}:
             self._window.setWindowFlag(Qt.WindowType.Tool, True)
             self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
+
+        if self._backend == OverlayBackend.WINDOWS_NATIVE:
+            _set_windows_taskbar_style(int(self._window.winId()))
 
         self._debug_log(
             "configure-window",

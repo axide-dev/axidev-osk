@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 from PySide6.QtWidgets import QWidget
 
@@ -90,7 +91,10 @@ class WindowManager:
 
         window = self.get_or_create(window_id)
         _logger.info("Showing runtime window %s", window_id)
-        window.show()
+        if sys.platform == "win32" and window.isMinimized():
+            window.showNormal()
+        else:
+            window.show()
         return window
 
     def hide(self, window_id: str) -> None:
@@ -106,6 +110,12 @@ class WindowManager:
 
         window = self._windows.get(window_id)
         return window is not None and window.isVisible()
+
+    def is_minimized(self, window_id: str) -> bool:
+        """Return whether a managed Windows window is currently minimized."""
+
+        window = self._windows.get(window_id)
+        return sys.platform == "win32" and window is not None and window.isMinimized()
 
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""

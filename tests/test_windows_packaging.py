@@ -35,6 +35,13 @@ class WindowsPackagingTests(unittest.TestCase):
 
         self.assertIsInstance(keywords["uac_uiaccess"], ast.Constant)
         self.assertIs(keywords["uac_uiaccess"].value, True)
+        self.assertIn("icon", keywords)
+
+    def test_application_icon_assets_are_packaged(self) -> None:
+        assets = REPO_ROOT / "src" / "axidev_osk" / "assets"
+
+        self.assertTrue((assets / "axidev-osk.svg").is_file())
+        self.assertTrue((assets / "axidev-osk.ico").is_file())
 
     def test_release_bootstrap_uses_latest_release_source(self) -> None:
         bootstrap = (
@@ -55,6 +62,18 @@ class WindowsPackagingTests(unittest.TestCase):
             "cp packaging/windows/axidev-osk-windows-install.ps1 release-assets/",
             workflow,
         )
+
+    def test_development_installer_manages_start_menu_shortcut_transaction(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
+        install_script = (WINDOWS_PACKAGING / "install-development.ps1").read_text(encoding="utf-8")
+        uninstall_script = (WINDOWS_PACKAGING / "uninstall-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('GetFolderPath("Programs")', install_script)
+        self.assertIn('GetFolderPath("Programs")', uninstall_script)
+        self.assertIn('New-Object -ComObject "WScript.Shell"', admin_script)
+        self.assertIn("$ShortcutNewPath", admin_script)
+        self.assertIn("$ShortcutOldPath", admin_script)
+        self.assertIn("Remove-Item -LiteralPath $ShortcutPath", admin_script)
 
 
 if __name__ == "__main__":

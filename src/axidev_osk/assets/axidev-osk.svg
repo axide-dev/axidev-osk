@@ -37,6 +37,7 @@
     stroke="#E61E8C"
     stroke-linecap="round"
     stroke-linejoin="round"
+    transform="translate(128 128) scale(1.2766) translate(-128 -128)"
   >
     <g mask="url(#cursor-occlusion)">
       <path

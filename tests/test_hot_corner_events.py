@@ -118,6 +118,9 @@ class HotCornerEventTests(unittest.TestCase):
         context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
 
         class FakeWindowManager:
+            def is_minimized(self, window_id: str) -> bool:
+                return False
+
             def is_visible(self, window_id: str) -> bool:
                 return False
 
@@ -141,6 +144,9 @@ class HotCornerEventTests(unittest.TestCase):
         context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
 
         class FakeWindowManager:
+            def is_minimized(self, window_id: str) -> bool:
+                return False
+
             def is_visible(self, window_id: str) -> bool:
                 return True
 
@@ -152,6 +158,31 @@ class HotCornerEventTests(unittest.TestCase):
         runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
 
         self.assertEqual(commands, [WindowHide("window:keyboard")])
+
+    def test_runtime_handler_restores_minimized_bound_window(self) -> None:
+        context = make_test_context(FakeKeyboardBackend())
+        config = replace(
+            context.config,
+            hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
+        )
+        commands: list[object] = []
+        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
+
+        class FakeWindowManager:
+            def is_minimized(self, window_id: str) -> bool:
+                return True
+
+            def is_visible(self, window_id: str) -> bool:
+                return True
+
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._config = config
+        runtime._dispatcher = context.dispatcher
+        runtime._window_manager = FakeWindowManager()
+
+        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+
+        self.assertEqual(commands, [WindowShow("window:keyboard")])
 
     def test_make_test_context_installs_default_event_handlers(self) -> None:
         config = replace(

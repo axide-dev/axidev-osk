@@ -8,7 +8,9 @@ param(
 
     [string]$CertificatePath,
 
-    [string]$CertificateThumbprint
+    [string]$CertificateThumbprint,
+
+    [string]$ShortcutPath
 )
 
 Set-StrictMode -Version Latest
@@ -20,6 +22,15 @@ $OldPath = "$InstallPath.old"
 $MarkerName = "development-certificate-thumbprint.txt"
 $PreviousMarkerName = "development-previous-certificate-thumbprint.txt"
 $PendingMarkerName = "development-install-pending.txt"
+$ShortcutMarkerName = "development-shortcut-pending.txt"
+
+if (-not $ShortcutPath) {
+    throw "The current user's Start Menu shortcut path is missing."
+}
+$ShortcutDirectory = Split-Path -Parent $ShortcutPath
+$ShortcutBaseName = [IO.Path]::GetFileNameWithoutExtension($ShortcutPath)
+$ShortcutNewPath = Join-Path $ShortcutDirectory "$ShortcutBaseName.new.lnk"
+$ShortcutOldPath = Join-Path $ShortcutDirectory "$ShortcutBaseName.old.lnk"
 
 function Stop-AxidevOsk {
     $processes = @(Get-Process -Name "axidev-osk" -ErrorAction SilentlyContinue)
@@ -51,6 +62,16 @@ function Read-CertificateMarker([string]$Directory, [string]$Name) {
     return (Get-Content -LiteralPath $marker -Raw).Trim()
 }
 
+function New-StartMenuShortcut([string]$Path) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+    $shell = New-Object -ComObject "WScript.Shell"
+    $shortcut = $shell.CreateShortcut($Path)
+    $shortcut.TargetPath = Join-Path $InstallPath "axidev-osk.exe"
+    $shortcut.WorkingDirectory = $InstallPath
+    $shortcut.Description = "Axidev OSK"
+    $shortcut.Save()
+}
+
 if ($Mode -eq "Uninstall") {
     Stop-AxidevOsk
     $thumbprints = @()
@@ -58,11 +79,13 @@ if ($Mode -eq "Uninstall") {
         $thumbprints += Read-CertificateMarker $path $MarkerName
         $thumbprints += Read-CertificateMarker $path $PreviousMarkerName
     }
-
     foreach ($path in @($InstallPath, $NewPath, $OldPath)) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
         }
+    }
+    foreach ($path in @($ShortcutPath, $ShortcutNewPath, $ShortcutOldPath)) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     }
     $thumbprints | Where-Object { $_ } | Select-Object -Unique | ForEach-Object {
         Remove-DevelopmentCertificate $_
@@ -78,6 +101,8 @@ if ($Mode -eq "Commit") {
     $currentThumbprint = Read-CertificateMarker $InstallPath $MarkerName
     $previousThumbprint = Read-CertificateMarker $InstallPath $PreviousMarkerName
     Remove-Item -LiteralPath $OldPath -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $ShortcutOldPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $InstallPath $ShortcutMarkerName) -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $InstallPath $PreviousMarkerName) -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $pendingMarker -Force
     if ($previousThumbprint -and $previousThumbprint -ne $currentThumbprint) {
@@ -98,8 +123,19 @@ if ($Mode -eq "Rollback") {
 
     if ($installIsPending) {
         Stop-AxidevOsk
+        $shortcutMarker = Join-Path $InstallPath $ShortcutMarkerName
+        if (Test-Path -LiteralPath $shortcutMarker -PathType Leaf) {
+            $previousShortcut = (Get-Content -LiteralPath $shortcutMarker -Raw).Trim()
+            if (Test-Path -LiteralPath $ShortcutOldPath -PathType Leaf) {
+                Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
+                Move-Item -LiteralPath $ShortcutOldPath -Destination $ShortcutPath
+            } elseif ($previousShortcut -eq "absent") {
+                Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
+            }
+        }
         Remove-Item -LiteralPath $InstallPath -Recurse -Force -ErrorAction Stop
     }
+    Remove-Item -LiteralPath $ShortcutNewPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $NewPath -Recurse -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $OldPath) {
         Move-Item -LiteralPath $OldPath -Destination $InstallPath
@@ -133,8 +169,12 @@ Import-Certificate -FilePath $CertificatePath -CertStoreLocation "Cert:\LocalMac
 if (Test-Path -LiteralPath $OldPath) {
     throw "A previous development install transaction is still pending."
 }
+if (Test-Path -LiteralPath $ShortcutOldPath) {
+    throw "A previous Start Menu shortcut transaction is still pending."
+}
 $previousThumbprint = Read-CertificateMarker $InstallPath $MarkerName
 Remove-Item -LiteralPath $NewPath -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $ShortcutNewPath -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $NewPath | Out-Null
 Copy-Item -Path (Join-Path $SourceDirectory "*") -Destination $NewPath -Recurse -Force
 Set-Content -LiteralPath (Join-Path $NewPath $MarkerName) -Value $CertificateThumbprint -NoNewline
@@ -142,6 +182,7 @@ Set-Content -LiteralPath (Join-Path $NewPath $PendingMarkerName) -Value "pending
 if ($previousThumbprint) {
     Set-Content -LiteralPath (Join-Path $NewPath $PreviousMarkerName) -Value $previousThumbprint -NoNewline
 }
+New-StartMenuShortcut $ShortcutNewPath
 
 $installedSignature = Get-AuthenticodeSignature -LiteralPath (Join-Path $NewPath "axidev-osk.exe")
 if ($installedSignature.Status -ne "Valid") {
@@ -162,3 +203,10 @@ try {
     }
     throw
 }
+
+$shortcutState = if (Test-Path -LiteralPath $ShortcutPath -PathType Leaf) { "existing" } else { "absent" }
+Set-Content -LiteralPath (Join-Path $InstallPath $ShortcutMarkerName) -Value $shortcutState -NoNewline
+if ($shortcutState -eq "existing") {
+    Move-Item -LiteralPath $ShortcutPath -Destination $ShortcutOldPath
+}
+Move-Item -LiteralPath $ShortcutNewPath -Destination $ShortcutPath

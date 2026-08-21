@@ -48,10 +48,11 @@ The script performs these steps:
 3. Signs `axidev-osk.exe` with SHA-256.
 4. Requests elevation to trust the certificate and stage the replacement.
 5. Replaces `C:\Program Files\Axidev OSK`.
-6. Launches the installed executable without elevation.
-7. Keeps the previous install until startup and UIAccess checks pass.
-8. Requests elevation to commit the verified replacement.
-9. Reports its signature state, UIAccess token, elevation state, and process ID.
+6. Creates `Axidev OSK` in the current user's Start Menu.
+7. Launches the installed executable without elevation.
+8. Keeps the previous install until startup and UIAccess checks pass.
+9. Requests elevation to commit the verified replacement.
+10. Reports its signature state, UIAccess token, elevation state, and process ID.
 
 The expected final output includes:
 
@@ -60,8 +61,8 @@ Signature: Valid
 UIAccess: 1
 ```
 
-The script creates no Start Menu entry and no startup entry. Those belong to
-the future MSI installer.
+The script creates no startup entry. Automatic startup belongs to the future
+MSI installer.
 
 ## Uninstall
 
@@ -77,9 +78,9 @@ For a source build, run the paired cleanup script:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\uninstall-development.ps1
 ```
 
-The script stops the installed process, removes `C:\Program Files\Axidev OSK`,
-and removes only the certificate thumbprint recorded by the development
-installer.
+The script stops the installed process, removes the Start Menu shortcut and
+`C:\Program Files\Axidev OSK`, and removes only the certificate thumbprint
+recorded by the development installer.
 
 ## Security Scope
 
