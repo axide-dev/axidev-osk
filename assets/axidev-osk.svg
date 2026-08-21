@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 256 256"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Axidev OSK icon</title>
+  <desc id="description">An arrow clicking a blank keyboard key</desc>
+  <defs>
+    <path
+      id="cursor-shape"
+      d="m128 68 46 88-46-20-46 20z"
+      transform="translate(17 22) rotate(-35 128 98)"
+    />
+    <mask
+      id="cursor-occlusion"
+      x="0"
+      y="0"
+      width="256"
+      height="256"
+      maskUnits="userSpaceOnUse"
+      mask-type="luminance"
+    >
+      <rect width="256" height="256" fill="white" />
+      <use
+        href="#cursor-shape"
+        fill="black"
+        stroke="black"
+        stroke-width="12"
+        stroke-linejoin="round"
+      />
+    </mask>
+  </defs>
+  <g
+    fill="none"
+    stroke="#E61E8C"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <g mask="url(#cursor-occlusion)">
+      <path
+        d="M59 98 38 145l90 70 90-70-21-47"
+        stroke-width="8"
+      />
+      <path
+        d="M128 43q32 31 69 55-37 25-69 55-32-30-69-55 37-24 69-55z"
+        stroke-width="7"
+      />
+      <path d="M128 153v62" stroke-width="6" />
+    </g>
+    <use href="#cursor-shape" stroke-width="6" />
+  </g>
+</svg>
