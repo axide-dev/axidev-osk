@@ -8,16 +8,49 @@ $AccessibilityPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Accessi
 $AccessibilityConfigurationName = "Configuration"
 $NormalRegistrationName = "Axidev_AxidevOSK_Development_v1.0"
 
-function Disable-AxidevAccessibilityAutoStart {
+function Get-AccessibilityConfigurationState {
     if (-not (Test-Path -LiteralPath $AccessibilityPath)) {
-        return
+        return [PSCustomObject]@{ Exists = $false; Value = "" }
     }
     $property = Get-ItemProperty -LiteralPath $AccessibilityPath -Name $AccessibilityConfigurationName -ErrorAction SilentlyContinue
     if ($null -eq $property) {
+        return [PSCustomObject]@{ Exists = $false; Value = "" }
+    }
+    return [PSCustomObject]@{
+        Exists = $true
+        Value = [string]$property.$AccessibilityConfigurationName
+    }
+}
+
+function Set-AccessibilityConfiguration([string]$Value) {
+    New-Item -ItemType Directory -Path $AccessibilityPath -Force | Out-Null
+    New-ItemProperty `
+        -LiteralPath $AccessibilityPath `
+        -Name $AccessibilityConfigurationName `
+        -Value $Value `
+        -PropertyType String `
+        -Force | Out-Null
+}
+
+function Restore-AccessibilityConfiguration($State) {
+    if ($State.Exists) {
+        Set-AccessibilityConfiguration $State.Value
+        return
+    }
+    Remove-ItemProperty `
+        -LiteralPath $AccessibilityPath `
+        -Name $AccessibilityConfigurationName `
+        -Force `
+        -ErrorAction SilentlyContinue
+}
+
+function Disable-AxidevAccessibilityAutoStart {
+    $state = Get-AccessibilityConfigurationState
+    if (-not $state.Exists) {
         return
     }
     $entries = @(
-        ([string]$property.$AccessibilityConfigurationName) -split "," |
+        $state.Value -split "," |
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -and $_ -ne $NormalRegistrationName }
     )
@@ -51,13 +84,23 @@ try {
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$AdminScript`"",
         "-Mode", "Uninstall",
-        "-ShortcutPath", "`"$ShortcutPath`""
+        "-ShortcutPath", "`"$ShortcutPath`"",
+        "-TransactionPath", "`"$NativeStage`""
     )
-    $AdminProcess = Start-Process -FilePath $PowerShell -Verb RunAs -Wait -PassThru -ArgumentList $AdminArguments
+    $PreviousAccessibilityConfiguration = Get-AccessibilityConfigurationState
+    Disable-AxidevAccessibilityAutoStart
+    try {
+        $AdminProcess = Start-Process -FilePath $PowerShell -Verb RunAs -Wait -PassThru -ArgumentList $AdminArguments
+    } catch {
+        Restore-AccessibilityConfiguration $PreviousAccessibilityConfiguration
+        throw
+    }
     if ($AdminProcess.ExitCode -ne 0) {
+        if (Test-Path -LiteralPath (Join-Path $NativeStage "restore-configuration") -PathType Leaf) {
+            Restore-AccessibilityConfiguration $PreviousAccessibilityConfiguration
+        }
         throw "The elevated uninstall failed with exit code $($AdminProcess.ExitCode)."
     }
-    Disable-AxidevAccessibilityAutoStart
 } finally {
     Remove-Item -LiteralPath $NativeStage -Recurse -Force -ErrorAction SilentlyContinue
 }

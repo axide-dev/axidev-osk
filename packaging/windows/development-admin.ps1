@@ -132,6 +132,7 @@ function Remove-RegistrationBackup([string]$Directory) {
 
 function Install-AccessibilityRegistration {
     $profile = '<HCIModel><Accommodation type="severe dexterity"/></HCIModel>'
+    Remove-Item -LiteralPath $RegistrationPath -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $RegistrationPath -Force | Out-Null
     New-ItemProperty -LiteralPath $RegistrationPath -Name "ApplicationName" `
         -Value "Axidev OSK Development" -PropertyType String -Force | Out-Null
@@ -224,24 +225,44 @@ function Rollback-Installation {
 }
 
 if ($Mode -eq "Uninstall") {
-    Stop-AxidevOsk
-    $thumbprints = @()
-    foreach ($path in @($InstallPath, $NewPath, $OldPath)) {
-        $thumbprints += Read-CertificateMarker $path $MarkerName
-        $thumbprints += Read-CertificateMarker $path $PreviousMarkerName
+    if (-not $TransactionPath -or -not (Test-Path -LiteralPath $TransactionPath -PathType Container)) {
+        throw "The uninstall transaction directory is missing."
     }
-    foreach ($path in @($InstallPath, $NewPath, $OldPath)) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+
+    $canRestoreRegistration = $true
+    try {
+        Backup-AccessibilityRegistration $TransactionPath
+        Remove-Item -LiteralPath $RegistrationPath -Recurse -Force -ErrorAction SilentlyContinue
+        Stop-AxidevOsk
+        $canRestoreRegistration = $false
+        $thumbprints = @()
+        foreach ($path in @($InstallPath, $NewPath, $OldPath)) {
+            $thumbprints += Read-CertificateMarker $path $MarkerName
+            $thumbprints += Read-CertificateMarker $path $PreviousMarkerName
         }
+        foreach ($path in @($InstallPath, $NewPath, $OldPath)) {
+            if (Test-Path -LiteralPath $path) {
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+            }
+        }
+        foreach ($path in @($ShortcutPath, $ShortcutNewPath, $ShortcutOldPath)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        $thumbprints | Where-Object { $_ } | Select-Object -Unique | ForEach-Object {
+            Remove-DevelopmentCertificate $_
+        }
+    } catch {
+        if ($canRestoreRegistration) {
+            $presencePath = Join-Path $TransactionPath $RegistrationPresenceName
+            if (Test-Path -LiteralPath $presencePath -PathType Leaf) {
+                Restore-AccessibilityRegistration $TransactionPath
+            }
+            Set-Content -LiteralPath (Join-Path $TransactionPath "restore-configuration") `
+                -Value "restore" -NoNewline
+        }
+        throw
     }
-    foreach ($path in @($ShortcutPath, $ShortcutNewPath, $ShortcutOldPath)) {
-        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-    }
-    Remove-Item -LiteralPath $RegistrationPath -Recurse -Force -ErrorAction SilentlyContinue
-    $thumbprints | Where-Object { $_ } | Select-Object -Unique | ForEach-Object {
-        Remove-DevelopmentCertificate $_
-    }
+    Remove-RegistrationBackup $TransactionPath
     return
 }
 

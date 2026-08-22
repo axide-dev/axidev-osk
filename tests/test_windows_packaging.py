@@ -96,6 +96,13 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertIn(f'-Name "{property_name}"', admin_script)
         self.assertIn("Backup-AccessibilityRegistration", admin_script)
         self.assertIn("Restore-AccessibilityRegistration", admin_script)
+        registration_function = admin_script.split("function Install-AccessibilityRegistration", 1)[1].split(
+            "function New-StartMenuShortcut", 1
+        )[0]
+        self.assertLess(
+            registration_function.index("Remove-Item -LiteralPath $RegistrationPath"),
+            registration_function.index("New-Item -ItemType Directory -Path $RegistrationPath"),
+        )
         self.assertIn("Enable-AxidevAccessibilityAutoStart", install_script)
         self.assertEqual(install_script.count("-Verb RunAs"), 1)
         self.assertIn('Join-Path $TransactionPath "ready"', install_script)
@@ -103,11 +110,26 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn('Join-Path $TransactionPath "rollback"', install_script)
 
     def test_development_uninstaller_removes_only_axidev_auto_start(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
         uninstall_script = (WINDOWS_PACKAGING / "uninstall-development.ps1").read_text(encoding="utf-8")
 
         self.assertIn("Disable-AxidevAccessibilityAutoStart", uninstall_script)
         self.assertIn("$_ -ne $NormalRegistrationName", uninstall_script)
         self.assertNotIn('Join-Path $AccessibilityRoot "osk"', uninstall_script)
+        self.assertLess(
+            uninstall_script.rindex("Disable-AxidevAccessibilityAutoStart"),
+            uninstall_script.index("$AdminProcess = Start-Process"),
+        )
+        uninstall_block = admin_script.split('if ($Mode -eq "Uninstall")', 1)[1].split(
+            "if (-not $SourceDirectory", 1
+        )[0]
+        self.assertLess(
+            uninstall_block.index("Remove-Item -LiteralPath $RegistrationPath"),
+            uninstall_block.index("Stop-AxidevOsk"),
+        )
+        self.assertIn("Restore-AccessibilityRegistration $TransactionPath", uninstall_block)
+        self.assertIn('Join-Path $TransactionPath "restore-configuration"', uninstall_block)
+        self.assertIn('Join-Path $NativeStage "restore-configuration"', uninstall_script)
 
 
 if __name__ == "__main__":
