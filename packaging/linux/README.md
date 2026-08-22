@@ -1,104 +1,209 @@
-# Linux Installer Internals
+Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
+Every call here is inayayousfi's, and no agent acted on its own.
 
-This document describes what `install.sh`, `install-from-source.sh`, and `uninstall.sh` actually do, what files they touch, and how to debug a failed install.
+# Linux Distribution Internals
 
-For an architecture overview, see [`../README.md`](../README.md).
+This document describes the standalone Linux payload, its lifecycle installer, release signing, and interactive test environments.
 
-## What `install.sh` does
+## Supported Host
 
-```
-1. Re-exec with sudo if not already root.
-2. Verify the host architecture (currently x86_64 only).
-3. Verify required commands exist (curl, tar, python3, install, udevadm, ...).
-4. Download axidev-osk-linux-x86_64.tar.gz from the latest release.
-5. Extract to a temporary directory.
-6. Stage the new install at /opt/axidev-osk.new/:
-   - python3 -m venv --system-site-packages /opt/axidev-osk.new/.venv
-   - pip install --no-index --no-deps the bundled wheels
-   - import smoke test
-7. Atomic swap: /opt/axidev-osk -> /opt/axidev-osk.old, then
-                /opt/axidev-osk.new -> /opt/axidev-osk, then
-                rm -rf /opt/axidev-osk.old.
-8. Install /usr/local/bin/axidev-osk from the bundled launcher.
-9. Ensure 'uinput' group exists.
-10. Ensure /etc/udev/rules.d/70-axidev-io-uinput.rules has the expected
-    contents; reload udev only if the rule actually changed.
-11. Verify /dev/uinput is owned by group 'uinput' with mode 0660; modprobe
-    if needed; warn if a reboot may be required.
-12. Add the invoking user to the 'uinput' group if not already a member.
+The payload targets x86_64 Linux with glibc 2.34 or newer. It requires `/usr/bin/python3` version 3.10 or newer.
+
+The host supplies PySide6, Qt, Qt's X11 and Wayland platform plugins, LayerShellQt, libinput, libudev, libxkbcommon, and normal desktop libraries. PySide6 and Qt must use matching major and minor versions from 6.7 up to, but not including, 7.0.
+
+Use these runtime packages on Fedora:
+
+```bash
+sudo dnf install python3 python3-pyside6 qt6-qtwayland layer-shell-qt \
+    libinput systemd-libs libxkbcommon
 ```
 
-## Required system packages
+Use these runtime packages on Arch Linux:
 
-These come from the distribution package manager. The installer does not attempt to install them; the top-level README documents the per-distro commands.
+```bash
+sudo pacman -S --needed python pyside6 qt6-wayland layer-shell-qt \
+    libinput systemd libxkbcommon
+```
 
-- `qt6-qtwayland` (Fedora) / `qt6-wayland` (Arch)
-- `layer-shell-qt`
-- `python3-pyside6` (Fedora) / `pyside6` (Arch)
-- `libinput`, `systemd-libs` (libudev), `libxkbcommon`
-- `python3` (>= 3.10), `curl`, `tar`
+The allowed native input-library sonames are recorded in `release-lock.json`.
 
-The `-devel` packages are not needed at install time because the C extension is precompiled in the release bundle.
+## Payload Contents
 
-For `install-from-source.sh`, development headers and compiler tooling are also required because the vendored `axidev-io` extension is built locally. On Fedora, install at least `gcc`, `python3-devel`, `libinput-devel`, `systemd-devel`, and `libxkbcommon-devel` in addition to the runtime packages.
+```text
+axidev-osk/
+  bin/axidev-osk
+  lib/python/
+  libexec/launch.py
+  share/applications/axidev-osk.desktop
+  share/icons/hicolor/scalable/apps/axidev-osk.svg
+  share/licenses/
+  release.json
+```
 
-## Source-tree install
+The payload's Python tree contains Axidev OSK and the native `axidev_io` extension. It does not contain PySide6, Qt, or LayerShellQt.
 
-Use `install-from-source.sh` when you have copied or cloned the repository and want to install that exact checkout system-wide:
+The launcher is a static Rust executable. It resolves the payload from its own path and starts `/usr/bin/python3 -I`.
+
+`launch.py` rejects Python older than 3.10. Before normal startup or `--verify-runtime`, it checks the PySide6 and Qt range, matching major and minor versions, Qt's X11 and Wayland platform plugins, and LayerShellQt compatibility. Runtime verification then reports the resolved versions and plugin paths.
+
+`release.json` records the payload version, architecture, minimum glibc version, host-runtime requirements, and the SHA-256 digest of every regular file.
+
+## Building
+
+Run the root command from the repository checkout:
+
+```bash
+python build.py linux payload
+```
+
+The outer command builds the pinned manylinux Docker image. Docker writes the result to the `axidev-osk-linux-output` volume, and the build command copies the verified payload into the requested output directory.
+
+The inner build performs these steps:
+
+1. Build the vendored input backend wheel.
+2. Build the Axidev OSK wheel.
+3. Install both wheels into the payload's Python tree without dependencies or bytecode.
+4. Build the static Rust launcher.
+5. Install desktop resources, icons, licenses, and metadata.
+6. Verify file checksums, launcher linkage, native input dependencies, and the host-library allowlist.
+
+The default output is `dist/linux/axidev-osk`.
+
+Verify an existing payload again with:
+
+```bash
+python build.py linux verify dist/linux/axidev-osk
+```
+
+Static verification does not import host Qt packages. The launcher's `--verify-runtime` check covers those packages on the target system.
+
+## Installing A Local Build
+
+Build and install the current checkout with:
 
 ```bash
 sudo ./packaging/linux/install-from-source.sh
 ```
 
-It creates the same `/opt/axidev-osk`, `/usr/local/bin/axidev-osk`, and udev rule layout as the release installer, but it builds and installs `vendor/axidev-io-python` and `axidev-osk` from the local checkout instead of downloading release wheels.
+The script builds the payload, archives it, calculates its checksum, and calls `install.sh` with that local archive.
 
-## Files written
+A local payload requires a checksum but does not require Minisign. Downloaded releases always require the signed manifest.
 
-| Path | Owner | Mode | Source |
-|------|-------|------|--------|
-| `/opt/axidev-osk/` | root:root | 0755 | release bundle |
-| `/usr/local/bin/axidev-osk` | root:root | 0755 | `resources/launcher.sh` |
-| `/etc/udev/rules.d/70-axidev-io-uinput.rules` | root:root | 0644 | `resources/70-axidev-io-uinput.rules` |
+## Release Signing
 
-## Files NOT written
-
-The installer does not create or modify:
-
-- any per-user configuration or state directory
-- any `.desktop` file or icon
-- any systemd unit
-- any file outside `/opt/axidev-osk/`, `/usr/local/bin/`, and `/etc/udev/rules.d/`
-
-## Debugging a failed install
-
-**Download fails.** The script aborts before touching anything. The previous install (if any) is still in place.
-
-**`pip install` fails inside the staging venv.** The script aborts before the swap. `/opt/axidev-osk/` is unchanged. The temporary `/opt/axidev-osk.new/` is removed by the EXIT trap.
-
-**Import smoke test fails.** Same as above; the swap never happens.
-
-**Atomic swap interrupted.** If the script is killed between `mv /opt/axidev-osk /opt/axidev-osk.old` and `mv /opt/axidev-osk.new /opt/axidev-osk`, the install is in a half state. Recovery: `mv /opt/axidev-osk.old /opt/axidev-osk` (or simply re-run the installer, which will detect a missing `/opt/axidev-osk` and proceed cleanly).
-
-**`/dev/uinput` still wrong after install.** The kernel module may not be loaded (`modprobe uinput`), or the udev rule may need a reboot to take effect on some setups. The launcher will fail with a permission error in that case. Confirm with:
+Create release assets with:
 
 ```bash
-stat -c '%a %G' /dev/uinput   # expected: 660 uinput
-groups                        # should include 'uinput' after logout/login
-axidev-osk linux status-permissions
+python build.py linux release --signing-key /path/to/minisign.key
 ```
 
-## What `uninstall.sh` does
+The command requires a public key at `packaging/linux/minisign.pub`. The private key must match that public key.
 
+The command creates:
+
+```text
+release-assets/
+  axidev-osk-VERSION-linux-x86_64.tar.gz
+  axidev-osk-linux-x86_64.tar.gz
+  axidev-osk-VERSION-source.zip
+  axidev-osk-source.zip
+  axidev-osk-install
+  SHA256SUMS
+  SHA256SUMS.minisig
 ```
-1. Re-exec with sudo if not already root.
-2. rm -rf /opt/axidev-osk
-3. rm -f /usr/local/bin/axidev-osk
-4. rm -f /etc/udev/rules.d/70-axidev-io-uinput.rules
-5. udevadm control --reload-rules
+
+The repository ZIP includes tracked files and vendored submodule contents.
+
+GitHub Actions reads the passwordless private key from `MINISIGN_SECRET_KEY`, writes it to a temporary mode-restricted file, signs the manifest, deletes the key file, and uploads one asset set.
+
+Signing is not provisioned until the repository public key and matching GitHub secret exist. Release builds fail instead of publishing unsigned assets.
+
+## Lifecycle Commands
+
+Install the latest signed release:
+
+```bash
+sudo axidev-osk-install install
 ```
 
-The script does not remove the user from the `uinput` group. Other virtual-input software may use the same least-privilege group.
+Upgrade to the latest signed release:
 
-## Re-running `install.sh`
+```bash
+sudo axidev-osk-install upgrade
+```
 
-`install.sh` is safe to re-run. The bundle is downloaded fresh and `/opt/axidev-osk` is replaced via the atomic swap. The udev rule and group membership steps detect their desired state and only act if a change is needed.
+Swap active and retained payloads:
+
+```bash
+sudo axidev-osk-install rollback
+```
+
+Remove Axidev OSK:
+
+```bash
+sudo axidev-osk-install uninstall
+```
+
+The first downloaded installer must be saved to a file and run from that file. A pipe cannot install the lifecycle command because no installer file would remain to copy.
+
+## Failure Behavior
+
+A bad signature or checksum stops before extraction.
+
+An unsafe archive path stops before extraction.
+
+A failed staged runtime check leaves the active payload unchanged and removes the temporary staging directory.
+
+A failed activation restores the retained payload.
+
+The installer keeps the previous successful payload at `/opt/axidev-osk.old` until another install replaces it.
+
+Rollback warns if the retained payload fails runtime verification, but it leaves the swap complete so the operator can inspect or reverse it.
+
+Uninstall stops when permission or autostart cleanup fails. `uninstall --force` removes owned files after reporting incomplete cleanup.
+
+## Files Owned
+
+```text
+/opt/axidev-osk/
+/opt/axidev-osk.old/
+/usr/local/bin/axidev-osk
+/usr/local/sbin/axidev-osk-install
+/usr/local/share/applications/axidev-osk.desktop
+/usr/local/share/icons/hicolor/scalable/apps/axidev-osk.svg
+```
+
+Permission setup manages `/etc/modules-load.d/axidev-osk-uinput.conf` and `/etc/udev/rules.d/70-axidev-io-uinput.rules` through the application command line. Removal deletes only files whose contents still match Axidev OSK's definitions, and it does not unload the shared `uinput` module. Autostart setup manages the selected user's XDG autostart file.
+
+The uninstaller does not remove the shared `uinput` group or its memberships.
+
+## QEMU Profiles
+
+Prepare one profile from a verified local payload:
+
+```bash
+python build.py linux vm prepare hyprland \
+    --payload dist/linux/axidev-osk
+```
+
+Run the prepared profile:
+
+```bash
+python build.py linux vm run hyprland
+```
+
+Reset its writable disk and cached installer source:
+
+```bash
+python build.py linux vm reset hyprland
+```
+
+Available profiles are `hyprland`, `kde`, and `gnome`. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
+
+QEMU exposes the cached source through a read-only 9p device during provisioning. Cloud-init mounts it temporarily, runs the lifecycle installer, and unmounts it before reboot. The installed application runs from `/opt/axidev-osk` through `/usr/local/bin/axidev-osk`; the guest does not retain a host payload mount.
+
+Hyprland starts Axidev OSK through its compositor configuration. KDE and GNOME provisioning create the selected user's XDG autostart entry through the installed application command line.
+
+The runner opens a GTK QEMU window. It uses KVM when `/dev/kvm` is accessible and otherwise uses slower software emulation.
+
+QEMU testing is interactive. It verifies the installer, host package set, and compositor behavior that static container checks cannot observe.

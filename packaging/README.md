@@ -1,89 +1,108 @@
+Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
+Every call here is inayayousfi's, and no agent acted on its own.
+
 # Packaging
 
-This directory holds everything related to distributing Axidev OSK to end users: install scripts, native package recipes, and platform-specific resources.
-
-The repository deliberately keeps these files in tree even when no public package has been published yet. They are the source of truth for how the project is meant to be installed, and they need to evolve alongside the application code.
+This directory contains Axidev OSK installers, native package recipes, build support, and platform resources.
 
 ## Layout
 
-```
+```text
 packaging/
-  README.md              # this file: install architecture overview
-  MANUAL_INSTALL.md      # source-based install for development or unsupported distros
-  arch/                  # Arch PKGBUILD and install hook
-  deb/                   # Debian packaging template
+  README.md
+  MANUAL_INSTALL.md
+  arch/
+  deb/
   linux/
-    README.md            # Linux installer internals
-    install.sh           # system-wide installer (downloads latest release bundle)
-    install-from-source.sh            # system-wide installer from a local checkout
-    uninstall.sh         # cleanly removes the system-wide install
+    README.md
+    build_support/
+    container/
+    launcher/
     resources/
-      launcher.sh                     # placed at /usr/local/bin/axidev-osk
-      70-axidev-io-uinput.rules       # placed at /etc/udev/rules.d/...
-  nix/                   # NixOS module documentation
-  rpm/                   # Fedora/RPM spec
+    install.sh
+    install-from-source.sh
+    release-lock.json
+    uninstall.sh
+  nix/
+  rpm/
 ```
 
-The top-level `flake.nix` exposes the Nix package and NixOS module because Nix users expect flakes at the repository root.
+The root `build.py` command routes Linux payload, verification, release, and virtual-machine work.
 
-## Installation Architecture
+## Linux Distribution
 
-### Linux
+The release payload owns the Axidev OSK Python package, native input extension, static launcher, desktop entry, icon, metadata, and license files. The host supplies `/usr/bin/python3`, PySide6, Qt, Qt Wayland, LayerShellQt, and normal desktop libraries.
 
-A normal install ends up looking like this on disk:
+A normal installation uses these paths:
 
+```text
+/opt/axidev-osk/                  active payload
+/opt/axidev-osk.old/              retained rollback payload
+/usr/local/bin/axidev-osk         launcher symlink
+/usr/local/sbin/axidev-osk-install
+/usr/local/share/applications/axidev-osk.desktop
+/usr/local/share/icons/hicolor/scalable/apps/axidev-osk.svg
 ```
-/opt/axidev-osk/                         # entire install lives here
-  .venv/                                 # virtual environment with --system-site-packages
-  packaging/linux/uninstall.sh           # bundled uninstaller
-  packaging/linux/resources/...          # source for the launcher and udev rule
-  ...
-/usr/local/bin/axidev-osk                # launcher shim that exec's the venv entry point
-/etc/udev/rules.d/70-axidev-io-uinput.rules
+
+The static Rust launcher finds its payload relative to its own location. It starts `/usr/bin/python3 -I`, adds only the payload's Python tree, then checks the host runtime before normal startup.
+
+The runtime gate requires Python 3.10 or newer. It accepts matching PySide6 and Qt releases from 6.7 up to, but not including, 7.0. It also checks the Qt X11 and Wayland platform plugins and verifies that LayerShellQt resolves against the installed Qt libraries.
+
+## Lifecycle
+
+`install.sh` becomes `/usr/local/sbin/axidev-osk-install` after installation.
+
+`install` verifies a local checksum or a downloaded Minisign manifest. It extracts into a temporary `/opt/axidev-osk.new.*` directory and runs the payload's runtime check before activation.
+
+Activation moves the current payload to `/opt/axidev-osk.old` and moves the staged payload into `/opt/axidev-osk`. A failed activation restores the previous payload.
+
+`upgrade` downloads the latest installer and payload from the signed release.
+
+`rollback` swaps `/opt/axidev-osk` and `/opt/axidev-osk.old`.
+
+`uninstall` removes active and rollback payloads plus owned integration files. It preserves the shared `uinput` group and memberships.
+
+## Build And Release
+
+Build and verify the payload through the pinned Docker environment:
+
+```bash
+python build.py linux payload
+python build.py linux verify dist/linux/axidev-osk
 ```
 
-The install path is intentionally simple:
+Create signed release assets:
 
-- **Everything the application owns lives under `/opt/axidev-osk/`.** Wiping that directory removes the program. There is no per-user data managed by the installer at this stage.
-- **The launcher in `/usr/local/bin/`** is a one-line shim that exec's `/opt/axidev-osk/.venv/bin/python -m axidev_osk`. The application performs its own environment discovery (Wayland vs X11, layer-shell plugin location, etc.); the shim does not pass extra environment variables.
-- **The udev rule** allows non-root processes to write to `/dev/uinput` when they belong to the dedicated `uinput` group. The installer adds the invoking user to that group when it is missing.
+```bash
+python build.py linux release --signing-key /path/to/minisign.key
+```
 
-PySide6, Qt6, layer-shell-qt, libinput, libudev, and libxkbcommon are **not** bundled with the install. They are loaded from the system at runtime so that the Qt and layer-shell-qt versions match (a mismatch causes hard-to-diagnose ABI segfaults). The Linux dependency list lives in `linux/README.md` and in the top-level `README.md` install commands.
+Release generation requires `packaging/linux/minisign.pub`, a matching passwordless CI key, and the `minisign` command. It fails when signing is not provisioned.
 
-### Upgrade flow
+The release directory contains versioned and stable payload archives, versioned and stable repository source ZIPs, the lifecycle installer, `SHA256SUMS`, and `SHA256SUMS.minisig`.
 
-`install.sh` performs the install atomically:
+`release-lock.json` records the supported architecture, minimum glibc version, pinned builder image, Rust toolchain, allowed host libraries, and virtual-machine images. Qt, PySide6, and LayerShellQt come from the host package manager, so the lock does not pin their artifacts.
 
-1. Stage the new install at `/opt/axidev-osk.new/`.
-2. Run a Python import smoke test inside the staged venv.
-3. Only on success: `mv /opt/axidev-osk /opt/axidev-osk.old` then `mv /opt/axidev-osk.new /opt/axidev-osk` then `rm -rf /opt/axidev-osk.old`.
+## Interactive Linux Checks
 
-If anything fails before the swap, the previous install remains untouched and `axidev-osk` keeps working from the old `/opt/axidev-osk/`.
+The QEMU helper manages three profiles:
 
-### Idempotency
+- `hyprland`: Arch Linux with Hyprland
+- `kde`: Fedora with KDE Plasma
+- `gnome`: Fedora with GNOME
 
-Re-running `install.sh` on a system that already has the correct configuration touches only what needs to change:
+Prepare, run, or reset a profile:
 
-- The `/opt/axidev-osk/` swap always happens (the new release replaces the old).
-- The `uinput` group is created only if missing.
-- The udev rule file is rewritten only if its contents differ from the expected value.
-- `udevadm` is reloaded only when the rule actually changed.
-- The user is added to the `uinput` group only if not already a member.
+```bash
+python build.py linux vm prepare hyprland
+python build.py linux vm run hyprland --share dist/linux
+python build.py linux vm reset hyprland
+```
 
-### Uninstall
+Replace `hyprland` with `kde` or `gnome`. The runner uses KVM when available and falls back to software emulation.
 
-`/opt/axidev-osk/packaging/linux/uninstall.sh` removes `/opt/axidev-osk/`, `/usr/local/bin/axidev-osk`, and the udev rule. It does **not** touch the user's `uinput` group membership, since that group can be shared with other software.
+## Other Packages
 
-## Windows
+The Arch, Debian, RPM, and Nix definitions remain in tree. They are separate distribution integrations and do not define the standalone `/opt` payload.
 
-Not yet implemented. The intended shape:
-
-- A signed installer (likely Inno Setup or WiX) that places the application under `C:\Program Files\Axidev OSK\`.
-- A Start Menu entry and an optional "Start at login" toggle that registers the launcher with the Windows startup mechanism.
-- An uninstaller registered with Windows so the program shows up in *Apps & Features* and can be cleanly removed.
-
-For now, Windows users follow the manual install in [`MANUAL_INSTALL.md`](./MANUAL_INSTALL.md).
-
-## Manual / source install
-
-For development, custom layouts, or distros not yet covered by a packaged install, see [`MANUAL_INSTALL.md`](./MANUAL_INSTALL.md). It documents the per-distro source-based flow that creates a virtual environment in the project checkout. This route is supported but not the recommended path for normal users.
+Windows native packaging is not implemented. Windows users currently install from the stable repository source ZIP.

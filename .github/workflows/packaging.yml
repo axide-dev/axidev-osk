@@ -3,15 +3,25 @@ name: Packaging
 on:
   pull_request:
     paths:
+      - ".dockerignore"
+      - "build.py"
       - "packaging/**"
-      - "flake.nix"
+      - "pyproject.toml"
+      - "src/**"
+      - "tests/test_linux_packaging.py"
+      - "vendor/axidev-io-python"
       - ".github/workflows/packaging.yml"
       - ".github/workflows/release.yml"
   push:
     branches: [main]
     paths:
+      - ".dockerignore"
+      - "build.py"
       - "packaging/**"
-      - "flake.nix"
+      - "pyproject.toml"
+      - "src/**"
+      - "tests/test_linux_packaging.py"
+      - "vendor/axidev-io-python"
       - ".github/workflows/packaging.yml"
       - ".github/workflows/release.yml"
   workflow_dispatch:
@@ -24,43 +34,78 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Install Rust 1.89.0
+        uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt
+
+      - name: Check Python files
+        run: |
+          python3 -m py_compile \
+            build.py \
+            packaging/linux/build_support/*.py \
+            packaging/linux/resources/launch.py
+          python3 -m unittest tests.test_linux_packaging
+          python3 -m json.tool packaging/linux/release-lock.json >/dev/null
+
       - name: Check shell scripts
         run: |
-          set -euo pipefail
+          test -x packaging/linux/install.sh
+          test -x packaging/linux/install-from-source.sh
+          test -x packaging/linux/uninstall.sh
           bash -n \
             packaging/linux/install.sh \
             packaging/linux/install-from-source.sh \
             packaging/linux/uninstall.sh \
-            packaging/linux/resources/launcher.sh \
             packaging/arch/axidev-osk.install \
             packaging/deb/debian/rules \
             packaging/deb/debian/postinst \
             packaging/deb/debian/postrm
 
+      - name: Check native launcher
+        run: cargo fmt --check --manifest-path packaging/linux/launcher/Cargo.toml
+
       - name: Check Debian metadata
         run: |
-          set -euo pipefail
           cp -a packaging/deb/debian ./debian
           dpkg-parsechangelog --show-field Version
           dpkg-parsechangelog --show-field Distribution
 
       - name: Check RPM spec parses
         run: |
-          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rpm
           rpmspec --parse packaging/rpm/axidev-osk.spec >/dev/null
 
       - name: Check Arch package metadata shape
         run: |
-          set -euo pipefail
           test -f packaging/arch/PKGBUILD
           test -f packaging/arch/axidev-osk.install
           grep -q '^pkgname=axidev-osk$' packaging/arch/PKGBUILD
           grep -q "install=axidev-osk.install" packaging/arch/PKGBUILD
 
-      - name: Check Nix flake syntax
+      - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Evaluate Nix flake
         run: nix flake check --no-build
+
+  linux-payload:
+    name: Build Linux x86_64 Payload
+    runs-on: ubuntu-24.04
+    needs: static
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build and verify payload
+        run: python3 build.py linux payload --output dist/linux
+
+      - name: Upload payload for inspection
+        uses: actions/upload-artifact@v6
+        with:
+          name: axidev-osk-linux-payload
+          path: dist/linux/axidev-osk
+          if-no-files-found: error

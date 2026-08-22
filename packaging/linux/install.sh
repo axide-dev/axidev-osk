@@ -1,280 +1,335 @@
 #!/usr/bin/env bash
-# Axidev OSK system-wide installer for Linux.
-#
-# Downloads the latest release bundle, installs it under /opt/axidev-osk,
-# registers a launcher in /usr/local/bin, and ensures the udev rule and
-# group membership required to emit input events through /dev/uinput.
-#
-# The install is performed atomically: if any step fails before the swap,
-# the previous install is left in place untouched.
+# Axidev OSK lifecycle installer for the signed Linux /opt payload.
 
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 readonly INSTALL_PREFIX="/opt/axidev-osk"
-readonly STAGING_DIR="/opt/axidev-osk.new"
-readonly BACKUP_DIR="/opt/axidev-osk.old"
-readonly LAUNCHER_PATH="/usr/local/bin/axidev-osk"
-readonly UDEV_RULE_PATH="/etc/udev/rules.d/70-axidev-io-uinput.rules"
-readonly UDEV_RULE_CONTENTS='KERNEL=="uinput", MODE="0660", GROUP="uinput", OPTIONS+="static_node=uinput"'
-
+readonly BACKUP_PREFIX="/opt/axidev-osk.old"
+readonly APP_LINK="/usr/local/bin/axidev-osk"
+readonly LIFECYCLE_PATH="/usr/local/sbin/axidev-osk-install"
+readonly DESKTOP_PATH="/usr/local/share/applications/axidev-osk.desktop"
+readonly ICON_PATH="/usr/local/share/icons/hicolor/scalable/apps/axidev-osk.svg"
+readonly LOCK_PATH="/run/lock/axidev-osk-install.lock"
 readonly RELEASE_BASE_URL="https://github.com/axide-dev/axidev-osk/releases/latest/download"
-readonly BUNDLE_NAME="axidev-osk-linux-x86_64.tar.gz"
+readonly PAYLOAD_NAME="axidev-osk-linux-x86_64.tar.gz"
+readonly INSTALLER_NAME="axidev-osk-install"
+readonly MINISIGN_PUBLIC_KEY='@MINISIGN_PUBLIC_KEY@'
 
-readonly REQUIRED_ARCH="x86_64"
+log() { printf '[axidev-osk-install] %s\n' "$*"; }
+warn() { printf '[axidev-osk-install] WARNING: %s\n' "$*" >&2; }
+die() { printf '[axidev-osk-install] ERROR: %s\n' "$*" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+usage() {
+    cat <<'EOF'
+Usage:
+  axidev-osk-install install [--payload FILE --checksum SHA256] [--user USER]
+  axidev-osk-install upgrade [--user USER]
+  axidev-osk-install rollback
+  axidev-osk-install uninstall [--user USER] [--force]
 
-log()  { printf '[install] %s\n' "$*"; }
-warn() { printf '[install] WARNING: %s\n' "$*" >&2; }
-die()  { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
-
-# ---------------------------------------------------------------------------
-# Pre-flight checks
-# ---------------------------------------------------------------------------
+An install without --payload downloads and verifies the latest signed release.
+EOF
+}
 
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        log "Re-executing with sudo..."
         exec sudo -E -- "$0" "$@"
     fi
 }
 
-require_arch() {
-    local arch
-    arch="$(uname -m)"
-    if [ "${arch}" != "${REQUIRED_ARCH}" ]; then
-        die "Unsupported architecture '${arch}'. This installer currently supports ${REQUIRED_ARCH} only."
-    fi
-}
-
-require_command() {
-    local cmd="$1"
-    if ! command -v "${cmd}" >/dev/null 2>&1; then
-        die "Required command not found: ${cmd}"
-    fi
-}
-
 require_commands() {
-    require_command curl
-    require_command tar
-    require_command python3
-    require_command install
-    require_command udevadm
-    require_command groupadd
-    require_command usermod
-    require_command getent
-    require_command stat
+    local missing=0
+    local command
+    for command in "$@"; do
+        if ! command -v "${command}" >/dev/null 2>&1; then
+            warn "Missing required command: ${command}"
+            missing=1
+        fi
+    done
+    [ "${missing}" -eq 0 ] || die "Install the missing commands and retry."
 }
 
-resolve_target_user() {
-    # When invoked through sudo, $SUDO_USER is the original user we want
-    # to add to the uinput group. When invoked directly as root we have no
-    # safe way to guess, so the group-add step is skipped with a warning.
-    if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+resolve_user() {
+    local requested="$1"
+    if [ -n "${requested}" ]; then
+        printf '%s' "${requested}"
+    elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
         printf '%s' "${SUDO_USER}"
     fi
 }
 
-# ---------------------------------------------------------------------------
-# Download and stage
-# ---------------------------------------------------------------------------
+acquire_lock() {
+    mkdir -p "$(dirname "${LOCK_PATH}")"
+    exec 9>"${LOCK_PATH}"
+    flock -n 9 || die "Another Axidev OSK lifecycle operation is running."
+}
 
-download_bundle() {
-    local dest="$1"
-    local url="${RELEASE_BASE_URL}/${BUNDLE_NAME}"
-    log "Downloading ${BUNDLE_NAME} from latest release..."
-    if ! curl --fail --location --show-error --silent --output "${dest}" "${url}"; then
-        die "Failed to download ${url}"
+verify_local_payload() {
+    local payload="$1"
+    local expected="$2"
+    [ -f "${payload}" ] || die "Payload does not exist: ${payload}"
+    [ -n "${expected}" ] || die "--checksum is required with --payload"
+    local actual
+    actual="$(sha256sum "${payload}" | cut -d' ' -f1)"
+    [ "${actual}" = "${expected}" ] || die "Payload checksum mismatch."
+}
+
+verify_signed_manifest() {
+    local directory="$1"
+    if [ "${MINISIGN_PUBLIC_KEY}" = '@MINISIGN_PUBLIC_KEY@' ]; then
+        die "This installer has no release public key. Use a signed release installer."
+    fi
+    minisign -V \
+        -P "${MINISIGN_PUBLIC_KEY}" \
+        -m "${directory}/SHA256SUMS" \
+        -x "${directory}/SHA256SUMS.minisig" >/dev/null
+}
+
+manifest_checksum() {
+    local manifest="$1"
+    local filename="$2"
+    local digest name
+    while read -r digest name; do
+        name="${name#\*}"
+        if [ "${name}" = "${filename}" ]; then
+            printf '%s' "${digest}"
+            return 0
+        fi
+    done < "${manifest}"
+    return 1
+}
+
+download_release_files() {
+    local directory="$1"
+    shift
+    local filename
+    for filename in SHA256SUMS SHA256SUMS.minisig "$@"; do
+        curl --fail --location --show-error --silent \
+            --output "${directory}/${filename}" \
+            "${RELEASE_BASE_URL}/${filename}"
+    done
+    verify_signed_manifest "${directory}"
+    for filename in "$@"; do
+        local expected
+        expected="$(manifest_checksum "${directory}/SHA256SUMS" "${filename}")" \
+            || die "Signed manifest does not contain ${filename}."
+        verify_local_payload "${directory}/${filename}" "${expected}"
+    done
+}
+
+validate_archive_paths() {
+    local payload="$1"
+    local path
+    while IFS= read -r path; do
+        case "${path}" in
+            axidev-osk|axidev-osk/*) ;;
+            *) die "Payload contains an unsafe path: ${path}" ;;
+        esac
+        case "/${path}/" in
+            */../*) die "Payload contains a parent traversal: ${path}" ;;
+        esac
+    done < <(tar -tzf "${payload}")
+}
+
+stage_payload() {
+    local payload="$1"
+    local staging
+    staging="$(mktemp -d /opt/axidev-osk.new.XXXXXX)"
+    trap 'rm -rf "${staging}"' EXIT
+    validate_archive_paths "${payload}"
+    tar -xzf "${payload}" -C "${staging}" --no-same-owner
+    local root="${staging}/axidev-osk"
+    [ -x "${root}/bin/axidev-osk" ] || die "Payload is missing its native launcher."
+    [ -f "${root}/release.json" ] || die "Payload is missing release metadata."
+    "${root}/bin/axidev-osk" --verify-runtime >&2 \
+        || die "Staged payload runtime verification failed."
+    trap - EXIT
+    printf '%s' "${root}"
+}
+
+activate_payload() {
+    local staged="$1"
+    rm -rf "${BACKUP_PREFIX}"
+    if [ -e "${INSTALL_PREFIX}" ]; then
+        mv "${INSTALL_PREFIX}" "${BACKUP_PREFIX}"
+    fi
+    if ! mv "${staged}" "${INSTALL_PREFIX}"; then
+        if [ -e "${BACKUP_PREFIX}" ]; then
+            mv "${BACKUP_PREFIX}" "${INSTALL_PREFIX}"
+        fi
+        die "Could not activate the staged payload."
+    fi
+    rmdir "$(dirname "${staged}")" 2>/dev/null || true
+}
+
+install_shared_files() {
+    ln -sfn "${INSTALL_PREFIX}/bin/axidev-osk" "${APP_LINK}"
+
+    if ! install -Dm0644 \
+        "${INSTALL_PREFIX}/share/applications/axidev-osk.desktop" \
+        "${DESKTOP_PATH}"; then
+        warn "Could not install the desktop entry."
+    fi
+    if ! install -Dm0644 \
+        "${INSTALL_PREFIX}/share/icons/hicolor/scalable/apps/axidev-osk.svg" \
+        "${ICON_PATH}"; then
+        warn "Could not install the desktop icon."
+    fi
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true
+    fi
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q /usr/local/share/icons/hicolor >/dev/null 2>&1 || true
+    fi
+
+    [ -f "$0" ] || die "Run this installer from a downloaded file, not a pipe."
+    if [ "$(readlink -f "$0")" != "${LIFECYCLE_PATH}" ]; then
+        install -Dm0755 "$0" "${LIFECYCLE_PATH}"
     fi
 }
 
-stage_install() {
-    local extract_dir="$1"
-
-    # Clean any leftovers from a previous failed run.
-    rm -rf "${STAGING_DIR}"
-    mkdir -p "${STAGING_DIR}"
-
-    # The release tarball contains an axidev-osk/ directory at its root with
-    # the wheels and resource files inside.
-    local bundle_root="${extract_dir}/axidev-osk"
-    [ -d "${bundle_root}" ] || die "Release bundle layout unexpected: ${bundle_root} not found"
-
-    log "Creating virtual environment at ${STAGING_DIR}/.venv..."
-    python3 -m venv --system-site-packages "${STAGING_DIR}/.venv"
-
-    log "Installing wheels into the virtual environment..."
-    local wheels_dir="${bundle_root}/wheels"
-    [ -d "${wheels_dir}" ] || die "Release bundle missing wheels/ directory"
-    [ -d "${bundle_root}/packaging" ] || die "Release bundle missing packaging/ directory"
-
-    "${STAGING_DIR}/.venv/bin/pip" install \
-        --quiet \
-        --no-index \
-        --no-deps \
-        --find-links "${wheels_dir}" \
-        axidev-io \
-        axidev-osk
-
-    cp -a "${bundle_root}/packaging" "${STAGING_DIR}/"
-
-    log "Verifying the staged install can import its modules..."
-    "${STAGING_DIR}/.venv/bin/python" -c "import axidev_osk, axidev_io" \
-        || die "Staged install failed import smoke test"
-}
-
-swap_install() {
-    if [ -d "${INSTALL_PREFIX}" ]; then
-        rm -rf "${BACKUP_DIR}"
-        mv "${INSTALL_PREFIX}" "${BACKUP_DIR}"
-    fi
-    mv "${STAGING_DIR}" "${INSTALL_PREFIX}"
-    rm -rf "${BACKUP_DIR}"
-}
-
-# ---------------------------------------------------------------------------
-# Launcher
-# ---------------------------------------------------------------------------
-
-install_launcher() {
-    local source_launcher="${INSTALL_PREFIX}/packaging/linux/resources/launcher.sh"
-    if [ ! -f "${source_launcher}" ]; then
-        die "Launcher template missing from install: ${source_launcher}"
-    fi
-    install -m 0755 "${source_launcher}" "${LAUNCHER_PATH}"
-    log "Installed launcher at ${LAUNCHER_PATH}"
-}
-
-# ---------------------------------------------------------------------------
-# udev / group setup
-#
-# Each step checks the desired state first and only acts if a change is
-# needed. Re-running the installer on a correctly-configured system will
-# touch nothing in this section.
-# ---------------------------------------------------------------------------
-
-ensure_uinput_group() {
-    if getent group uinput >/dev/null 2>&1; then
-        return 0
-    fi
-    log "Creating 'uinput' group..."
-    groupadd --system uinput
-}
-
-ensure_udev_rule() {
-    local current=""
-    if [ -L "${UDEV_RULE_PATH}" ]; then
-        log "Removing existing udev rule mask..."
-        rm -f "${UDEV_RULE_PATH}"
-    fi
-    if [ -f "${UDEV_RULE_PATH}" ]; then
-        current="$(cat "${UDEV_RULE_PATH}")"
-    fi
-    if [ "${current}" = "${UDEV_RULE_CONTENTS}" ]; then
-        log "udev rule already present, skipping."
-        return 1
-    fi
-    log "Installing udev rule at ${UDEV_RULE_PATH}..."
-    printf '%s\n' "${UDEV_RULE_CONTENTS}" > "${UDEV_RULE_PATH}"
-    chmod 0644 "${UDEV_RULE_PATH}"
-    return 0
-}
-
-reload_udev() {
-    log "Reloading udev rules..."
-    udevadm control --reload-rules
-    if [ -e /dev/uinput ]; then
-        udevadm trigger /dev/uinput || true
-    fi
-}
-
-uinput_state_correct() {
-    [ -e /dev/uinput ] || return 1
-    local state
-    state="$(stat -c '%a %G' /dev/uinput 2>/dev/null || true)"
-    [ "${state}" = "660 uinput" ]
-}
-
-ensure_uinput_node() {
-    if uinput_state_correct; then
-        log "/dev/uinput already configured correctly."
-        return 0
-    fi
-
-    if [ ! -e /dev/uinput ]; then
-        log "Loading uinput kernel module..."
-        modprobe uinput || warn "Could not load 'uinput' kernel module."
-    fi
-
-    if uinput_state_correct; then
-        return 0
-    fi
-
-    warn "/dev/uinput is not yet owned by group 'uinput' with mode 0660."
-    warn "A reboot may be required for the new udev rule to take effect."
-}
-
-ensure_user_in_input_group() {
+setup_permissions() {
     local target_user="$1"
     if [ -z "${target_user}" ]; then
-        warn "Cannot determine the target user; skipping 'uinput' group membership step."
+        warn "No target user was selected."
         warn "Run: axidev-osk linux setup-permissions --user <username>"
         return 0
     fi
-
-    if id -nG "${target_user}" 2>/dev/null | tr ' ' '\n' | grep -qx uinput; then
-        log "User '${target_user}' is already in the 'uinput' group."
-        return 0
+    if ! "${APP_LINK}" linux setup-permissions --user "${target_user}"; then
+        warn "The application installed, but Linux input setup failed."
+        warn "Retry: axidev-osk linux setup-permissions --user ${target_user}"
     fi
-
-    log "Adding user '${target_user}' to the 'uinput' group..."
-    usermod -aG uinput "${target_user}"
-    log "Log out and back in for the new group membership to take effect."
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+install_action() {
+    local payload="$1"
+    local checksum="$2"
+    local target_user="$3"
+    local temp=""
+    if [ -z "${payload}" ]; then
+        temp="$(mktemp -d)"
+        download_release_files "${temp}" "${PAYLOAD_NAME}"
+        payload="${temp}/${PAYLOAD_NAME}"
+        checksum="$(manifest_checksum "${temp}/SHA256SUMS" "${PAYLOAD_NAME}")"
+    fi
+    trap 'rm -rf "${temp:-}"' RETURN
+    verify_local_payload "${payload}" "${checksum}"
+    local staged
+    staged="$(stage_payload "${payload}")"
+    activate_payload "${staged}"
+    install_shared_files
+    setup_permissions "${target_user}"
+    log "Install complete. Run: axidev-osk"
+}
+
+upgrade_action() {
+    local target_user="$1"
+    local temp
+    temp="$(mktemp -d)"
+    download_release_files "${temp}" "${INSTALLER_NAME}" "${PAYLOAD_NAME}"
+    local checksum
+    checksum="$(manifest_checksum "${temp}/SHA256SUMS" "${PAYLOAD_NAME}")"
+    local arguments=(
+        install
+        --payload "${temp}/${PAYLOAD_NAME}"
+        --checksum "${checksum}"
+    )
+    if [ -n "${target_user}" ]; then
+        arguments+=(--user "${target_user}")
+    fi
+    local status=0
+    bash "${temp}/${INSTALLER_NAME}" "${arguments[@]}" || status=$?
+    rm -rf "${temp}"
+    return "${status}"
+}
+
+rollback_action() {
+    [ -d "${BACKUP_PREFIX}" ] || die "No retained payload is available."
+    local temporary="/opt/axidev-osk.rollback.$$"
+    [ ! -e "${temporary}" ] || die "Rollback temporary path already exists."
+    mv "${INSTALL_PREFIX}" "${temporary}"
+    if ! mv "${BACKUP_PREFIX}" "${INSTALL_PREFIX}"; then
+        mv "${temporary}" "${INSTALL_PREFIX}"
+        die "Could not activate the retained payload."
+    fi
+    mv "${temporary}" "${BACKUP_PREFIX}"
+    "${INSTALL_PREFIX}/bin/axidev-osk" --verify-runtime \
+        || warn "The retained payload failed runtime verification."
+    install_shared_files
+    log "Rollback complete."
+}
+
+cleanup_integration() {
+    local target_user="$1"
+    local failed=0
+    if [ -x "${INSTALL_PREFIX}/bin/axidev-osk" ]; then
+        if [ -n "${target_user}" ]; then
+            "${INSTALL_PREFIX}/bin/axidev-osk" linux remove-autostart --user "${target_user}" \
+                || failed=1
+        else
+            warn "Cannot remove autostart without a target user."
+            failed=1
+        fi
+        "${INSTALL_PREFIX}/bin/axidev-osk" linux remove-permissions || failed=1
+    fi
+    return "${failed}"
+}
+
+uninstall_action() {
+    local target_user="$1"
+    local force="$2"
+    if ! cleanup_integration "${target_user}"; then
+        if [ "${force}" -ne 1 ]; then
+            die "Integration cleanup failed. Retry, or use uninstall --force."
+        fi
+        warn "Continuing after incomplete integration cleanup."
+    fi
+    rm -rf "${INSTALL_PREFIX}" "${BACKUP_PREFIX}"
+    if [ -L "${APP_LINK}" ] && [ "$(readlink "${APP_LINK}")" = "${INSTALL_PREFIX}/bin/axidev-osk" ]; then
+        rm -f "${APP_LINK}"
+    fi
+    rm -f "${DESKTOP_PATH}" "${ICON_PATH}"
+    rm -f "${LIFECYCLE_PATH}"
+    log "Uninstall complete. Shared uinput group memberships were preserved."
+}
 
 main() {
+    [ "$#" -gt 0 ] || set -- install
     require_root "$@"
-    require_arch
-    require_commands
+    local action="$1"
+    shift
+    case "${action}" in
+        install|upgrade|rollback|uninstall) ;;
+        -h|--help) usage; return 0 ;;
+        *) usage >&2; die "Unknown action: ${action}" ;;
+    esac
 
-    local target_user
-    target_user="$(resolve_target_user)"
+    local payload="" checksum="" requested_user="" force=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --payload) [ "$#" -ge 2 ] || die "--payload needs a path"; payload="$2"; shift 2 ;;
+            --checksum) [ "$#" -ge 2 ] || die "--checksum needs a digest"; checksum="$2"; shift 2 ;;
+            --user) [ "$#" -ge 2 ] || die "--user needs a name"; requested_user="$2"; shift 2 ;;
+            --force) force=1; shift ;;
+            -h|--help) usage; return 0 ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
 
-    local tmp_dir=""
-    tmp_dir="$(mktemp -d)"
-    trap 'rm -rf "${tmp_dir:-}"; rm -rf "${STAGING_DIR}"' EXIT
-
-    local archive_path="${tmp_dir}/${BUNDLE_NAME}"
-    download_bundle "${archive_path}"
-
-    log "Extracting bundle..."
-    tar -xzf "${archive_path}" -C "${tmp_dir}"
-
-    stage_install "${tmp_dir}"
-
-    log "Swapping install into place at ${INSTALL_PREFIX}..."
-    swap_install
-
-    install_launcher
-
-    ensure_uinput_group
-    if ensure_udev_rule; then
-        reload_udev
+    require_commands flock install sha256sum tar
+    if [ -z "${payload}" ] && { [ "${action}" = install ] || [ "${action}" = upgrade ]; }; then
+        require_commands curl minisign
     fi
-    ensure_uinput_node
-    ensure_user_in_input_group "${target_user}"
+    acquire_lock
+    local target_user
+    target_user="$(resolve_user "${requested_user}")"
 
-    log "Install complete. Run: axidev-osk"
+    case "${action}" in
+        install) install_action "${payload}" "${checksum}" "${target_user}" ;;
+        upgrade) upgrade_action "${target_user}" ;;
+        rollback) rollback_action ;;
+        uninstall) uninstall_action "${target_user}" "${force}" ;;
+    esac
 }
 
 main "$@"

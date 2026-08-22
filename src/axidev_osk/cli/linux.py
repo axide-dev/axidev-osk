@@ -22,6 +22,8 @@ else:
 
 
 UINPUT_GROUP = "uinput"
+MODULES_LOAD_PATH = Path("/etc/modules-load.d/axidev-osk-uinput.conf")
+MODULES_LOAD_TEXT = "uinput\n"
 UDEV_RULE_NAME = "70-axidev-io-uinput.rules"
 UDEV_RULE_TEXT = 'KERNEL=="uinput", MODE="0660", GROUP="uinput", OPTIONS+="static_node=uinput"\n'
 UDEV_RULE_PATH = Path("/etc/udev/rules.d") / UDEV_RULE_NAME
@@ -142,7 +144,14 @@ def _sudo_reexec(argv: list[str], account: Account | None, *, run_as_account: bo
     explicit_args = list(argv)
     if account is not None and "--user" not in explicit_args:
         explicit_args.extend(("--user", account.name))
-    child_command = [sys.executable, "-m", "axidev_osk", *explicit_args]
+    payload_root = os.environ.get("AXIDEV_OSK_ROOT")
+    if payload_root:
+        launcher = Path(payload_root) / "bin" / "axidev-osk"
+        if not launcher.is_file():
+            raise LinuxSetupError(f"payload launcher does not exist: {launcher}")
+        child_command = [str(launcher), *explicit_args]
+    else:
+        child_command = [sys.executable, "-m", "axidev_osk", *explicit_args]
     if run_as_account and _is_root():
         assert account is not None
         runuser = shutil.which("runuser")
@@ -171,6 +180,7 @@ def _sudo_reexec(argv: list[str], account: Account | None, *, run_as_account: bo
 
 def _setup_permissions(account: Account) -> None:
     assert grp is not None
+    _ensure_owned_file(MODULES_LOAD_PATH, MODULES_LOAD_TEXT)
     try:
         group = grp.getgrnam(UINPUT_GROUP)
     except KeyError:
@@ -182,9 +192,7 @@ def _setup_permissions(account: Account) -> None:
     if membership_added:
         _run_checked(["usermod", "-aG", UINPUT_GROUP, account.name])
 
-    if not UINPUT_PATH.exists():
-        _run_checked(["modprobe", "uinput"])
-    _reload_udev()
+    _reload_udev(ensure_device=True)
     print(f"Linux uinput permissions are configured for {account.name}.")
     if membership_added:
         print("Log out and back in before starting Axidev OSK.")
@@ -199,6 +207,7 @@ def _status_permissions(account: Account) -> int:
         group = None
 
     checks.append((f"group {UINPUT_GROUP}", group is not None))
+    checks.append(("module load", _read_text(MODULES_LOAD_PATH) == MODULES_LOAD_TEXT))
     checks.append(("udev rule", _permission_rule_is_enabled()))
     checks.append(("group membership", group is not None and _account_in_group(account, group)))
     checks.append(("/dev/uinput mode", group is not None and _uinput_mode_is_ready(group.gr_gid)))
@@ -211,6 +220,7 @@ def _status_permissions(account: Account) -> int:
 
 
 def _remove_permissions() -> None:
+    _remove_owned_file(MODULES_LOAD_PATH, MODULES_LOAD_TEXT)
     UDEV_RULE_PATH.parent.mkdir(parents=True, exist_ok=True)
     if UDEV_RULE_PATH.exists() or UDEV_RULE_PATH.is_symlink():
         UDEV_RULE_PATH.unlink()
@@ -241,8 +251,11 @@ def _uinput_mode_is_ready(group_gid: int) -> bool:
     return details.st_gid == group_gid and details.st_mode & required == required
 
 
-def _reload_udev() -> None:
+def _reload_udev(*, ensure_device: bool = False) -> None:
     _run_checked(["udevadm", "control", "--reload-rules"])
+    if ensure_device and not UINPUT_PATH.exists():
+        _run_checked(["modprobe", "uinput"])
+    _run_checked(["udevadm", "settle"])
     if UINPUT_PATH.exists():
         _run_checked(["udevadm", "trigger", str(UINPUT_PATH)])
 
@@ -284,6 +297,7 @@ def _autostart_text() -> str:
     executable = shutil.which("axidev-osk")
     if executable is None:
         raise LinuxSetupError("axidev-osk must be installed on PATH before enabling autostart")
+    executable = str(Path(executable).resolve())
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
@@ -319,6 +333,25 @@ def _ensure_directory(path: Path) -> None:
         raise LinuxSetupError(f"autostart parent is not a directory: {current}")
     for directory in reversed(missing):
         directory.mkdir(mode=0o700)
+
+
+def _ensure_owned_file(path: Path, contents: str) -> None:
+    current = _read_text(path)
+    if current is not None and current != contents:
+        raise LinuxSetupError(f"refusing to replace conflicting file: {path}")
+    _write_atomic(path, contents, 0o644)
+
+
+def _remove_owned_file(path: Path, contents: str) -> None:
+    current = _read_text(path)
+    if current is None:
+        return
+    if current != contents:
+        raise LinuxSetupError(f"refusing to remove conflicting file: {path}")
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise LinuxSetupError(f"cannot remove {path}: {exc}") from exc
 
 
 def _write_atomic(path: Path, contents: str, mode: int) -> None:
