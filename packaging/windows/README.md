@@ -1,6 +1,7 @@
 # Trusted Windows Development Install
 
 This directory builds a local Axidev OSK executable with Windows UIAccess.
+It also registers Axidev OSK as a development accessibility application.
 It is a development workflow, not a distributable installer.
 
 UIAccess lets the on-screen keyboard stay above other applications without
@@ -46,13 +47,14 @@ The script performs these steps:
 1. Builds a one-directory PyInstaller bundle under `dist\axidev-osk`.
 2. Creates or reuses `CN=Axidev OSK Development` in the current user's certificate store.
 3. Signs `axidev-osk.exe` with SHA-256.
-4. Requests elevation to trust the certificate and stage the replacement.
-5. Replaces `C:\Program Files\Axidev OSK`.
-6. Creates `Axidev OSK` in the current user's Start Menu.
-7. Launches the installed executable without elevation.
-8. Keeps the previous install until startup and UIAccess checks pass.
-9. Requests elevation to commit the verified replacement.
-10. Reports its signature state, UIAccess token, elevation state, and process ID.
+4. Requests one UAC confirmation for an elevated transaction helper.
+5. Replaces `C:\Program Files\Axidev OSK` and its Start Menu shortcut.
+6. Registers one Axidev accessibility application without launch arguments.
+7. Keeps the elevated helper waiting while the normal process starts.
+8. Verifies the installed process signature and UIAccess token.
+9. Adds Axidev OSK to the current user's accessibility configuration.
+10. Signals the helper to commit or rollback the replacement.
+11. Reports its signature state, UIAccess token, elevation state, and process ID.
 
 The expected final output includes:
 
@@ -61,8 +63,18 @@ Signature: Valid
 UIAccess: 1
 ```
 
-The script creates no startup entry. Automatic startup belongs to the future
-MSI installer.
+Windows uses the same executable and normal runtime on every desktop. The
+registration has no `StartParams` or alternate secure executable. Sign out
+and back in after installation so Windows reloads the accessibility settings.
+
+The development registration uses this stable identity:
+
+```text
+Axidev_AxidevOSK_Development_v1.0
+```
+
+The registration does not modify the Windows `osk` accessibility entry.
+Microsoft's on-screen keyboard remains available as a fallback.
 
 ## Uninstall
 
@@ -80,10 +92,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\unin
 
 The script stops the installed process, removes the Start Menu shortcut and
 `C:\Program Files\Axidev OSK`, and removes only the certificate thumbprint
-recorded by the development installer.
+recorded by the development installer. It also removes only the Axidev
+accessibility entry and its current-user configuration membership.
 
 ## Security Scope
 
 The development certificate is local and self-signed. Do not export it with
-its private key, commit it, or use it for public releases. The future MSI must
-use a production Authenticode certificate and its own installer signing flow.
+its private key, commit it, or use it for public releases. Windows may run the
+normal application under the `SYSTEM` account on secure desktops. The future
+MSI must use a production Authenticode certificate, localizable registration
+resources, and its own installer signing flow.

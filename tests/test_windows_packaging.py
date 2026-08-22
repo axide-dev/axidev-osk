@@ -75,6 +75,40 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("$ShortcutOldPath", admin_script)
         self.assertIn("Remove-Item -LiteralPath $ShortcutPath", admin_script)
 
+    def test_development_installer_registers_one_accessibility_application(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
+        install_script = (WINDOWS_PACKAGING / "install-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('"Axidev_AxidevOSK_Development_v1.0"', admin_script)
+        self.assertNotIn("SecureDesktopAccommodation", admin_script)
+        self.assertNotIn("StartParams", admin_script)
+        self.assertNotIn("--secure-desktop", admin_script)
+        self.assertIn("Install-AccessibilityRegistration", admin_script)
+        for property_name in (
+            "ApplicationName",
+            "Description",
+            "ATExe",
+            "StartExe",
+            "Profile",
+            "SimpleProfile",
+            "TerminateOnDesktopSwitch",
+        ):
+            self.assertIn(f'-Name "{property_name}"', admin_script)
+        self.assertIn("Backup-AccessibilityRegistration", admin_script)
+        self.assertIn("Restore-AccessibilityRegistration", admin_script)
+        self.assertIn("Enable-AxidevAccessibilityAutoStart", install_script)
+        self.assertEqual(install_script.count("-Verb RunAs"), 1)
+        self.assertIn('Join-Path $TransactionPath "ready"', install_script)
+        self.assertIn('Join-Path $TransactionPath "commit"', install_script)
+        self.assertIn('Join-Path $TransactionPath "rollback"', install_script)
+
+    def test_development_uninstaller_removes_only_axidev_auto_start(self) -> None:
+        uninstall_script = (WINDOWS_PACKAGING / "uninstall-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("Disable-AxidevAccessibilityAutoStart", uninstall_script)
+        self.assertIn("$_ -ne $NormalRegistrationName", uninstall_script)
+        self.assertNotIn('Join-Path $AccessibilityRoot "osk"', uninstall_script)
+
 
 if __name__ == "__main__":
     unittest.main()

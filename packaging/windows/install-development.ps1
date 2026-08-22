@@ -6,6 +6,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$AccessibilityPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Accessibility"
+$AccessibilityConfigurationName = "Configuration"
+$NormalRegistrationName = "Axidev_AxidevOSK_Development_v1.0"
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
 if (-not $Python) {
     $Python = Join-Path $RepoRoot ".venv-windows\Scripts\python.exe"
@@ -112,21 +116,92 @@ public static class AxidevTokenInfo
 "@
 }
 
-function Invoke-DevelopmentAdmin([string]$Mode) {
+function Start-DevelopmentAdmin {
     $arguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$AdminScript`"",
-        "-Mode", $Mode,
+        "-Mode", "Install",
         "-SourceDirectory", "`"$StagedBundle`"",
         "-CertificatePath", "`"$ExportedCertificate`"",
         "-CertificateThumbprint", $Certificate.Thumbprint,
-        "-ShortcutPath", "`"$ShortcutPath`""
+        "-ShortcutPath", "`"$ShortcutPath`"",
+        "-TransactionPath", "`"$TransactionPath`""
     )
-    $process = Start-Process -FilePath $PowerShell -Verb RunAs -Wait -PassThru -ArgumentList $arguments
-    if ($process.ExitCode -ne 0) {
-        throw "The elevated $Mode operation failed with exit code $($process.ExitCode)."
+    return Start-Process `
+        -FilePath $PowerShell `
+        -Verb RunAs `
+        -PassThru `
+        -ArgumentList $arguments
+}
+
+function Get-AccessibilityConfigurationState {
+    if (-not (Test-Path -LiteralPath $AccessibilityPath)) {
+        return [PSCustomObject]@{ Exists = $false; Value = "" }
     }
+    $property = Get-ItemProperty -LiteralPath $AccessibilityPath -Name $AccessibilityConfigurationName -ErrorAction SilentlyContinue
+    if ($null -eq $property) {
+        return [PSCustomObject]@{ Exists = $false; Value = "" }
+    }
+    return [PSCustomObject]@{
+        Exists = $true
+        Value = [string]$property.$AccessibilityConfigurationName
+    }
+}
+
+function Set-AccessibilityConfiguration([string]$Value) {
+    New-Item -ItemType Directory -Path $AccessibilityPath -Force | Out-Null
+    New-ItemProperty `
+        -LiteralPath $AccessibilityPath `
+        -Name $AccessibilityConfigurationName `
+        -Value $Value `
+        -PropertyType String `
+        -Force | Out-Null
+}
+
+function Restore-AccessibilityConfiguration($State) {
+    if ($State.Exists) {
+        Set-AccessibilityConfiguration $State.Value
+        return
+    }
+    Remove-ItemProperty `
+        -LiteralPath $AccessibilityPath `
+        -Name $AccessibilityConfigurationName `
+        -Force `
+        -ErrorAction SilentlyContinue
+}
+
+function Enable-AxidevAccessibilityAutoStart {
+    $state = Get-AccessibilityConfigurationState
+    $entries = @(
+        $state.Value -split "," |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ }
+    )
+    if ($entries -notcontains $NormalRegistrationName) {
+        $entries += $NormalRegistrationName
+    }
+    Set-AccessibilityConfiguration ($entries -join ",")
+}
+
+function Disable-AxidevAccessibilityAutoStart {
+    $state = Get-AccessibilityConfigurationState
+    if (-not $state.Exists) {
+        return
+    }
+    $entries = @(
+        $state.Value -split "," |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -and $_ -ne $NormalRegistrationName }
+    )
+    if ($entries.Count -eq 0) {
+        Remove-ItemProperty `
+            -LiteralPath $AccessibilityPath `
+            -Name $AccessibilityConfigurationName `
+            -Force
+        return
+    }
+    Set-AccessibilityConfiguration ($entries -join ",")
 }
 
 function Start-VerifiedApplication([string]$ExecutablePath) {
@@ -171,6 +246,21 @@ function Start-VerifiedApplication([string]$ExecutablePath) {
     }
 }
 
+function Wait-ForAdminReady($Process) {
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        if (Test-Path -LiteralPath (Join-Path $TransactionPath "ready") -PathType Leaf) {
+            return
+        }
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            throw "The elevated installation failed with exit code $($Process.ExitCode)."
+        }
+        Start-Sleep -Milliseconds 200
+    } while ((Get-Date) -lt $deadline)
+    throw "The elevated installation did not become ready within 30 seconds."
+}
+
 $NativeStage = Join-Path $env:LOCALAPPDATA "Axidev OSK Development\install-stage"
 Remove-Item -LiteralPath $NativeStage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $NativeStage | Out-Null
@@ -180,6 +270,9 @@ try {
     New-Item -ItemType Directory -Path $StagedBundle | Out-Null
     Copy-Item -Path (Join-Path $BundlePath "*") -Destination $StagedBundle -Recurse -Force
 
+    $TransactionPath = Join-Path $NativeStage "transaction"
+    New-Item -ItemType Directory -Path $TransactionPath | Out-Null
+
     $ExportedCertificate = Join-Path $NativeStage "development-certificate.cer"
     Export-Certificate -Cert $Certificate -FilePath $ExportedCertificate -Force | Out-Null
 
@@ -188,19 +281,47 @@ try {
     $PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $InstalledExecutable = Join-Path $env:ProgramFiles "Axidev OSK\axidev-osk.exe"
     $ShortcutPath = Join-Path ([Environment]::GetFolderPath("Programs")) "Axidev OSK.lnk"
+    $PreviousAccessibilityConfiguration = Get-AccessibilityConfigurationState
+    $AdminProcess = $null
+    $InstallationCommitted = $false
 
     try {
-        Invoke-DevelopmentAdmin "Install"
+        Disable-AxidevAccessibilityAutoStart
+        $AdminProcess = Start-DevelopmentAdmin
+        Wait-ForAdminReady $AdminProcess
         $Verification = Start-VerifiedApplication $InstalledExecutable
-        Invoke-DevelopmentAdmin "Commit"
+        Enable-AxidevAccessibilityAutoStart
+        Set-Content -LiteralPath (Join-Path $TransactionPath "commit") -Value "commit" -NoNewline
+        if (-not $AdminProcess.WaitForExit(30000)) {
+            throw "The elevated installation did not commit within 30 seconds."
+        }
+        if ($AdminProcess.ExitCode -ne 0) {
+            throw "The elevated installation failed with exit code $($AdminProcess.ExitCode)."
+        }
+        $InstallationCommitted = $true
     } catch {
         $installationFailure = $_
-        try {
-            Invoke-DevelopmentAdmin "Rollback"
-        } catch {
-            throw "Installation failed: $installationFailure`nRollback also failed: $_"
+        Restore-AccessibilityConfiguration $PreviousAccessibilityConfiguration
+        if ($null -ne $AdminProcess) {
+            $AdminProcess.Refresh()
+            if (-not $AdminProcess.HasExited) {
+                Set-Content -LiteralPath (Join-Path $TransactionPath "rollback") `
+                    -Value "rollback" -NoNewline
+                if (-not $AdminProcess.WaitForExit(30000)) {
+                    throw "Installation failed: $installationFailure`nThe elevated rollback timed out."
+                }
+            }
         }
         throw $installationFailure
+    } finally {
+        if (-not $InstallationCommitted -and $null -ne $AdminProcess) {
+            $AdminProcess.Refresh()
+            if (-not $AdminProcess.HasExited) {
+                Set-Content -LiteralPath (Join-Path $TransactionPath "rollback") `
+                    -Value "rollback" -NoNewline
+                $AdminProcess.WaitForExit(30000) | Out-Null
+            }
+        }
     }
 } finally {
     Remove-Item -LiteralPath $NativeStage -Recurse -Force -ErrorAction SilentlyContinue
