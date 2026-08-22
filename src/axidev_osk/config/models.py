@@ -299,6 +299,7 @@ class WindowConfig:
         surface: Root surface content declaration.
         overlay: Overlay behavior for this window.
         chrome: Optional custom chrome policy.
+        opacity: Normal window opacity from zero through one.
     """
 
     id: str
@@ -306,6 +307,13 @@ class WindowConfig:
     surface: SurfaceConfig
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     chrome: ChromeConfig = field(default_factory=ChromeConfig)
+    opacity: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Validate window presentation values."""
+
+        if not 0.0 <= self.opacity <= 1.0:
+            raise ValueError("Window opacity must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True, slots=True)

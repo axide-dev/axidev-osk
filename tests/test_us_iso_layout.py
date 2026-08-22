@@ -86,3 +86,17 @@ def test_us_iso_layout_dense_body_columns_match_main_block_width() -> None:
 
     assert len([column for column in occupied_columns if column < NAV_START]) == 60
     assert len([column for column in occupied_columns if column >= NAV_START]) == 12
+
+
+def test_ghost_key_uses_the_near_bracket_slot_and_targets_configured_window() -> None:
+    target_window_id = "window:alternate"
+    specs = build_us_iso_layout(target_window_id=target_window_id)
+    ghost = next(spec for spec in specs if spec.label == "Ghost")
+
+    assert (ghost.row, ghost.column, ghost.width) == (2, 54, 1.0)
+    assert ghost.io_key is None
+    assert ghost.repeats is False
+    assert ghost.action is not None
+    assert ghost.action.kind == "toggle-opacity"
+    assert ghost.action.target_window_id == target_window_id
+    assert ghost.action.opacity == 0.01

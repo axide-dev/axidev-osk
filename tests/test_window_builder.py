@@ -194,6 +194,19 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         config = configure_overlay.call_args.kwargs["config"]
         self.assertEqual(config.placement, OverlayPlacement.CENTER)
 
+    def test_keyboard_window_uses_configured_normal_opacity(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+
     def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
         _app()
         overlay = FakeOverlayController()
