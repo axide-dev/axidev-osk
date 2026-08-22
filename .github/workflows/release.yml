@@ -96,6 +96,7 @@ jobs:
 
           (cd "${stage_dir}" && zip -r "${versioned_archive}" axidev-osk) > /dev/null
           cp "${versioned_archive}" "${stable_archive}"
+          cp packaging/windows/axidev-osk-windows-install.ps1 release-assets/
 
           ls -la release-assets
 

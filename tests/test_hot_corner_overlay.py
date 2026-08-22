@@ -17,7 +17,7 @@ from axidev_osk.hot_corner.controller import (
 )
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.windows.overlay import layer_shell
-from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
+from axidev_osk.windows.overlay.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
 from axidev_osk.windows.overlay.always_on_top import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,
@@ -358,85 +358,47 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(anchors, layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM)
         self.assertEqual(margins, QMargins(1814, 0, 0, 984))
 
-    def test_windows_native_frameless_overlay_disables_dwm_border(self) -> None:
+    def test_windows_native_overlay_keeps_native_chrome(self) -> None:
         window = FakeWindow()
-        window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
         with patch.object(
             AlwaysOnTopWindowController,
             "_detect_backend",
             return_value=OverlayBackend.WINDOWS_NATIVE,
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top._GWL_EXSTYLE",
-            create=True,
-            new=-20,
+            "axidev_osk.windows.overlay.always_on_top._set_windows_taskbar_style",
+        ) as set_taskbar_style:
+            controller = AlwaysOnTopWindowController(window)
+            controller.configure_window()
+
+        self.assertFalse(controller.uses_custom_chrome)
+        self.assertIn((Qt.WindowType.WindowStaysOnTopHint, True), window.flags)
+        self.assertIn((Qt.WindowType.WindowDoesNotAcceptFocus, True), window.flags)
+        self.assertIn((Qt.WidgetAttribute.WA_ShowWithoutActivating, True), window.attributes)
+        self.assertNotIn((Qt.WindowType.FramelessWindowHint, True), window.flags)
+        set_taskbar_style.assert_called_once_with(1)
+
+    def test_windows_native_overlay_resets_chrome_inactive_after_show(self) -> None:
+        window = FakeWindow()
+        window.show()
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WINDOWS_NATIVE,
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top._HWND_TOPMOST",
-            create=True,
-            new=-1,
+            "axidev_osk.windows.overlay.always_on_top.QTimer.singleShot",
+            side_effect=lambda _delay, callback: callback(),
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top._SWP_NOMOVE",
-            create=True,
-            new=0x0002,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._SWP_NOSIZE",
-            create=True,
-            new=0x0001,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._SWP_NOACTIVATE",
-            create=True,
-            new=0x0010,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._SWP_FRAMECHANGED",
-            create=True,
-            new=0x0020,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._SWP_NOOWNERZORDER",
-            create=True,
-            new=0x0200,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._WS_EX_NOACTIVATE",
-            create=True,
-            new=0x08000000,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._DWMWA_WINDOW_CORNER_PREFERENCE",
-            create=True,
-            new=33,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._DWMWA_BORDER_COLOR",
-            create=True,
-            new=34,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._DWMWCP_DONOTROUND",
-            create=True,
-            new=1,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._DWMWA_COLOR_NONE",
-            create=True,
-            new=0xFFFFFFFE,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._get_window_long_ptr",
-            create=True,
-            return_value=0,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._set_window_long_ptr",
-            create=True,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._set_window_pos",
-            create=True,
-        ), patch(
-            "axidev_osk.windows.overlay.always_on_top._dwm_set_window_attribute",
-            create=True,
-        ) as set_dwm_attribute:
+            "axidev_osk.windows.overlay.always_on_top._set_windows_native_chrome_inactive",
+        ) as set_chrome_inactive:
             controller = AlwaysOnTopWindowController(
                 window,
                 config=AlwaysOnTopWindowConfig(manage_position=False),
             )
-            controller.configure_window()
             controller.handle_show()
 
-        requested_attributes = [call.args[1] for call in set_dwm_attribute.call_args_list]
-        self.assertEqual(requested_attributes, [33, 34])
+        set_chrome_inactive.assert_called_once_with(1)
 
 
 class LayerShellPluginDiscoveryTests(unittest.TestCase):

@@ -104,6 +104,15 @@ class WindowHide:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowToggleOpacity:
+    """Command toggling a managed window's low-opacity input-blocking mode."""
+
+    window_id: str
+    component_id: str
+    opacity: float
+
+
+@dataclass(frozen=True, slots=True)
 class WindowClose:
     """Command requesting a managed window to be closed.
 
@@ -125,4 +134,4 @@ class AppQuit:
     exit_code: int = 0
 
 
-RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | WindowShow | WindowHide | WindowClose | AppQuit
+RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | WindowShow | WindowHide | WindowToggleOpacity | WindowClose | AppQuit

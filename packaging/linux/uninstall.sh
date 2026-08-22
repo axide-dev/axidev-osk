@@ -40,7 +40,7 @@ main() {
         log "${LAUNCHER_PATH} not present, skipping."
     fi
 
-    if [ -f "${UDEV_RULE_PATH}" ]; then
+    if [ -f "${UDEV_RULE_PATH}" ] || [ -L "${UDEV_RULE_PATH}" ]; then
         log "Removing ${UDEV_RULE_PATH}..."
         rm -f "${UDEV_RULE_PATH}"
         if command -v udevadm >/dev/null 2>&1; then

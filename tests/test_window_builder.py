@@ -51,7 +51,6 @@ class FakeKeyboardBackend:
 class FakeOverlayController:
     def __init__(self, *, uses_custom_chrome: bool = True) -> None:
         self.uses_custom_chrome = uses_custom_chrome
-        self.reapply_count = 0
 
     def prepare_show(self) -> bool:
         return True
@@ -67,10 +66,6 @@ class FakeOverlayController:
 
     def apply_configured_position(self) -> None:
         return None
-
-    def reapply_always_on_top(self) -> None:
-        self.reapply_count += 1
-
 
 def _app() -> QApplication:
     app = QApplication.instance()
@@ -199,6 +194,19 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         config = configure_overlay.call_args.kwargs["config"]
         self.assertEqual(config.placement, OverlayPlacement.CENTER)
 
+    def test_keyboard_window_uses_configured_normal_opacity(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+
     def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
         _app()
         overlay = FakeOverlayController()
@@ -239,24 +247,6 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertFalse(key.property("pressed"))
         self.assertEqual(key.property("profile"), "default")
         self.assertEqual(key.property("layout"), "layout:us-iso")
-
-    def test_runtime_window_reapplies_always_on_top_through_overlay_controller(self) -> None:
-        _app()
-        overlay = FakeOverlayController()
-
-        with patch(
-            "axidev_osk.windows.builder.configure_always_on_top_window",
-            return_value=overlay,
-        ):
-            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
-
-        self.addCleanup(window.close)
-
-        self.assertTrue(window.always_on_top)
-        window.reapply_always_on_top()
-
-        self.assertEqual(overlay.reapply_count, 1)
-
 
 if __name__ == "__main__":
     unittest.main()

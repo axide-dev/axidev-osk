@@ -46,18 +46,25 @@ For a manual source-based install (development, custom layouts, or distributions
 
 ### Windows
 
-Requirements: Python 3.10+
+Requirements: Windows 10 or newer, Python 3.10+, and PowerShell 5.1.
 
 ```powershell
-curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
-Expand-Archive -Path axidev-osk-source.zip -DestinationPath .
-cd axidev-osk
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .\vendor\axidev-io-python
-python -m pip install -e .
-axidev-osk
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1' | iex"
 ```
+
+The installer downloads the latest release, installs Axidev OSK under
+`C:\Program Files\Axidev OSK`, and adds it to the current user's Start Menu.
+Windows asks for UAC approval because the development installer trusts a local
+signing certificate and enables UIAccess.
+See the [Windows install guide](./packaging/windows/README.md) for details.
+
+To uninstall:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm 'https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-windows-install.ps1'))) -Uninstall"
+```
+
+A production-signed MSI remains planned for public distribution.
 
 ## Command Line
 

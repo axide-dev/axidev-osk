@@ -7,6 +7,7 @@ from unittest.mock import patch
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
+from axidev_osk.app import _set_application_icon
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import WindowConfig
 from axidev_osk.runtime.application import ApplicationRuntime
@@ -45,6 +46,22 @@ class ApplicationRuntimePromptTests(unittest.TestCase):
 
         self.assertEqual(roles.count("open_terminal"), 1)
         self.assertNotIn("setup_here", roles)
+
+    def test_prompt_windows_remain_fully_opaque(self) -> None:
+        config = build_default_app_config()
+        runtime = ApplicationRuntime(_app(), config=config)
+
+        prompt_window = runtime._build_prompt_window_config(config.quit_prompt)
+
+        self.assertEqual(config.windows[0].opacity, 0.85)
+        self.assertEqual(prompt_window.opacity, 1.0)
+
+    def test_application_icon_loads_from_packaged_assets(self) -> None:
+        app = _app()
+
+        _set_application_icon(app)
+
+        self.assertFalse(app.windowIcon().isNull())
 
     def test_quit_prompt_uses_configured_title(self) -> None:
         sentinel = "Sentinel Quit Prompt"

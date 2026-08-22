@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
+
+
+if not __package__:
+    package_root = Path(__file__).resolve().parent.parent
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -11,11 +18,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = list(sys.argv[1:] if argv is None else argv)
     if args:
-        from .cli import main as cli_main
+        if __package__:
+            from .cli import main as cli_main
+        else:
+            from axidev_osk.cli import main as cli_main
 
         return cli_main(args)
 
-    from .app import main as app_main
+    if __package__:
+        from .app import main as app_main
+    else:
+        from axidev_osk.app import main as app_main
 
     return app_main()
 

@@ -194,9 +194,10 @@ class ApplicationQuitController(QObject):
         return f"{type(self_obj).__name__}.{getattr(func, '__name__', name)}"
 
     def _install_stdin_eof_handler(self) -> None:
-        if not sys.stdin.isatty():
+        stdin = sys.stdin
+        if stdin is None or not stdin.isatty():
             return
-        self._stdin_notifier = QSocketNotifier(sys.stdin.fileno(), QSocketNotifier.Type.Read, self)
+        self._stdin_notifier = QSocketNotifier(stdin.fileno(), QSocketNotifier.Type.Read, self)
         self._stdin_notifier.activated.connect(self._handle_stdin_ready)
 
     def _handle_stdin_ready(self) -> None:

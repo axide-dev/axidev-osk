@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from axidev_osk import __main__
@@ -10,6 +13,17 @@ from axidev_osk.cli import build_parser, main
 
 
 class EntryPointTests(unittest.TestCase):
+    def test_direct_file_execution_dispatches_cli(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(Path(__main__.__file__)), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage: axidev-osk", result.stdout)
+
     def test_arguments_dispatch_cli_without_importing_app(self) -> None:
         with patch("axidev_osk.cli.main", return_value=7) as cli_main:
             result = __main__.main(["linux", "status-permissions"])

@@ -94,7 +94,27 @@ class LinuxCliTests(unittest.TestCase):
                 path = account.home / linux.AUTOSTART_RELATIVE_PATH
                 contents = path.read_text(encoding="utf-8")
                 self.assertIn('Exec="/usr/local/bin/axidev-osk"', contents)
+                self.assertIn(linux.AUTOSTART_MANAGED_LINE, contents)
                 self.assertEqual(linux._status_autostart(account), 0)
+                linux._remove_autostart(account)
+
+            self.assertFalse(path.exists())
+
+    def test_autostart_remove_works_without_executable_on_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            account = linux.Account("alice", 1000, 1000, Path(temporary))
+            path = account.home / linux.AUTOSTART_RELATIVE_PATH
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Axidev OSK\n"
+                "Exec=\"/removed/axidev-osk\"\n"
+                f"{linux.AUTOSTART_MANAGED_LINE}",
+                encoding="utf-8",
+            )
+
+            with patch.object(linux.shutil, "which", return_value=None):
                 linux._remove_autostart(account)
 
             self.assertFalse(path.exists())
@@ -139,6 +159,26 @@ class LinuxCliTests(unittest.TestCase):
             linux._setup_permissions(account)
 
         run.assert_called_once_with(["usermod", "-aG", "uinput", "alice"])
+
+    def test_reload_udev_loads_and_settles_missing_device(self) -> None:
+        input_path = Mock()
+        input_path.exists.side_effect = [False, True]
+        with (
+            patch.object(linux, "UINPUT_PATH", input_path),
+            patch.object(linux, "_run_checked") as run,
+        ):
+            linux._reload_udev(ensure_device=True)
+
+        self.assertEqual(
+            run.call_args_list,
+            [
+                unittest.mock.call(["udevadm", "control", "--reload-rules"]),
+                unittest.mock.call(["modprobe", "uinput"]),
+                unittest.mock.call(["udevadm", "settle"]),
+                unittest.mock.call(["udevadm", "trigger", str(input_path)]),
+                unittest.mock.call(["udevadm", "settle"]),
+            ],
+        )
 
 
 if __name__ == "__main__":
