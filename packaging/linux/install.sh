@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Axidev OSK lifecycle installer for the signed Linux /opt payload.
+# Axidev OSK lifecycle installer for the Linux /opt payload.
 
 set -euo pipefail
 
@@ -13,7 +13,6 @@ readonly LOCK_PATH="/run/lock/axidev-osk-install.lock"
 readonly RELEASE_BASE_URL="https://github.com/axide-dev/axidev-osk/releases/latest/download"
 readonly PAYLOAD_NAME="axidev-osk-linux-x86_64.tar.gz"
 readonly INSTALLER_NAME="axidev-osk-install"
-readonly MINISIGN_PUBLIC_KEY='@MINISIGN_PUBLIC_KEY@'
 
 log() { printf '[axidev-osk-install] %s\n' "$*"; }
 warn() { printf '[axidev-osk-install] WARNING: %s\n' "$*" >&2; }
@@ -27,7 +26,7 @@ Usage:
   axidev-osk-install rollback
   axidev-osk-install uninstall [--user USER] [--force]
 
-An install without --payload downloads and verifies the latest signed release.
+An install without --payload downloads the latest release and verifies its checksums.
 EOF
 }
 
@@ -74,17 +73,6 @@ verify_local_payload() {
     [ "${actual}" = "${expected}" ] || die "Payload checksum mismatch."
 }
 
-verify_signed_manifest() {
-    local directory="$1"
-    if [ "${MINISIGN_PUBLIC_KEY}" = '@MINISIGN_PUBLIC_KEY@' ]; then
-        die "This installer has no release public key. Use a signed release installer."
-    fi
-    minisign -V \
-        -P "${MINISIGN_PUBLIC_KEY}" \
-        -m "${directory}/SHA256SUMS" \
-        -x "${directory}/SHA256SUMS.minisig" >/dev/null
-}
-
 manifest_checksum() {
     local manifest="$1"
     local filename="$2"
@@ -103,16 +91,15 @@ download_release_files() {
     local directory="$1"
     shift
     local filename
-    for filename in SHA256SUMS SHA256SUMS.minisig "$@"; do
+    for filename in SHA256SUMS "$@"; do
         curl --fail --location --show-error --silent \
             --output "${directory}/${filename}" \
             "${RELEASE_BASE_URL}/${filename}"
     done
-    verify_signed_manifest "${directory}"
     for filename in "$@"; do
         local expected
         expected="$(manifest_checksum "${directory}/SHA256SUMS" "${filename}")" \
-            || die "Signed manifest does not contain ${filename}."
+            || die "Checksum manifest does not contain ${filename}."
         verify_local_payload "${directory}/${filename}" "${expected}"
     done
 }
@@ -319,7 +306,7 @@ main() {
 
     require_commands flock install sha256sum tar
     if [ -z "${payload}" ] && { [ "${action}" = install ] || [ "${action}" = upgrade ]; }; then
-        require_commands curl minisign
+        require_commands curl
     fi
     acquire_lock
     local target_user

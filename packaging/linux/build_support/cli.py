@@ -26,10 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("payload", nargs="?", type=str)
     verify.set_defaults(handler=verify_payload)
 
-    release = commands.add_parser("release", help="assemble signed Linux release assets")
+    release = commands.add_parser("release", help="assemble Linux release assets")
     release.add_argument("--output", type=str)
     release.add_argument("--engine", default=os.environ.get("DOCKER", "docker"))
-    release.add_argument("--signing-key", type=str)
     release.set_defaults(handler=build_release)
 
     vm = commands.add_parser("vm", help="manage interactive Linux test machines")

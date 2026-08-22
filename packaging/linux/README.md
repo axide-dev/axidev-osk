@@ -3,7 +3,7 @@ Every call here is inayayousfi's, and no agent acted on its own.
 
 # Linux Distribution Internals
 
-This document describes the standalone Linux payload, its lifecycle installer, release signing, and interactive test environments.
+This document describes the standalone Linux payload, its lifecycle installer, release assets, and interactive test environments.
 
 ## Supported Host
 
@@ -87,17 +87,15 @@ sudo ./packaging/linux/install-from-source.sh
 
 The script builds the payload, archives it, calculates its checksum, and calls `install.sh` with that local archive.
 
-A local payload requires a checksum but does not require Minisign. Downloaded releases always require the signed manifest.
+A local payload requires an explicit checksum. Downloaded releases use the published `SHA256SUMS` manifest.
 
-## Release Signing
+## Release Assets
 
 Create release assets with:
 
 ```bash
-python build.py linux release --signing-key /path/to/minisign.key
+python build.py linux release
 ```
-
-The command requires a public key at `packaging/linux/minisign.pub`. The private key must match that public key.
 
 The command creates:
 
@@ -109,24 +107,21 @@ release-assets/
   axidev-osk-source.zip
   axidev-osk-install
   SHA256SUMS
-  SHA256SUMS.minisig
 ```
 
 The repository ZIP includes tracked files and vendored submodule contents.
 
-GitHub Actions reads the passwordless private key from `MINISIGN_SECRET_KEY`, writes it to a temporary mode-restricted file, signs the manifest, deletes the key file, and uploads one asset set.
-
-Signing is not provisioned until the repository public key and matching GitHub secret exist. Release builds fail instead of publishing unsigned assets.
+`SHA256SUMS` covers every uploaded asset. It detects corruption during download but does not authenticate the publisher because GitHub hosts both the assets and their checksums.
 
 ## Lifecycle Commands
 
-Install the latest signed release:
+Install the latest release:
 
 ```bash
 sudo axidev-osk-install install
 ```
 
-Upgrade to the latest signed release:
+Upgrade to the latest release:
 
 ```bash
 sudo axidev-osk-install upgrade

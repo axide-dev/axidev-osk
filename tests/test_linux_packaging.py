@@ -156,6 +156,50 @@ class LinuxPackagingTests(unittest.TestCase):
                     archive.read("axidev-osk/vendor/backend.c"), b"tracked source\n"
                 )
 
+    def test_release_assets_use_checksums_without_signing(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+
+            def build_test_payload(namespace: SimpleNamespace) -> int:
+                payload_tree = Path(namespace.output) / payload.PAYLOAD_NAME
+                payload_tree.mkdir(parents=True)
+                (payload_tree / "release.json").write_text("{}\n", encoding="utf-8")
+                return 0
+
+            def build_test_sources(assets: Path, version: str) -> tuple[Path, Path]:
+                versioned = assets / f"axidev-osk-{version}-source.zip"
+                stable = assets / "axidev-osk-source.zip"
+                versioned.write_bytes(b"versioned source")
+                stable.write_bytes(b"stable source")
+                return versioned, stable
+
+            namespace = SimpleNamespace(output=str(output), engine="docker")
+            with (
+                patch.object(payload, "build_payload", side_effect=build_test_payload),
+                patch.object(payload, "project_version", return_value="1.2.3"),
+                patch.object(
+                    payload,
+                    "_repository_source_archives",
+                    side_effect=build_test_sources,
+                ),
+            ):
+                result = payload.build_release(namespace)
+
+            assets = output / "release-assets"
+            manifest = (assets / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertEqual(result, 0)
+            self.assertFalse((assets / "SHA256SUMS.minisig").exists())
+            self.assertNotIn("MINISIGN", (assets / "axidev-osk-install").read_text())
+            for filename in (
+                "axidev-osk-1.2.3-linux-x86_64.tar.gz",
+                "axidev-osk-linux-x86_64.tar.gz",
+                "axidev-osk-1.2.3-source.zip",
+                "axidev-osk-source.zip",
+                "axidev-osk-install",
+            ):
+                self.assertIn(f"{sha256(assets / filename)}  {filename}\n", manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

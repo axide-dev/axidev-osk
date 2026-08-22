@@ -403,22 +403,6 @@ def _repository_source_archives(output: Path, version: str) -> tuple[Path, Path]
 
 def build_release(namespace: argparse.Namespace) -> int:
     output = _output_root(namespace.output)
-    public_key = LINUX_DIR / "minisign.pub"
-    signing_key = Path(namespace.signing_key).resolve() if namespace.signing_key else None
-    if not public_key.is_file() or signing_key is None or not signing_key.is_file():
-        raise BuildError(
-            "release signing is not provisioned; provide packaging/linux/minisign.pub "
-            "and --signing-key"
-        )
-    require_commands("minisign")
-    key_lines = [
-        line.strip()
-        for line in public_key.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("untrusted comment:")
-    ]
-    if len(key_lines) != 1 or not key_lines[0].startswith("RW"):
-        raise BuildError(f"invalid Minisign public key: {public_key}")
-
     payload_namespace = argparse.Namespace(output=str(output), engine=namespace.engine, inner=False)
     build_payload(payload_namespace)
     version = project_version()
@@ -431,12 +415,12 @@ def build_release(namespace: argparse.Namespace) -> int:
     shutil.copy2(payload_archive, stable_payload)
     source_archives = _repository_source_archives(assets, version)
     installer = assets / "axidev-osk-install"
-    installer_text = (LINUX_DIR / "install.sh").read_text(encoding="utf-8")
-    installer_text = installer_text.replace("@MINISIGN_PUBLIC_KEY@", key_lines[0])
-    installer.write_text(installer_text, encoding="utf-8")
+    installer.write_text(
+        (LINUX_DIR / "install.sh").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     installer.chmod(0o755)
 
-    signed_assets = (
+    release_assets = (
         payload_archive,
         stable_payload,
         *source_archives,
@@ -444,20 +428,8 @@ def build_release(namespace: argparse.Namespace) -> int:
     )
     sums = assets / "SHA256SUMS"
     sums.write_text(
-        "".join(f"{sha256(path)}  {path.name}\n" for path in signed_assets),
+        "".join(f"{sha256(path)}  {path.name}\n" for path in release_assets),
         encoding="utf-8",
-    )
-    run(
-        [
-            "minisign",
-            "-S",
-            "-s",
-            str(signing_key),
-            "-m",
-            str(sums),
-            "-x",
-            str(assets / "SHA256SUMS.minisig"),
-        ]
     )
     print(assets)
     return 0

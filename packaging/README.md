@@ -52,11 +52,11 @@ The runtime gate requires Python 3.10 or newer. It accepts matching PySide6 and 
 
 `install.sh` becomes `/usr/local/sbin/axidev-osk-install` after installation.
 
-`install` verifies a local checksum or a downloaded Minisign manifest. It extracts into a temporary `/opt/axidev-osk.new.*` directory and runs the payload's runtime check before activation.
+`install` verifies a local checksum or downloaded `SHA256SUMS` manifest. It extracts into a temporary `/opt/axidev-osk.new.*` directory and runs the payload's runtime check before activation.
 
 Activation moves the current payload to `/opt/axidev-osk.old` and moves the staged payload into `/opt/axidev-osk`. A failed activation restores the previous payload.
 
-`upgrade` downloads the latest installer and payload from the signed release.
+`upgrade` downloads the latest installer, payload, and checksum manifest.
 
 `rollback` swaps `/opt/axidev-osk` and `/opt/axidev-osk.old`.
 
@@ -71,15 +71,13 @@ python build.py linux payload
 python build.py linux verify dist/linux/axidev-osk
 ```
 
-Create signed release assets:
+Create release assets:
 
 ```bash
-python build.py linux release --signing-key /path/to/minisign.key
+python build.py linux release
 ```
 
-Release generation requires `packaging/linux/minisign.pub`, a matching passwordless CI key, and the `minisign` command. It fails when signing is not provisioned.
-
-The release directory contains versioned and stable payload archives, versioned and stable repository source ZIPs, the lifecycle installer, `SHA256SUMS`, and `SHA256SUMS.minisig`.
+The release directory contains versioned and stable payload archives, versioned and stable repository source ZIPs, the lifecycle installer, and `SHA256SUMS`. The checksums detect corrupted downloads but do not authenticate the publisher because the assets and manifest use the same download channel.
 
 `release-lock.json` records the supported architecture, minimum glibc version, pinned builder image, Rust toolchain, allowed host libraries, and virtual-machine images. Qt, PySide6, and LayerShellQt come from the host package manager, so the lock does not pin their artifacts.
 

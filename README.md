@@ -25,14 +25,14 @@ The Linux release carries Axidev OSK, its native input extension, and a static l
 
 ```bash
 sudo dnf install python3 python3-pyside6 qt6-qtwayland layer-shell-qt \
-    libinput systemd-libs libxkbcommon curl tar minisign
+    libinput systemd-libs libxkbcommon curl tar
 ```
 
 **Arch:**
 
 ```bash
 sudo pacman -S --needed python pyside6 qt6-wayland layer-shell-qt \
-    libinput systemd libxkbcommon curl tar minisign
+    libinput systemd libxkbcommon curl tar
 ```
 
 Download and run the lifecycle installer:
@@ -44,7 +44,7 @@ chmod +x axidev-osk-install
 sudo ./axidev-osk-install install
 ```
 
-The installer verifies the signed release manifest and payload before changing `/opt/axidev-osk`. Log out and back in after installation if the installer adds you to the `uinput` group.
+The installer checks the downloaded payload against the release checksum manifest before changing `/opt/axidev-osk`. This detects a corrupted download but does not authenticate the publisher. Log out and back in after installation if the installer adds you to the `uinput` group.
 
 The installed lifecycle command supports upgrades, rollback, and removal:
 

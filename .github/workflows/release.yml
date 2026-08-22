@@ -13,33 +13,16 @@ concurrency:
 
 jobs:
   linux-release:
-    name: Build And Upload Signed Release
+    name: Build And Upload Release
     runs-on: ubuntu-24.04
-    env:
-      MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Install release tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends minisign
-
-      - name: Build signed release assets
-        run: |
-          test -n "${MINISIGN_SECRET_KEY}"
-          umask 077
-          printf '%s' "${MINISIGN_SECRET_KEY}" > "${RUNNER_TEMP}/minisign.key"
-          python3 build.py linux release \
-            --output dist/linux \
-            --signing-key "${RUNNER_TEMP}/minisign.key"
-
-      - name: Remove private signing key
-        if: always()
-        run: rm -f "${RUNNER_TEMP}/minisign.key"
+      - name: Build release assets
+        run: python3 build.py linux release --output dist/linux
 
       - name: Upload assets to published release
         uses: softprops/action-gh-release@v3
