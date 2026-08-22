@@ -19,7 +19,12 @@ from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
 from .dispatcher import Dispatcher
-from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
+from .event_handlers import (
+    register_context_command_handlers,
+    register_event_handlers,
+    route_component_pressed,
+    route_hot_corner_triggered,
+)
 from .events import WindowCloseRequested
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
@@ -143,6 +148,11 @@ class ApplicationRuntime:
         """Map hot-corner events to managed window visibility commands."""
 
         route_hot_corner_triggered(event, self)
+
+    def _handle_component_pressed(self, event: object) -> None:
+        """Map configured component actions to runtime commands."""
+
+        route_component_pressed(event, self)
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

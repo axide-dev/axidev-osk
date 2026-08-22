@@ -5,13 +5,49 @@ from __future__ import annotations
 import logging
 import sys
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ..config.models import WindowConfig
 from ..windows.builder import RuntimeWindow, build_window
 from .context import Context
 
 _logger = logging.getLogger(__name__)
+
+
+class _WindowInputBlocker(QObject):
+    """Swallow target-window mouse input except for one control component."""
+
+    _BLOCKED_EVENTS = {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.MouseMove,
+        QEvent.Type.Wheel,
+        QEvent.Type.ContextMenu,
+    }
+
+    def __init__(self, window: QWidget, allowed_component_id: str) -> None:
+        super().__init__()
+        self._window = window
+        self._allowed_component_id = allowed_component_id
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        """Return true for blocked mouse events within the target window."""
+
+        if event.type() not in self._BLOCKED_EVENTS or not isinstance(watched, QWidget):
+            return False
+        if watched.window() is not self._window:
+            return False
+
+        current: QWidget | None = watched
+        while current is not None:
+            if current.property("componentId") == self._allowed_component_id:
+                return False
+            if current is self._window:
+                break
+            current = current.parentWidget()
+        return True
 
 
 class WindowManager:
@@ -33,6 +69,7 @@ class WindowManager:
         self._context = context
         self._windows: dict[str, RuntimeWindow] = {}
         self._configs = {window.id: window for window in context.config.windows}
+        self._input_blockers: dict[str, _WindowInputBlocker] = {}
 
     def get_or_create(self, window_id: str, *, parent: QWidget | None = None) -> RuntimeWindow:
         """Return a live window, creating it from config if needed.
@@ -91,6 +128,7 @@ class WindowManager:
 
         window = self.get_or_create(window_id)
         _logger.info("Showing runtime window %s", window_id)
+        self._restore_interaction(window_id, window)
         if sys.platform == "win32" and window.isMinimized():
             window.showNormal()
         else:
@@ -117,12 +155,43 @@ class WindowManager:
         window = self._windows.get(window_id)
         return sys.platform == "win32" and window is not None and window.isMinimized()
 
+    def is_opacity_reduced(self, window_id: str) -> bool:
+        """Return whether a managed window is in low-opacity input-blocking mode."""
+
+        return window_id in self._input_blockers
+
+    def toggle_opacity(self, window_id: str, *, component_id: str, opacity: float) -> None:
+        """Toggle low-opacity mode while preserving one recovery control."""
+
+        window = self.get_or_create(window_id)
+        if window_id in self._input_blockers:
+            self._restore_interaction(window_id, window)
+            return
+
+        app = QApplication.instance()
+        if app is None:
+            raise RuntimeError("Window opacity mode requires a QApplication")
+        blocker = _WindowInputBlocker(window, component_id)
+        app.installEventFilter(blocker)
+        self._input_blockers[window_id] = blocker
+        window.setWindowOpacity(opacity)
+
+    def _restore_interaction(self, window_id: str, window: QWidget) -> None:
+        """Restore configured opacity and remove any temporary input blocker."""
+
+        blocker = self._input_blockers.pop(window_id, None)
+        app = QApplication.instance()
+        if blocker is not None and app is not None:
+            app.removeEventFilter(blocker)
+        window.setWindowOpacity(self._configs[window_id].opacity)
+
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""
 
         window = self._windows.pop(window_id, None)
         if window is not None:
             _logger.info("Closing runtime window %s", window_id)
+            self._restore_interaction(window_id, window)
             window.close()
 
     def all_windows(self) -> list[RuntimeWindow]:

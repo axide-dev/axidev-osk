@@ -3,6 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class WindowAction:
+    """Declarative action targeting a configured window."""
+
+    kind: Literal["toggle-opacity"]
+    target_window_id: str
+    opacity: float = 0.01
+
+    def __post_init__(self) -> None:
+        """Validate values before the action reaches runtime routing."""
+
+        if self.kind != "toggle-opacity":
+            raise ValueError(f"Unsupported window action kind: {self.kind!r}")
+        if not self.target_window_id.strip():
+            raise ValueError("Window action target ID must not be empty")
+        if not 0.0 <= self.opacity < 1.0:
+            raise ValueError("Window action opacity must be at least 0.0 and less than 1.0")
 
 
 @dataclass(frozen=True)
@@ -41,6 +61,7 @@ class KeySpec:
         honors_latched_modifiers: Whether display resolution should account for active latches.
         repeats: Whether holding this key should produce repeat events.
         display_variants: Modifier-aware display alternatives.
+        action: Optional window action used instead of keyboard output.
     """
 
     label: str
@@ -57,6 +78,19 @@ class KeySpec:
     honors_latched_modifiers: bool = True
     repeats: bool = True
     display_variants: tuple[KeyDisplay, ...] = ()
+    action: WindowAction | None = None
+
+    def __post_init__(self) -> None:
+        """Reject action keys with conflicting keyboard behavior."""
+
+        if self.action is None:
+            return
+        if self.is_spacer:
+            raise ValueError("Action keys cannot be spacers")
+        if self.io_key is not None or self.key_id is not None or self.latchable or self.holds_when_latched:
+            raise ValueError("Action keys cannot define keyboard output or latch behavior")
+        if self.repeats:
+            raise ValueError("Action keys cannot repeat")
 
     def resolve_display(self, active_modifiers: frozenset[str]) -> KeyDisplay:
         """Return the most specific display variant for active modifier IDs."""

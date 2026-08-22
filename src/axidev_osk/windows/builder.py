@@ -45,6 +45,7 @@ class RuntimeWindow(QMainWindow):
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
+        self.setWindowOpacity(config.opacity)
         if config.overlay.always_on_top:
             self._overlay = configure_always_on_top_window(self, config=config.overlay.config)
         else:
