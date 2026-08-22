@@ -177,13 +177,13 @@ class WindowManager:
         window.setWindowOpacity(opacity)
 
     def _restore_interaction(self, window_id: str, window: QWidget) -> None:
-        """Restore full opacity and remove any temporary input blocker."""
+        """Restore configured opacity and remove any temporary input blocker."""
 
         blocker = self._input_blockers.pop(window_id, None)
         app = QApplication.instance()
         if blocker is not None and app is not None:
             app.removeEventFilter(blocker)
-        window.setWindowOpacity(1.0)
+        window.setWindowOpacity(self._configs[window_id].opacity)
 
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""

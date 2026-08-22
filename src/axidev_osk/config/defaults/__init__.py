@@ -64,6 +64,7 @@ def build_default_app_config() -> AppConfig:
             ),
         ),
         chrome=ChromeConfig(enabled=True),
+        opacity=0.85,
     )
 
     validate_unique_ids((keyboard_window.id,), scope="default app windows")

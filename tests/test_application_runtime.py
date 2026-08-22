@@ -39,6 +39,15 @@ class FakePromptWindow(QWidget):
 
 
 class ApplicationRuntimePromptTests(unittest.TestCase):
+    def test_prompt_windows_remain_fully_opaque(self) -> None:
+        config = build_default_app_config()
+        runtime = ApplicationRuntime(_app(), config=config)
+
+        prompt_window = runtime._build_prompt_window_config(config.quit_prompt)
+
+        self.assertEqual(config.windows[0].opacity, 0.85)
+        self.assertEqual(prompt_window.opacity, 1.0)
+
     def test_application_icon_loads_from_packaged_assets(self) -> None:
         app = _app()
 
