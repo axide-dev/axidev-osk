@@ -33,6 +33,7 @@ VENDOR_UDEV_RULE_PATHS = (
 )
 UINPUT_PATH = Path("/dev/uinput")
 AUTOSTART_RELATIVE_PATH = Path(".config/autostart/axidev-osk.desktop")
+AUTOSTART_MANAGED_LINE = "X-Axidev-OSK-Managed=true\n"
 
 
 class LinuxSetupError(RuntimeError):
@@ -275,6 +276,7 @@ def _reload_udev(*, ensure_device: bool = False) -> None:
     _run_checked(["udevadm", "settle"])
     if UINPUT_PATH.exists():
         _run_checked(["udevadm", "trigger", str(UINPUT_PATH)])
+        _run_checked(["udevadm", "settle"])
 
 
 def _setup_autostart(account: Account) -> None:
@@ -302,7 +304,7 @@ def _remove_autostart(account: Account) -> None:
     current = _read_text(path)
     if current is None:
         return
-    if current != _autostart_text():
+    if AUTOSTART_MANAGED_LINE not in current.splitlines(keepends=True):
         raise LinuxSetupError(f"refusing to remove conflicting file: {path}")
     try:
         path.unlink()
@@ -323,6 +325,7 @@ def _autostart_text() -> str:
         f"Exec={_desktop_exec_arg(executable)}\n"
         "Terminal=false\n"
         "X-GNOME-Autostart-enabled=true\n"
+        f"{AUTOSTART_MANAGED_LINE}"
     )
 
 

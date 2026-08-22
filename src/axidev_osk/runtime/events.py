@@ -116,11 +116,6 @@ class WindowCloseRequested:
 
 
 @dataclass(frozen=True, slots=True)
-class WindowManagerEventObserved:
-    """The platform window manager emitted an event that may affect overlays."""
-
-
-@dataclass(frozen=True, slots=True)
 class PromptResolved:
     """A prompt window resolved to the selected button role.
 
@@ -142,6 +137,5 @@ RuntimeEvent = (
     | KeyLatchChanged
     | HotCornerTriggered
     | WindowCloseRequested
-    | WindowManagerEventObserved
     | PromptResolved
 )

@@ -66,6 +66,10 @@ This installs a udev rule, ensures the dedicated `uinput` group exists, and adds
 
 Requirements: Python 3.10+
 
+This source workflow cannot receive Windows UIAccess because it launches the
+shared Python interpreter. Developers testing trusted topmost behavior should
+use the [trusted Windows development install](./windows/README.md).
+
 ```powershell
 curl -L -o axidev-osk-source.zip https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-source.zip
 Expand-Archive -Path axidev-osk-source.zip -DestinationPath .

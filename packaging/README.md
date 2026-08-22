@@ -23,6 +23,7 @@ packaging/
     install-from-source.sh
     release-lock.json
     uninstall.sh
+  windows/
   nix/
   rpm/
 ```
@@ -103,4 +104,10 @@ Replace `hyprland` with `kde` or `gnome`. The runner uses KVM when available and
 
 The Arch, Debian, RPM, and Nix definitions remain in tree. They are separate distribution integrations and do not define the standalone `/opt` payload.
 
-Windows native packaging is not implemented. Windows users currently install from the stable repository source ZIP.
+## Windows
+
+The unified release builder includes the stable source ZIP and Windows bootstrap. The bootstrap creates a Windows Python environment, then runs the trusted installer in [`windows/`](./windows/README.md).
+
+The installer builds, locally signs, trusts, installs, and verifies a UIAccess executable under `C:\Program Files\Axidev OSK`. It also creates the current user's Start Menu shortcut. This remains a trusted local installer, not an officially signed end-user package.
+
+A production-signed MSI with a registered uninstaller remains the intended public distribution format.

@@ -345,21 +345,22 @@ class KeyboardWidget(QFrame):
 
         self._buttons_by_spec.append((button, spec))
         self._buttons_by_component_id[component_id] = button
-        self._dispatch_command(KeyboardRegisterKeySpec(self._layout_config.id, component_id, spec))
+        if spec.action is None:
+            self._dispatch_command(KeyboardRegisterKeySpec(self._layout_config.id, component_id, spec))
         return button
 
     def _handle_key_press(self, component_id: str, spec: KeySpec) -> None:
         """Dispatch a press event/command through the runtime."""
 
         self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
-        if not spec.holds_when_latched:
+        if spec.action is None and not spec.holds_when_latched:
             self._context.dispatcher.dispatch_command(KeyboardKeyDown(self._layout_config.id, spec, component_id))
 
     def _handle_key_release(self, component_id: str, spec: KeySpec) -> None:
         """Dispatch a release event/command through the runtime."""
 
         self._dispatch_event(ComponentReleased(component_id=component_id))
-        if not spec.holds_when_latched:
+        if spec.action is None and not spec.holds_when_latched:
             self._context.dispatcher.dispatch_command(KeyboardKeyUp(self._layout_config.id, spec, component_id))
 
     def _handle_key_registered(self, layout_id: str, component_id: str, io_key_name: object) -> None:

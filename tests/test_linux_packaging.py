@@ -197,6 +197,7 @@ class LinuxPackagingTests(unittest.TestCase):
                 "axidev-osk-1.2.3-source.zip",
                 "axidev-osk-source.zip",
                 "axidev-osk-install",
+                "axidev-osk-windows-install.ps1",
             ):
                 self.assertIn(f"{sha256(assets / filename)}  {filename}\n", manifest)
 

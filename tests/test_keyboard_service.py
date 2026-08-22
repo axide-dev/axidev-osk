@@ -8,9 +8,9 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
-from axidev_osk.models import KeySpec
-from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey
-from axidev_osk.runtime.events import BackendKeyStateChanged, KeyLatchChanged
+from axidev_osk.models import KeySpec, WindowAction
+from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardSyncLatchedKey
+from axidev_osk.runtime.events import BackendKeyStateChanged, ComponentPressed, KeyLatchChanged
 from axidev_osk.runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
 from axidev_osk.runtime.testing import make_test_context
 
@@ -66,6 +66,45 @@ class FakeKeyboardBackend:
 
 
 class KeyboardServiceTests(unittest.TestCase):
+    def test_window_actions_reject_unknown_kinds_and_empty_targets(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported window action kind"):
+            WindowAction(kind="unknown", target_window_id="window:keyboard")  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "target ID must not be empty"):
+            WindowAction(kind="toggle-opacity", target_window_id="  ")
+
+    def test_action_keys_reject_keyboard_behavior(self) -> None:
+        action = WindowAction(kind="toggle-opacity", target_window_id="window:keyboard")
+
+        with self.assertRaisesRegex(ValueError, "keyboard output or latch behavior"):
+            KeySpec(label="Ghost", row=0, column=0, io_key="A", repeats=False, action=action)
+        with self.assertRaisesRegex(ValueError, "cannot repeat"):
+            KeySpec(label="Ghost", row=0, column=0, action=action)
+
+    def test_ghost_key_emits_action_event_without_keyboard_output(self) -> None:
+        _app()
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        events: list[ComponentPressed] = []
+        context.dispatcher.add_event_handler(
+            lambda event: events.append(event) if isinstance(event, ComponentPressed) else None
+        )
+        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
+        self.addCleanup(widget.close)
+        ghost = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Ghost"
+        )
+
+        ghost.click()
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].component_id, ghost.property("componentId"))
+        self.assertIsNotNone(events[0].key_spec.action)
+        backend.key_down.assert_not_called()
+        backend.key_up.assert_not_called()
+
     def test_service_emits_backend_key_state_changed_on_backend_update(self) -> None:
         backend = FakeKeyboardBackend()
         context = make_test_context(backend, services={"keyboard"})

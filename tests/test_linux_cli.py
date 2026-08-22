@@ -164,6 +164,7 @@ class LinuxCliTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             account = linux.Account("alice", 1000, 1000, Path(temporary))
             with (
+                patch.dict(linux.os.environ, {"XDG_CONFIG_HOME": ""}),
                 patch.object(linux.shutil, "which", return_value="/usr/local/bin/axidev-osk"),
                 patch.object(linux, "_is_root", return_value=False),
                 patch("builtins.print"),
@@ -173,7 +174,30 @@ class LinuxCliTests(unittest.TestCase):
                 contents = path.read_text(encoding="utf-8")
                 executable = str(linux.Path("/usr/local/bin/axidev-osk").resolve())
                 self.assertIn(f"Exec={linux._desktop_exec_arg(executable)}", contents)
+                self.assertIn(linux.AUTOSTART_MANAGED_LINE, contents)
                 self.assertEqual(linux._status_autostart(account), 0)
+                linux._remove_autostart(account)
+
+            self.assertFalse(path.exists())
+
+    def test_autostart_remove_works_without_executable_on_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            account = linux.Account("alice", 1000, 1000, Path(temporary))
+            path = account.home / linux.AUTOSTART_RELATIVE_PATH
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Axidev OSK\n"
+                "Exec=\"/removed/axidev-osk\"\n"
+                f"{linux.AUTOSTART_MANAGED_LINE}",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.dict(linux.os.environ, {"XDG_CONFIG_HOME": ""}),
+                patch.object(linux.shutil, "which", return_value=None),
+            ):
                 linux._remove_autostart(account)
 
             self.assertFalse(path.exists())
@@ -195,7 +219,10 @@ class LinuxCliTests(unittest.TestCase):
             path = account.home / linux.AUTOSTART_RELATIVE_PATH
             path.parent.mkdir(parents=True)
             path.write_text("different\n", encoding="utf-8")
-            with patch.object(linux.shutil, "which", return_value="/usr/local/bin/axidev-osk"):
+            with (
+                patch.dict(linux.os.environ, {"XDG_CONFIG_HOME": ""}),
+                patch.object(linux.shutil, "which", return_value="/usr/local/bin/axidev-osk"),
+            ):
                 with self.assertRaises(linux.LinuxSetupError):
                     linux._remove_autostart(account)
 
@@ -238,6 +265,7 @@ class LinuxCliTests(unittest.TestCase):
                 unittest.mock.call(["modprobe", "uinput"]),
                 unittest.mock.call(["udevadm", "settle"]),
                 unittest.mock.call(["udevadm", "trigger", str(input_path)]),
+                unittest.mock.call(["udevadm", "settle"]),
             ],
         )
 

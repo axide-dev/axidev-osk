@@ -31,6 +31,7 @@ PAYLOAD_NAME = "axidev-osk"
 IMAGE_NAME = "axidev-osk-linux-builder"
 OUTPUT_VOLUME = "axidev-osk-linux-output"
 ELF_MAGIC = b"\x7fELF"
+WINDOWS_BOOTSTRAP = ROOT / "packaging" / "windows" / "axidev-osk-windows-install.ps1"
 
 
 def _output_root(raw: str | None) -> Path:
@@ -419,12 +420,15 @@ def build_release(namespace: argparse.Namespace) -> int:
         (LINUX_DIR / "install.sh").read_text(encoding="utf-8"), encoding="utf-8"
     )
     installer.chmod(0o755)
+    windows_bootstrap = assets / WINDOWS_BOOTSTRAP.name
+    shutil.copy2(WINDOWS_BOOTSTRAP, windows_bootstrap)
 
     release_assets = (
         payload_archive,
         stable_payload,
         *source_archives,
         installer,
+        windows_bootstrap,
     )
     sums = assets / "SHA256SUMS"
     sums.write_text(
