@@ -17,6 +17,10 @@ class WindowAction:
     def __post_init__(self) -> None:
         """Validate values before the action reaches runtime routing."""
 
+        if self.kind != "toggle-opacity":
+            raise ValueError(f"Unsupported window action kind: {self.kind!r}")
+        if not self.target_window_id.strip():
+            raise ValueError("Window action target ID must not be empty")
         if not 0.0 <= self.opacity < 1.0:
             raise ValueError("Window action opacity must be at least 0.0 and less than 1.0")
 
@@ -75,6 +79,18 @@ class KeySpec:
     repeats: bool = True
     display_variants: tuple[KeyDisplay, ...] = ()
     action: WindowAction | None = None
+
+    def __post_init__(self) -> None:
+        """Reject action keys with conflicting keyboard behavior."""
+
+        if self.action is None:
+            return
+        if self.is_spacer:
+            raise ValueError("Action keys cannot be spacers")
+        if self.io_key is not None or self.key_id is not None or self.latchable or self.holds_when_latched:
+            raise ValueError("Action keys cannot define keyboard output or latch behavior")
+        if self.repeats:
+            raise ValueError("Action keys cannot repeat")
 
     def resolve_display(self, active_modifiers: frozenset[str]) -> KeyDisplay:
         """Return the most specific display variant for active modifier IDs."""

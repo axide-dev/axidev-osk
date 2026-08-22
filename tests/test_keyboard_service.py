@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
-from axidev_osk.models import KeySpec
+from axidev_osk.models import KeySpec, WindowAction
 from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey
 from axidev_osk.runtime.events import BackendKeyStateChanged, ComponentPressed, KeyLatchChanged
 from axidev_osk.runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
@@ -70,6 +70,21 @@ class FakeKeyboardBackend:
 
 
 class KeyboardServiceTests(unittest.TestCase):
+    def test_window_actions_reject_unknown_kinds_and_empty_targets(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported window action kind"):
+            WindowAction(kind="unknown", target_window_id="window:keyboard")  # type: ignore[arg-type]
+
+        with self.assertRaisesRegex(ValueError, "target ID must not be empty"):
+            WindowAction(kind="toggle-opacity", target_window_id="  ")
+
+    def test_action_keys_reject_keyboard_behavior(self) -> None:
+        action = WindowAction(kind="toggle-opacity", target_window_id="window:keyboard")
+
+        with self.assertRaisesRegex(ValueError, "keyboard output or latch behavior"):
+            KeySpec(label="Ghost", row=0, column=0, io_key="A", repeats=False, action=action)
+        with self.assertRaisesRegex(ValueError, "cannot repeat"):
+            KeySpec(label="Ghost", row=0, column=0, action=action)
+
     def test_ghost_key_emits_action_event_without_keyboard_output(self) -> None:
         _app()
         backend = FakeKeyboardBackend()
