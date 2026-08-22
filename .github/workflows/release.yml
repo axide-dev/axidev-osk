@@ -22,7 +22,7 @@ jobs:
           submodules: recursive
 
       - name: Build release assets
-        run: python3 build.py linux release --output dist/linux
+        run: python3 packaging/build.py linux release --output dist/linux
 
       - name: Upload assets to published release
         uses: softprops/action-gh-release@v3

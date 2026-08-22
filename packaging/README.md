@@ -28,7 +28,7 @@ packaging/
   rpm/
 ```
 
-The root `build.py` command routes Linux payload, verification, release, and virtual-machine work.
+The `packaging/build.py` command routes Linux payload, verification, release, and virtual-machine work.
 
 ## Linux Distribution
 
@@ -68,14 +68,14 @@ Activation moves the current payload to `/opt/axidev-osk.old` and moves the stag
 Build and verify the payload through the pinned Docker environment:
 
 ```bash
-python build.py linux payload
-python build.py linux verify dist/linux/axidev-osk
+python packaging/build.py linux payload
+python packaging/build.py linux verify dist/linux/axidev-osk
 ```
 
 Create release assets:
 
 ```bash
-python build.py linux release
+python packaging/build.py linux release
 ```
 
 The release directory contains versioned and stable payload archives, versioned and stable repository source ZIPs, the lifecycle installer, and `SHA256SUMS`. The checksums detect corrupted downloads but do not authenticate the publisher because the assets and manifest use the same download channel.
@@ -93,9 +93,9 @@ The QEMU helper manages three profiles:
 Prepare, run, or reset a profile:
 
 ```bash
-python build.py linux vm prepare hyprland
-python build.py linux vm run hyprland --share dist/linux
-python build.py linux vm reset hyprland
+python packaging/build.py linux vm prepare hyprland
+python packaging/build.py linux vm run hyprland --share dist/linux
+python packaging/build.py linux vm reset hyprland
 ```
 
 Replace `hyprland` with `kde` or `gnome`. The runner uses KVM when available and falls back to software emulation.

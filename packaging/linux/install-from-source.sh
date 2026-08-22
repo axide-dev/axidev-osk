@@ -7,7 +7,7 @@ readonly ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly OUTPUT="${ROOT}/dist/linux-local"
 readonly PAYLOAD="${OUTPUT}/axidev-osk-local.tar.gz"
 
-python3 "${ROOT}/build.py" linux payload --output "${OUTPUT}"
+python3 "${ROOT}/packaging/build.py" linux payload --output "${OUTPUT}"
 tar -czf "${PAYLOAD}" -C "${OUTPUT}" axidev-osk
 checksum="$(sha256sum "${PAYLOAD}" | cut -d' ' -f1)"
 arguments=(

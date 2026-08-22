@@ -11,7 +11,7 @@ from vm import prepare_vm, reset_vm, run_vm, ssh_vm
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python build.py")
+    parser = argparse.ArgumentParser(prog="python packaging/build.py")
     platforms = parser.add_subparsers(dest="platform", required=True)
     linux = platforms.add_parser("linux", help="build and test Linux distribution artifacts")
     commands = linux.add_subparsers(dest="linux_command", required=True)

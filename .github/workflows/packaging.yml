@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - ".dockerignore"
-      - "build.py"
+      - "packaging/build.py"
       - "packaging/**"
       - "pyproject.toml"
       - "src/**"
@@ -16,7 +16,7 @@ on:
     branches: [main]
     paths:
       - ".dockerignore"
-      - "build.py"
+      - "packaging/build.py"
       - "packaging/**"
       - "pyproject.toml"
       - "src/**"
@@ -42,7 +42,7 @@ jobs:
       - name: Check Python files
         run: |
           python3 -m py_compile \
-            build.py \
+            packaging/build.py \
             packaging/linux/build_support/*.py \
             packaging/linux/resources/launch.py
           python3 -m unittest tests.test_linux_packaging
@@ -101,7 +101,7 @@ jobs:
           submodules: recursive
 
       - name: Build and verify payload
-        run: python3 build.py linux payload --output dist/linux
+        run: python3 packaging/build.py linux payload --output dist/linux
 
       - name: Upload payload for inspection
         uses: actions/upload-artifact@v6

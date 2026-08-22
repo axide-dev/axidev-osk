@@ -53,7 +53,7 @@ The launcher is a static Rust executable. It resolves the payload from its own p
 Run the root command from the repository checkout:
 
 ```bash
-python build.py linux payload
+python packaging/build.py linux payload
 ```
 
 The outer command builds the pinned manylinux Docker image. Docker writes the result to the `axidev-osk-linux-output` volume, and the build command copies the verified payload into the requested output directory.
@@ -72,7 +72,7 @@ The default output is `dist/linux/axidev-osk`.
 Verify an existing payload again with:
 
 ```bash
-python build.py linux verify dist/linux/axidev-osk
+python packaging/build.py linux verify dist/linux/axidev-osk
 ```
 
 Static verification does not import host Qt packages. The launcher's `--verify-runtime` check covers those packages on the target system.
@@ -94,7 +94,7 @@ A local payload requires an explicit checksum. Downloaded releases use the publi
 Create release assets with:
 
 ```bash
-python build.py linux release
+python packaging/build.py linux release
 ```
 
 The command creates:
@@ -215,20 +215,20 @@ The uninstaller does not remove the shared `uinput` group or its memberships.
 Prepare one profile from a verified local payload:
 
 ```bash
-python build.py linux vm prepare hyprland \
+python packaging/build.py linux vm prepare hyprland \
     --payload dist/linux/axidev-osk
 ```
 
 Run the prepared profile:
 
 ```bash
-python build.py linux vm run hyprland
+python packaging/build.py linux vm run hyprland
 ```
 
 Reset its writable disk and cached installer source:
 
 ```bash
-python build.py linux vm reset hyprland
+python packaging/build.py linux vm reset hyprland
 ```
 
 Available profiles are `hyprland`, `kde`, `gnome`, and `lightdm-x11`. The Hyprland and KDE profiles exercise Wayland greeters. The GNOME profile exercises user-session autostart. `lightdm-x11` installs LightDM, its GTK greeter, Xorg, and Xfce on Arch Linux. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.

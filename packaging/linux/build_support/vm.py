@@ -302,7 +302,10 @@ def run_vm(namespace: argparse.Namespace) -> int:
         "-virtfs",
         f"local,path={install_source},mount_tag=axidev_host,security_model=none,readonly=on",
     ]
-    print(f"SSH diagnostics: python build.py linux vm ssh {namespace.profile}", flush=True)
+    print(
+        f"SSH diagnostics: python packaging/build.py linux vm ssh {namespace.profile}",
+        flush=True,
+    )
     run(command)
     return 0
 

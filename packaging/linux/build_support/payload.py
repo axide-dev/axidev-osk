@@ -73,7 +73,7 @@ def build_payload(namespace: argparse.Namespace) -> int:
             f"{OUTPUT_VOLUME}:/output",
             IMAGE_NAME,
             "python",
-            "build.py",
+            "packaging/build.py",
             "linux",
             "payload",
             "--inner",
