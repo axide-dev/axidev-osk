@@ -4,7 +4,7 @@
 # Wipes /opt/axidev-osk, removes the launcher in /usr/local/bin, and removes
 # the udev rule (reloading udev so the rule is no longer active).
 #
-# Does NOT remove the user from the 'input' group; that group is shared with
+# Does NOT remove the user from the 'uinput' group; that group is shared with
 # other system uses and removing membership would be too aggressive.
 
 set -euo pipefail
@@ -40,7 +40,7 @@ main() {
         log "${LAUNCHER_PATH} not present, skipping."
     fi
 
-    if [ -f "${UDEV_RULE_PATH}" ]; then
+    if [ -f "${UDEV_RULE_PATH}" ] || [ -L "${UDEV_RULE_PATH}" ]; then
         log "Removing ${UDEV_RULE_PATH}..."
         rm -f "${UDEV_RULE_PATH}"
         if command -v udevadm >/dev/null 2>&1; then
@@ -53,7 +53,7 @@ main() {
     fi
 
     log "Uninstall complete."
-    log "Note: your membership in the 'input' group has been left untouched."
+    log "Note: your membership in the 'uinput' group has been left untouched."
 }
 
 main "$@"

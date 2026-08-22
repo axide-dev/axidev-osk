@@ -5,13 +5,12 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...models import KeySpec
 from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, KeyLatchChanged
 from ...runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
-from .io import AxidevIoKeyboardBackend, PermissionSetupOutcome
+from .io import AxidevIoKeyboardBackend
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
@@ -87,12 +86,6 @@ class KeyboardService:
 
         return self._backend.permission_setup_text
 
-    @property
-    def permission_setup_script_path(self) -> Path | None:
-        """Return the bundled permission helper path when available."""
-
-        return self._backend.permission_setup_script_path
-
     def initialize(self) -> bool:
         """Initialize keyboard output.
 
@@ -132,21 +125,6 @@ class KeyboardService:
         self._release_press_handles()
         self._backend.shutdown()
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
-
-    def setup_permissions(self) -> PermissionSetupOutcome:
-        """Run backend permission setup.
-
-        Args:
-            None.
-
-        Returns:
-            Permission setup outcome from the backend.
-
-        Side effects:
-            May run helper scripts and update backend readiness/status.
-        """
-
-        return self._backend.setup_permissions()
 
     def register_key_spec(self, layout_id: str, spec: KeySpec, *, component_id: str | None = None) -> str | None:
         """Register a key spec for backend state updates and return its backend key name."""

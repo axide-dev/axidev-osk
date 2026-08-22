@@ -6,12 +6,12 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox
 
 from ..runtime.prompt import PromptResolutionWaiter
 
@@ -65,8 +65,6 @@ class LinuxPermissionController:
 
         if waiter.result == "open_terminal":
             self._open_terminal()
-        elif waiter.result == "setup_here":
-            self._run_setup()
         elif waiter.result == "already_configured":
             QMessageBox.information(
                 parent,
@@ -79,72 +77,42 @@ class LinuxPermissionController:
             )
 
     def _open_terminal(self) -> None:
-        script_path = self._keyboard.permission_setup_script_path
         parent = self._window_manager.get_or_create(self._config.keyboard_window_id)
-        if script_path is None:
-            QMessageBox.warning(parent, "Permission Helper Missing", self._keyboard.permission_setup_text)
-            return
-        if launch_permission_script_in_terminal(script_path):
+        command = [sys.executable, "-m", "axidev_osk", "linux", "setup-permissions"]
+        if launch_command_in_terminal(command):
             QMessageBox.information(
                 parent,
                 "Terminal Opened",
                 (
-                    "A terminal window was opened for the Linux permission helper.\n\n"
-                    "Complete the sudo prompt there. When the script finishes, log out and back in, "
+                    "A terminal window was opened for Linux permission setup.\n\n"
+                    "Complete the sudo prompt there. When setup finishes, log out and back in, "
                     "then relaunch axidev-osk and test keyboard output again."
                 ),
             )
             return
         QMessageBox.warning(parent, "No Terminal Launcher Found", self._keyboard.permission_setup_text)
 
-    def _run_setup(self) -> None:
-        outcome = self._keyboard.setup_permissions()
-        parent = self._window_manager.get_or_create(self._config.keyboard_window_id)
-        status_label = parent.findChild(QWidget, "statusLabel")
-        if status_label is not None and hasattr(status_label, "setText"):
-            status_label.setText(self._keyboard.status_text)  # type: ignore[attr-defined]
-        if outcome.error_text is not None:
-            QMessageBox.warning(parent, "Permission Setup Failed", f"{outcome.error_text}\n\n{self._keyboard.permission_setup_text}")
-            return
-        if outcome.requires_logout:
-            detail = (
-                "Linux permission setup finished, but the new group membership is not active "
-                "in this session yet.\n\n"
-                "Log out and back in, then relaunch axidev-osk and test keyboard output again."
-            )
-            if outcome.helper_path is not None:
-                detail = f"{detail}\n\nHelper script: {outcome.helper_path}"
-            QMessageBox.information(parent, "Log Out Required", detail)
-            return
-        if self._keyboard.ready:
-            detail = "Linux keyboard permissions are available now. Keyboard output is ready."
-            if outcome.already_granted:
-                detail = "Linux keyboard permissions were already available in this session. Keyboard output is ready."
-            QMessageBox.information(parent, "Permission Ready", detail)
-            return
-        QMessageBox.information(parent, "Permission Setup", self._keyboard.permission_setup_text)
 
-
-def launch_permission_script_in_terminal(script_path: Path) -> bool:
-    """Launch the permission helper in an available terminal emulator."""
+def launch_command_in_terminal(command: list[str]) -> bool:
+    """Launch a command in an available terminal emulator."""
 
     if os.name == "nt":
         return False
 
-    command = _terminal_launch_command(script_path)
-    if command is None:
+    terminal_command = _terminal_launch_command(command)
+    if terminal_command is None:
         return False
 
     try:
-        subprocess.Popen(command)
+        subprocess.Popen(terminal_command)
     except OSError:
         return False
 
     return True
 
 
-def _terminal_launch_command(script_path: Path) -> list[str] | None:
-    shell_command = _build_terminal_shell_command(script_path)
+def _terminal_launch_command(command: list[str]) -> list[str] | None:
+    shell_command = _build_terminal_shell_command(command)
 
     candidates = (
         ("x-terminal-emulator", ["x-terminal-emulator", "-e", "bash", "-lc", shell_command]),
@@ -164,10 +132,10 @@ def _terminal_launch_command(script_path: Path) -> list[str] | None:
     return None
 
 
-def _build_terminal_shell_command(script_path: Path) -> str:
-    quoted_script_path = shlex.quote(str(script_path))
+def _build_terminal_shell_command(command: list[str]) -> str:
+    quoted_command = shlex.join(command)
     return (
-        f"bash {quoted_script_path}; "
+        f"{quoted_command}; "
         "status=$?; "
         "printf '\\n'; "
         "if [ \"$status\" -eq 0 ]; then "

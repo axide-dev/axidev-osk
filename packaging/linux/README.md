@@ -20,12 +20,12 @@ For an architecture overview, see [`../README.md`](../README.md).
                 /opt/axidev-osk.new -> /opt/axidev-osk, then
                 rm -rf /opt/axidev-osk.old.
 8. Install /usr/local/bin/axidev-osk from the bundled launcher.
-9. Ensure 'input' group exists.
+9. Ensure 'uinput' group exists.
 10. Ensure /etc/udev/rules.d/70-axidev-io-uinput.rules has the expected
     contents; reload udev only if the rule actually changed.
-11. Verify /dev/uinput is owned by group 'input' with mode 0660; modprobe
+11. Verify /dev/uinput is owned by group 'uinput' with mode 0660; modprobe
     if needed; warn if a reboot may be required.
-12. Add the invoking user to the 'input' group if not already a member.
+12. Add the invoking user to the 'uinput' group if not already a member.
 ```
 
 ## Required system packages
@@ -82,8 +82,9 @@ The installer does not create or modify:
 **`/dev/uinput` still wrong after install.** The kernel module may not be loaded (`modprobe uinput`), or the udev rule may need a reboot to take effect on some setups. The launcher will fail with a permission error in that case. Confirm with:
 
 ```bash
-stat -c '%a %G' /dev/uinput   # expected: 660 input
-groups                        # should include 'input' after logout/login
+stat -c '%a %G' /dev/uinput   # expected: 660 uinput
+groups                        # should include 'uinput' after logout/login
+axidev-osk linux status-permissions
 ```
 
 ## What `uninstall.sh` does
@@ -96,7 +97,7 @@ groups                        # should include 'input' after logout/login
 5. udevadm control --reload-rules
 ```
 
-The script does not remove the user from the `input` group. That group exists on most systems independently of this application and may be used by other software.
+The script does not remove the user from the `uinput` group. Other virtual-input software may use the same least-privilege group.
 
 ## Re-running `install.sh`
 

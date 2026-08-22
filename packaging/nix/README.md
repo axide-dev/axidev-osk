@@ -42,7 +42,7 @@ nix build .#axidev-osk
 }
 ```
 
-The module installs the package, registers the bundled udev rule, and adds configured users to the `input` group.
+The module installs the package, registers the bundled udev rule, and adds configured users to the `uinput` group.
 
 ## Dependency Policy
 

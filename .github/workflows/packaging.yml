@@ -29,8 +29,10 @@ jobs:
           set -euo pipefail
           bash -n \
             packaging/linux/install.sh \
+            packaging/linux/install-from-source.sh \
             packaging/linux/uninstall.sh \
             packaging/linux/resources/launcher.sh \
+            packaging/arch/axidev-osk.install \
             packaging/deb/debian/rules \
             packaging/deb/debian/postinst \
             packaging/deb/debian/postrm

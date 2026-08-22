@@ -17,7 +17,7 @@ from axidev_osk.hot_corner.controller import (
 )
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.windows.overlay import layer_shell
-from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
+from axidev_osk.windows.overlay.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
 from axidev_osk.windows.overlay.always_on_top import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,

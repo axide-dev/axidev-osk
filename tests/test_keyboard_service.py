@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
 from axidev_osk.models import KeySpec, WindowAction
-from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardKeyUp, KeyboardSyncLatchedKey
+from axidev_osk.runtime.commands import KeyboardKeyDown, KeyboardSyncLatchedKey
 from axidev_osk.runtime.events import BackendKeyStateChanged, ComponentPressed, KeyLatchChanged
 from axidev_osk.runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
 from axidev_osk.runtime.testing import make_test_context
@@ -30,7 +30,6 @@ class FakeKeyboardBackend:
         self.status_text = "ready"
         self.needs_permission_setup = False
         self.permission_setup_text = ""
-        self.permission_setup_script_path = None
         self._pressed_key_names = pressed_key_names or set()
         self._listeners = []
         self.key_down = Mock(return_value=SimpleNamespace(name="press"))
@@ -41,9 +40,6 @@ class FakeKeyboardBackend:
         return True
 
     def shutdown(self) -> None:
-        return None
-
-    def setup_permissions(self):
         return None
 
     def add_key_state_listener(self, listener):

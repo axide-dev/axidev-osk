@@ -54,13 +54,13 @@ PYTHONPATH=src python -m axidev_osk
 
 ### One-time uinput permissions
 
-Linux requires permission to emit keystrokes through `/dev/uinput`. Run the helper script bundled with the vendored input backend:
+Linux requires permission to emit keystrokes through `/dev/uinput`. Run the installed Axidev OSK setup command:
 
 ```bash
-bash ./vendor/axidev-io-python/src/axidev_io/vendor/axidev-io/scripts/setup_uinput_permissions.sh
+axidev-osk linux setup-permissions
 ```
 
-This installs a udev rule, ensures the `input` group exists, and adds your user to it. Log out and back in for the new group membership to take effect.
+This installs a udev rule, ensures the dedicated `uinput` group exists, and adds your user to it. Log out and back in for the new group membership to take effect.
 
 ## Windows
 

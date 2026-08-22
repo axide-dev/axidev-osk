@@ -11,7 +11,7 @@ readonly STAGING_DIR="/opt/axidev-osk.new"
 readonly BACKUP_DIR="/opt/axidev-osk.old"
 readonly LAUNCHER_PATH="/usr/local/bin/axidev-osk"
 readonly UDEV_RULE_PATH="/etc/udev/rules.d/70-axidev-io-uinput.rules"
-readonly UDEV_RULE_CONTENTS='KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"'
+readonly UDEV_RULE_CONTENTS='KERNEL=="uinput", MODE="0660", GROUP="uinput", OPTIONS+="static_node=uinput"'
 
 log()  { printf '[install-from-source] %s\n' "$*"; }
 warn() { printf '[install-from-source] WARNING: %s\n' "$*" >&2; }
@@ -114,16 +114,20 @@ install_launcher() {
     log "Installed launcher at ${LAUNCHER_PATH}"
 }
 
-ensure_input_group() {
-    if getent group input >/dev/null 2>&1; then
+ensure_uinput_group() {
+    if getent group uinput >/dev/null 2>&1; then
         return 0
     fi
-    log "Creating 'input' group..."
-    groupadd input
+    log "Creating 'uinput' group..."
+    groupadd --system uinput
 }
 
 ensure_udev_rule() {
     local current=""
+    if [ -L "${UDEV_RULE_PATH}" ]; then
+        log "Removing existing udev rule mask..."
+        rm -f "${UDEV_RULE_PATH}"
+    fi
     if [ -f "${UDEV_RULE_PATH}" ]; then
         current="$(cat "${UDEV_RULE_PATH}")"
     fi
@@ -149,7 +153,7 @@ uinput_state_correct() {
     [ -e /dev/uinput ] || return 1
     local state
     state="$(stat -c '%a %G' /dev/uinput 2>/dev/null || true)"
-    [ "${state}" = "660 input" ]
+    [ "${state}" = "660 uinput" ]
 }
 
 ensure_uinput_node() {
@@ -167,25 +171,25 @@ ensure_uinput_node() {
         return 0
     fi
 
-    warn "/dev/uinput is not yet owned by group 'input' with mode 0660."
+    warn "/dev/uinput is not yet owned by group 'uinput' with mode 0660."
     warn "A reboot may be required for the new udev rule to take effect."
 }
 
 ensure_user_in_input_group() {
     local target_user="$1"
     if [ -z "${target_user}" ]; then
-        warn "Cannot determine the target user; skipping 'input' group membership step."
-        warn "Add yourself to the 'input' group manually with: sudo usermod -aG input <username>"
+        warn "Cannot determine the target user; skipping 'uinput' group membership step."
+        warn "Run: axidev-osk linux setup-permissions --user <username>"
         return 0
     fi
 
-    if id -nG "${target_user}" 2>/dev/null | tr ' ' '\n' | grep -qx input; then
-        log "User '${target_user}' is already in the 'input' group."
+    if id -nG "${target_user}" 2>/dev/null | tr ' ' '\n' | grep -qx uinput; then
+        log "User '${target_user}' is already in the 'uinput' group."
         return 0
     fi
 
-    log "Adding user '${target_user}' to the 'input' group..."
-    usermod -aG input "${target_user}"
+    log "Adding user '${target_user}' to the 'uinput' group..."
+    usermod -aG uinput "${target_user}"
     log "Log out and back in for the new group membership to take effect."
 }
 
@@ -209,7 +213,7 @@ main() {
     install_launcher
 
 
-    ensure_input_group
+    ensure_uinput_group
     if ensure_udev_rule; then
         reload_udev
     fi

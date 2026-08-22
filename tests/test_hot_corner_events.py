@@ -34,15 +34,11 @@ class FakeKeyboardBackend:
     status_text = "ready"
     needs_permission_setup = False
     permission_setup_text = ""
-    permission_setup_script_path = None
 
     def initialize(self) -> bool:
         return True
 
     def shutdown(self) -> None:
-        return None
-
-    def setup_permissions(self) -> None:
         return None
 
     def add_key_state_listener(self, listener):

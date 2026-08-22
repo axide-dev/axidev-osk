@@ -32,4 +32,4 @@ The RPM depends on distro-provided Qt/PySide/layer-shell packages instead of bun
 
 ## uinput Permissions
 
-The RPM installs `70-axidev-io-uinput.rules` and reloads udev in `%post`. Users still need to belong to the `input` group before they can emit events through `/dev/uinput`.
+The RPM installs `70-axidev-io-uinput.rules` and reloads udev in `%post`. Users run `axidev-osk linux setup-permissions` to join the dedicated `uinput` group before emitting events through `/dev/uinput`.

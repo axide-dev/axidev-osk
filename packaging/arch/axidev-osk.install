@@ -1,13 +1,13 @@
 post_install() {
-  getent group input >/dev/null || groupadd -r input
+  getent group uinput >/dev/null || groupadd -r uinput
   udevadm control --reload-rules >/dev/null 2>&1 || true
   udevadm trigger /dev/uinput >/dev/null 2>&1 || true
 
   cat <<'EOF'
 Axidev OSK installed.
 
-Add your user to the input group and log out/back in before using key emission:
-  sudo usermod -aG input "$USER"
+Configure your user, then log out and back in before using key emission:
+  axidev-osk linux setup-permissions
 EOF
 }
 
@@ -16,6 +16,9 @@ post_upgrade() {
 }
 
 post_remove() {
+  if [ "$(readlink /etc/udev/rules.d/70-axidev-io-uinput.rules 2>/dev/null || true)" = "/dev/null" ]; then
+    rm -f /etc/udev/rules.d/70-axidev-io-uinput.rules
+  fi
   udevadm control --reload-rules >/dev/null 2>&1 || true
   udevadm trigger /dev/uinput >/dev/null 2>&1 || true
 }
