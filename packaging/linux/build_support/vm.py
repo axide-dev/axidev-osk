@@ -75,6 +75,23 @@ def _desktop_commands(name: str) -> list[str]:
             "systemctl enable greetd.service",
             "systemctl set-default graphical.target",
         ]
+    if name == "lightdm-x11":
+        return [
+            "pacman -Syu --noconfirm lightdm lightdm-gtk-greeter xfce4 xorg-server "
+            "xorg-xrandr layer-shell-qt mesa noto-fonts noto-fonts-emoji pyside6 qt6-wayland",
+            "usermod -aG video,input axidev",
+            "install -Dm0755 /dev/stdin /usr/local/libexec/axidev-osk-lightdm-display <<'EOF'\n"
+            "#!/bin/sh\n"
+            "xrandr --output Virtual-1 --mode 1920x1080\n"
+            "EOF",
+            "install -d /etc/lightdm/lightdm.conf.d && "
+            "printf '%s\\n' '[Seat:*]' 'greeter-session=lightdm-gtk-greeter' "
+            "'user-session=xfce' "
+            "'display-setup-script=/usr/local/libexec/axidev-osk-lightdm-display' "
+            "> /etc/lightdm/lightdm.conf.d/20-axidev-osk-vm.conf",
+            "systemctl enable lightdm.service",
+            "systemctl set-default graphical.target",
+        ]
     if name == "kde":
         return [
             "dnf group install -y kde-desktop-environment",
@@ -91,16 +108,23 @@ def _desktop_commands(name: str) -> list[str]:
 
 
 def _post_install_commands(name: str) -> list[str]:
-    if name in {"kde", "gnome"}:
-        return [f"axidev-osk linux setup-autostart --user {VM_USER}"]
-    return []
+    manager = {
+        "hyprland": "greetd",
+        "kde": "plasma-login",
+        "lightdm-x11": "lightdm",
+    }.get(name)
+    commands = [] if manager is None else [f"axidev-osk linux setup-greeter --manager {manager}"]
+    if name in {"kde", "gnome", "lightdm-x11"}:
+        commands.append(f"axidev-osk linux setup-autostart --user {VM_USER}")
+    return commands
 
 
 def _cloud_config(name: str, public_key: str, payload_checksum: str) -> str:
     commands = [
-        *_desktop_commands(name),
         f"install -d {INSTALL_MOUNT}",
         f"mount -t 9p -o trans=virtio,ro axidev_host {INSTALL_MOUNT}",
+        "modprobe uinput",
+        *_desktop_commands(name),
         f"bash {INSTALL_MOUNT}/{INSTALLER_NAME} install "
         f"--payload {INSTALL_MOUNT}/{PAYLOAD_ARCHIVE_NAME} "
         f"--checksum {payload_checksum} --user {VM_USER}",
@@ -130,7 +154,7 @@ ssh_pwauth: true
 package_update: true
 runcmd:
 {indented}
-  - [systemctl, reboot]
+  - [systemd-run, --on-active=5s, --unit=axidev-osk-vm-reboot, systemctl, reboot]
 final_message: "Axidev OSK {name} VM provisioning finished"
 """
 

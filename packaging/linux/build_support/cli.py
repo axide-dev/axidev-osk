@@ -41,7 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
         ("reset", reset_vm),
     ):
         command = vm_commands.add_parser(name)
-        command.add_argument("profile", choices=("hyprland", "kde", "gnome"))
+        command.add_argument(
+            "profile", choices=("hyprland", "kde", "gnome", "lightdm-x11")
+        )
         if name == "prepare":
             command.add_argument("--payload", type=str, required=True)
         if name == "ssh":

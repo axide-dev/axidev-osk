@@ -34,7 +34,6 @@ class LinuxPackagingTests(unittest.TestCase):
         cloud_config = vm._cloud_config("hyprland", public_key, "a" * 64)
 
         self.assertIn(public_key, cloud_config)
-        self.assertNotIn("modprobe uinput", cloud_config)
         self.assertIn("axidev-osk-install install", cloud_config)
         self.assertIn("--checksum " + "a" * 64, cloud_config)
         self.assertIn("1920x1080@60", cloud_config)
@@ -42,7 +41,13 @@ class LinuxPackagingTests(unittest.TestCase):
         self.assertIn("scale    = 1", cloud_config)
         self.assertIn("hl.exec_cmd(\\\"/usr/local/bin/axidev-osk\\\")", cloud_config)
         self.assertIn("mount -t 9p -o trans=virtio,ro", cloud_config)
+        self.assertLess(cloud_config.index("mount -t 9p"), cloud_config.index("pacman -Syu"))
+        self.assertLess(cloud_config.index("modprobe uinput"), cloud_config.index("pacman -Syu"))
         self.assertIn("umount /run/axidev-osk-install-source", cloud_config)
+        self.assertIn(
+            "[systemd-run, --on-active=5s, --unit=axidev-osk-vm-reboot, systemctl, reboot]",
+            cloud_config,
+        )
         self.assertNotIn("mounts:", cloud_config)
         self.assertNotIn("\\'", cloud_config)
 
@@ -50,13 +55,38 @@ class LinuxPackagingTests(unittest.TestCase):
         self.assertIn("plasmalogin.service", " ".join(vm._desktop_commands("kde")))
 
     def test_xdg_desktops_configure_installed_autostart(self) -> None:
-        for profile in ("kde", "gnome"):
+        for profile in ("kde", "gnome", "lightdm-x11"):
             with self.subTest(profile=profile):
                 cloud_config = vm._cloud_config(profile, "ssh-ed25519 test", "a" * 64)
                 self.assertIn("axidev-osk linux setup-autostart --user axidev", cloud_config)
 
         hyprland = vm._cloud_config("hyprland", "ssh-ed25519 test", "a" * 64)
         self.assertNotIn("linux setup-autostart", hyprland)
+
+    def test_supported_profiles_configure_their_greeter(self) -> None:
+        expected = {
+            "hyprland": "greetd",
+            "kde": "plasma-login",
+            "lightdm-x11": "lightdm",
+        }
+        for profile, manager in expected.items():
+            with self.subTest(profile=profile):
+                cloud_config = vm._cloud_config(profile, "ssh-ed25519 test", "a" * 64)
+                self.assertIn(
+                    f"axidev-osk linux setup-greeter --manager {manager}", cloud_config
+                )
+
+        gnome = vm._cloud_config("gnome", "ssh-ed25519 test", "a" * 64)
+        self.assertNotIn("linux setup-greeter", gnome)
+
+    def test_lightdm_profile_installs_xorg_and_xfce(self) -> None:
+        commands = " ".join(vm._desktop_commands("lightdm-x11"))
+
+        self.assertIn("lightdm-gtk-greeter", commands)
+        self.assertIn("xorg-server", commands)
+        self.assertIn("xorg-xrandr", commands)
+        self.assertIn("xfce4", commands)
+        self.assertIn("display-setup-script", commands)
 
     def test_vm_prepare_install_source_archives_payload_and_installer(self) -> None:
         with TemporaryDirectory() as temporary:

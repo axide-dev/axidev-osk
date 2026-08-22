@@ -93,7 +93,21 @@ axidev-osk linux status-autostart
 axidev-osk linux remove-autostart
 ```
 
-These autostart commands support regular user desktop sessions. Login-screen greeters use separate accounts and environments, so GDM, SDDM, and other greeters require adapters that are not implemented yet.
+Login-screen startup is separate from user autostart. Axidev OSK supports Plasma Login Manager, greetd, and LightDM.
+
+```bash
+axidev-osk linux setup-greeter
+axidev-osk linux status-greeter
+axidev-osk linux remove-greeter
+```
+
+`setup-greeter` shows an arrow-key menu of installed supported managers. Scripts can select one directly with `--manager plasma-login`, `--manager greetd`, or `--manager lightdm`. Setup checks the selected manager and its current configuration before writing files. It does not restart the display manager, so reboot or restart it after setup.
+
+Plasma Login Manager and LightDM use their own greeter startup hooks. The greetd adapter saves and wraps the existing default-session command. It starts that command before Axidev OSK, keeps the greeter authoritative, and restores the exact command during removal.
+
+The keyboard retries with exponential backoff while the greeter remains active. A keyboard or display-detection failure never stops the greeter. Failures appear in the system journal under `axidev-osk-greeter`.
+
+Greeter setup adds the manager's service account to the shared `uinput` group. Removal preserves that membership, matching the normal permission cleanup policy.
 
 On Windows, replacing `osk.exe` or another protected system binary is not supported. Future Windows integration should use supported accessibility registration and startup mechanisms.
 

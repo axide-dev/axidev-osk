@@ -12,6 +12,29 @@ from axidev_osk.cli import linux
 
 
 class LinuxCliTests(unittest.TestCase):
+    def test_service_account_does_not_require_home_directory(self) -> None:
+        record = SimpleNamespace(
+            pw_name="lightdm", pw_uid=42, pw_gid=42, pw_dir="/missing/lightdm"
+        )
+        fake_pwd = Mock()
+        fake_pwd.getpwnam.return_value = record
+
+        with patch.object(linux, "pwd", fake_pwd):
+            account = linux._resolve_account("lightdm", require_home=False)
+
+        self.assertEqual(account, linux.Account("lightdm", 42, 42, Path("/missing/lightdm")))
+
+    def test_user_account_still_requires_home_directory(self) -> None:
+        record = SimpleNamespace(pw_name="alice", pw_uid=1000, pw_gid=1000, pw_dir="/missing/alice")
+        fake_pwd = Mock()
+        fake_pwd.getpwnam.return_value = record
+
+        with (
+            patch.object(linux, "pwd", fake_pwd),
+            self.assertRaisesRegex(linux.LinuxSetupError, "home directory does not exist"),
+        ):
+            linux._resolve_account("alice")
+
     def test_non_linux_command_stops_before_account_lookup(self) -> None:
         namespace = argparse.Namespace(action="status", resource="permissions", user=None)
         with (

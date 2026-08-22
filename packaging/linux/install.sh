@@ -263,6 +263,7 @@ cleanup_integration() {
     local target_user="$1"
     local failed=0
     if [ -x "${INSTALL_PREFIX}/bin/axidev-osk" ]; then
+        "${INSTALL_PREFIX}/bin/axidev-osk" linux remove-greeter || failed=1
         if [ -n "${target_user}" ]; then
             "${INSTALL_PREFIX}/bin/axidev-osk" linux remove-autostart --user "${target_user}" \
                 || failed=1

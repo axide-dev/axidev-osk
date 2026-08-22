@@ -60,12 +60,25 @@ def register_commands(parser: argparse.ArgumentParser) -> None:
         ("setup-autostart", "setup", "autostart", True, "start Axidev OSK with a desktop session"),
         ("status-autostart", "status", "autostart", True, "check desktop-session autostart"),
         ("remove-autostart", "remove", "autostart", True, "remove desktop-session autostart"),
+        ("setup-greeter", "setup", "greeter", False, "start Axidev OSK on a login screen"),
+        ("status-greeter", "status", "greeter", False, "check login-screen startup"),
+        ("remove-greeter", "remove", "greeter", False, "remove login-screen startup"),
     )
     for name, action, resource, accepts_user, help_text in definitions:
         command = commands.add_parser(name, help=help_text, description=help_text)
         if accepts_user:
             command.add_argument("--user", help="local account to configure")
+        if name == "setup-greeter":
+            command.add_argument(
+                "--manager",
+                choices=("plasma-login", "greetd", "lightdm"),
+                help="login manager to configure",
+            )
         command.set_defaults(handler=run_command, action=action, resource=resource)
+
+    from . import linux_greeter
+
+    linux_greeter.register_runtime_commands(commands)
 
 
 def run_command(namespace: argparse.Namespace, argv: list[str]) -> int:
@@ -76,6 +89,10 @@ def run_command(namespace: argparse.Namespace, argv: list[str]) -> int:
         return 2
 
     try:
+        if namespace.resource == "greeter":
+            from . import linux_greeter
+
+            return linux_greeter.run_setup_command(namespace, argv)
         account = None
         if hasattr(namespace, "user"):
             account = _resolve_account(namespace.user)
@@ -117,7 +134,7 @@ def _run_autostart(action: str, account: Account | None, argv: list[str]) -> int
     return 0
 
 
-def _resolve_account(requested_user: str | None) -> Account:
+def _resolve_account(requested_user: str | None, *, require_home: bool = True) -> Account:
     if pwd is None:
         raise LinuxSetupError("local account lookup requires Linux")
 
@@ -135,7 +152,7 @@ def _resolve_account(requested_user: str | None) -> Account:
         raise LinuxSetupError(f"local user does not exist: {user}") from exc
 
     home = Path(record.pw_dir)
-    if not home.is_dir():
+    if require_home and not home.is_dir():
         raise LinuxSetupError(f"home directory does not exist: {home}")
     return Account(record.pw_name, record.pw_uid, record.pw_gid, home)
 

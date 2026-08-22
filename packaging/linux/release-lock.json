@@ -56,6 +56,15 @@
       "memory_mb": 6144,
       "cpus": 4,
       "ssh_port": 22223
+    },
+    "lightdm-x11": {
+      "distribution": "arch",
+      "image": "Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "url": "https://geo.mirror.pkgbuild.com/images/v20260815.573966/Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "sha256": "5d8be8d28cfd290f051b0f67df0a6874596ad23de3f3f18b90c91aeb758eb878",
+      "memory_mb": 4096,
+      "cpus": 4,
+      "ssh_port": 22224
     }
   }
 }

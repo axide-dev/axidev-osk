@@ -146,6 +146,40 @@ sudo axidev-osk-install uninstall
 
 The first downloaded installer must be saved to a file and run from that file. A pipe cannot install the lifecycle command because no installer file would remain to copy.
 
+## Login-Screen Startup
+
+The installed command line can configure Axidev OSK before login:
+
+```bash
+sudo axidev-osk linux setup-greeter
+axidev-osk linux status-greeter
+sudo axidev-osk linux remove-greeter
+```
+
+Without `--manager`, setup lists the supported managers installed on the host. Use the option for unattended setup:
+
+```bash
+sudo axidev-osk linux setup-greeter --manager plasma-login
+sudo axidev-osk linux setup-greeter --manager greetd
+sudo axidev-osk linux setup-greeter --manager lightdm
+```
+
+Setup validates every required account, hook, and existing file before changing the manager. It configures one manager and never restarts it. Reboot or restart the selected display manager after setup.
+
+Plasma Login Manager uses an `axidev-osk-greeter.service` user unit tied to `plasma-login-wayland.target`. LightDM uses a `greeter-wrapper` drop-in. greetd replaces only the default-session command line with `/etc/axidev-osk/greetd-session-wrapper`, while `/etc/axidev-osk/greeter.json` keeps the exact original value for removal.
+
+The LightDM and greetd shell wrappers start the original greeter before invoking the Axidev launcher. A missing Python package, incompatible Qt runtime, keyboard crash, or display-detection error cannot stop the original greeter. The keyboard retries after 1, 2, 4, 8, 16, 32, and then 60 seconds until the greeter exits.
+
+Runtime failures are written to the existing manager output and the system journal. Read the common journal stream with:
+
+```bash
+journalctl -t axidev-osk-greeter
+```
+
+The diagnostics include the manager, service account, display protocol, failure stage, process status, and retry delay. They do not include passwords or complete process environments.
+
+The current VM coverage verifies Plasma Login Manager and greetd on Wayland. The `lightdm-x11` profile verifies LightDM under Xorg with an Xfce user session. The GNOME profile verifies user-session autostart only.
+
 ## Failure Behavior
 
 A bad signature or checksum stops before extraction.
@@ -175,6 +209,10 @@ Uninstall stops when permission or autostart cleanup fails. `uninstall --force` 
 
 Permission setup manages `/etc/modules-load.d/axidev-osk-uinput.conf` and `/etc/udev/rules.d/70-axidev-io-uinput.rules` through the application command line. Removal deletes only files whose contents still match Axidev OSK's definitions, and it does not unload the shared `uinput` module. Autostart setup manages the selected user's XDG autostart file.
 
+Files owned by a configured manager are conditional. `/etc/axidev-osk/greeter.json` records the selected adapter. Plasma Login Manager owns its user service and target link. LightDM owns its drop-in and wrapper. greetd owns its wrapper and restores the previous command during removal.
+
+The uninstaller removes exact managed greeter files before it disables the Axidev OSK uinput rule. It stops on changed files unless `--force` is selected. Shared `uinput` memberships remain in place.
+
 The uninstaller does not remove the shared `uinput` group or its memberships.
 
 ## QEMU Profiles
@@ -198,11 +236,11 @@ Reset its writable disk and cached installer source:
 python build.py linux vm reset hyprland
 ```
 
-Available profiles are `hyprland`, `kde`, and `gnome`. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
+Available profiles are `hyprland`, `kde`, `gnome`, and `lightdm-x11`. The Hyprland and KDE profiles exercise Wayland greeters. The GNOME profile exercises user-session autostart. `lightdm-x11` installs LightDM, its GTK greeter, Xorg, and Xfce on Arch Linux. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
 
 QEMU exposes the cached source through a read-only 9p device during provisioning. Cloud-init mounts it temporarily, runs the lifecycle installer, and unmounts it before reboot. The installed application runs from `/opt/axidev-osk` through `/usr/local/bin/axidev-osk`; the guest does not retain a host payload mount.
 
-Hyprland starts Axidev OSK through its compositor configuration. KDE and GNOME provisioning create the selected user's XDG autostart entry through the installed application command line.
+Hyprland, KDE, and `lightdm-x11` enable login-screen startup through the installed application command line. Hyprland keeps its existing greetd session command, KDE uses Plasma Login Manager, and `lightdm-x11` uses LightDM. KDE, GNOME, and `lightdm-x11` also keep the selected user's separate XDG autostart entry.
 
 The runner opens a GTK QEMU window. It uses KVM when `/dev/kvm` is accessible and otherwise uses slower software emulation.
 
