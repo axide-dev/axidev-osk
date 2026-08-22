@@ -22,7 +22,12 @@ from ..services.keyboard import KeyboardService
 from .commands import AppQuit
 from .context import Context
 from .dispatcher import Dispatcher
-from .event_handlers import register_context_command_handlers, register_event_handlers, route_hot_corner_triggered
+from .event_handlers import (
+    register_context_command_handlers,
+    register_event_handlers,
+    route_component_pressed,
+    route_hot_corner_triggered,
+)
 from .events import WindowCloseRequested
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -64,6 +69,11 @@ class _TestRuntime:
         """Route hot-corner visibility commands through production helper."""
 
         route_hot_corner_triggered(event, self)
+
+    def _handle_component_pressed(self, event: object) -> None:
+        """Route configured component actions through production helper."""
+
+        route_component_pressed(event, self)
 
 def make_test_context(
     keyboard_backend: Any,

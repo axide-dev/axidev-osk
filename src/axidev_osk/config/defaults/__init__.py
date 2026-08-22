@@ -46,7 +46,10 @@ def build_default_app_config() -> AppConfig:
             components=(
                 KeyboardGridConfig(
                     id=keyboard_grid_id,
-                    layout=build_us_iso_layout_config(parent_id=keyboard_surface_id),
+                    layout=build_us_iso_layout_config(
+                        parent_id=keyboard_surface_id,
+                        target_window_id=keyboard_window_id,
+                    ),
                 ),
                 KeyboardStatusConfig(id=keyboard_status_id),
             ),

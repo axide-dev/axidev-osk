@@ -16,7 +16,7 @@ embedded Python knowledge.
 
 from __future__ import annotations
 
-from ...models import KeyDisplay, KeySpec
+from ...models import KeyDisplay, KeySpec, WindowAction
 from ...runtime.identity import key_component_id, stable_id, validate_unique_ids
 from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
@@ -42,6 +42,7 @@ def key(
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
     display_variants: tuple[KeyDisplay, ...] = (),
+    action: WindowAction | None = None,
 ) -> KeySpec:
     """Build a key spec with default keyboard-layout behavior."""
 
@@ -60,6 +61,7 @@ def key(
         honors_latched_modifiers=honors_latched_modifiers,
         repeats=repeats,
         display_variants=display_variants,
+        action=action,
     )
 
 
@@ -174,7 +176,7 @@ def letter_key(
     )
 
 
-def build_us_iso_layout() -> list[KeySpec]:
+def build_us_iso_layout(*, target_window_id: str = "window:keyboard") -> list[KeySpec]:
     """Return the bundled US ISO layout as ordered key specs."""
 
     return [
@@ -225,6 +227,17 @@ def build_us_iso_layout() -> list[KeySpec]:
         letter_key("P", row=2, column=42),
         shifted_key("[", "{", row=2, column=46),
         shifted_key("]", "}", row=2, column=50),
+        key(
+            "Ghost",
+            row=2,
+            column=54,
+            repeats=False,
+            action=WindowAction(
+                kind="toggle-opacity",
+                target_window_id=target_window_id,
+                opacity=0.01,
+            ),
+        ),
         key("Del", row=2, column=NAV_START, io_key="Delete"),
         key("End", row=2, column=NAV_START + u(1), io_key="End"),
         key("PgDn", row=2, column=NAV_START + u(2), io_key="PageDown"),
@@ -308,7 +321,11 @@ def build_us_iso_layout() -> list[KeySpec]:
     ]
 
 
-def build_us_iso_layout_config(*, parent_id: str = "default") -> LayoutConfig:
+def build_us_iso_layout_config(
+    *,
+    parent_id: str = "default",
+    target_window_id: str = "window:keyboard",
+) -> LayoutConfig:
     """Build the bundled US ISO keyboard as pure layout/grid/component data.
 
     Args:
@@ -324,7 +341,7 @@ def build_us_iso_layout_config(*, parent_id: str = "default") -> LayoutConfig:
     layout_id = stable_id(parent_id, "layout", "us_iso", stable_override="layout:us-iso")
     grid_id = stable_id(layout_id, "grid", "keyboard", stable_override="grid:us-iso:keyboard")
     components: list[KeyConfig | SpacerConfig] = []
-    for spec in build_us_iso_layout():
+    for spec in build_us_iso_layout(target_window_id=target_window_id):
         kind = "spacer" if spec.is_spacer else "key"
         component_id = key_component_id(
             grid_id,

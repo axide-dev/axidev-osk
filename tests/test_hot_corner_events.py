@@ -12,8 +12,8 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.commands import WindowHide, WindowShow
-from axidev_osk.runtime.events import HotCornerTriggered
+from axidev_osk.runtime.commands import WindowHide, WindowShow, WindowToggleOpacity
+from axidev_osk.runtime.events import ComponentPressed, HotCornerTriggered
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 
@@ -121,6 +121,9 @@ class HotCornerEventTests(unittest.TestCase):
             def is_minimized(self, window_id: str) -> bool:
                 return False
 
+            def is_opacity_reduced(self, window_id: str) -> bool:
+                return False
+
             def is_visible(self, window_id: str) -> bool:
                 return False
 
@@ -145,6 +148,9 @@ class HotCornerEventTests(unittest.TestCase):
 
         class FakeWindowManager:
             def is_minimized(self, window_id: str) -> bool:
+                return False
+
+            def is_opacity_reduced(self, window_id: str) -> bool:
                 return False
 
             def is_visible(self, window_id: str) -> bool:
@@ -172,6 +178,38 @@ class HotCornerEventTests(unittest.TestCase):
             def is_minimized(self, window_id: str) -> bool:
                 return True
 
+            def is_opacity_reduced(self, window_id: str) -> bool:
+                return False
+
+            def is_visible(self, window_id: str) -> bool:
+                return True
+
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._config = config
+        runtime._dispatcher = context.dispatcher
+        runtime._window_manager = FakeWindowManager()
+
+        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+
+        self.assertEqual(commands, [WindowShow("window:keyboard")])
+
+    def test_runtime_handler_restores_ghosted_window_without_hiding_it(self) -> None:
+        context = make_test_context(FakeKeyboardBackend())
+        config = replace(
+            context.config,
+            hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
+        )
+        commands: list[object] = []
+        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
+        context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
+
+        class FakeWindowManager:
+            def is_minimized(self, window_id: str) -> bool:
+                return False
+
+            def is_opacity_reduced(self, window_id: str) -> bool:
+                return True
+
             def is_visible(self, window_id: str) -> bool:
                 return True
 
@@ -196,6 +234,36 @@ class HotCornerEventTests(unittest.TestCase):
         context.dispatcher.dispatch_event(HotCornerTriggered(corner="bottom_left"))
 
         self.assertEqual(commands, [WindowShow("window:keyboard")])
+
+    def test_component_action_dispatches_configured_window_opacity_command(self) -> None:
+        context = make_test_context(FakeKeyboardBackend())
+        ghost = next(
+            component
+            for component in context.config.windows[0].surface.components[0].layout.grids[0].components
+            if component.spec.label == "Ghost"
+        )
+        commands: list[object] = []
+        context.dispatcher.add_command_handler(
+            WindowToggleOpacity,
+            lambda command: commands.append(command),
+        )
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._dispatcher = context.dispatcher
+
+        runtime._handle_component_pressed(
+            ComponentPressed(component_id=ghost.id, key_spec=ghost.spec)
+        )
+
+        self.assertEqual(
+            commands,
+            [
+                WindowToggleOpacity(
+                    window_id="window:keyboard",
+                    component_id=ghost.id,
+                    opacity=0.01,
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":
