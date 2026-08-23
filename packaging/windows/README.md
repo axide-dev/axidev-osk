@@ -46,7 +46,7 @@ The script performs these steps:
 
 1. Builds a one-directory PyInstaller bundle under `dist\axidev-osk`.
 2. Creates or reuses `CN=Axidev OSK Development` in the current user's certificate store.
-3. Signs `axidev-osk.exe` with SHA-256.
+3. Signs `axidev-osk.exe` and `axidev-osk-resources.dll` with SHA-256.
 4. Requests one UAC confirmation for an elevated transaction helper.
 5. Replaces `C:\Program Files\Axidev OSK` and its Start Menu shortcut.
 6. Registers one Axidev accessibility application without launch arguments.
@@ -73,8 +73,28 @@ The development registration uses this stable identity:
 Axidev_AxidevOSK_Development_v1.0
 ```
 
-The registration does not modify the Windows `osk` accessibility entry.
-Microsoft's on-screen keyboard remains available as a fallback.
+The registration loads its English application name and description from
+`axidev-osk-resources.dll`. It does not modify the Windows `osk`
+accessibility entry. Microsoft's on-screen keyboard remains available as a
+fallback.
+
+## Rebuild Accessibility Resources
+
+Normal source and release installation use the committed resource DLL and do
+not need a compiler. Maintainers need Visual Studio 2022 Build Tools with the
+C++ build tools and a Windows 10 or Windows 11 SDK only when changing the
+resource strings.
+
+Run the resource build from the repository root in Windows PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows\build-resources.ps1
+```
+
+The script replaces `packaging\windows\axidev-osk-resources.dll` with a
+64-bit resource-only DLL. Packaging CI rebuilds a temporary copy and compares
+resource IDs 101 and 102 with the committed DLL instead of comparing binary
+bytes.
 
 ## Uninstall
 
@@ -100,5 +120,5 @@ accessibility entry and its current-user configuration membership.
 The development certificate is local and self-signed. Do not export it with
 its private key, commit it, or use it for public releases. Windows may run the
 normal application under the `SYSTEM` account on secure desktops. The future
-MSI must use a production Authenticode certificate, localizable registration
-resources, and its own installer signing flow.
+MSI must use a production Authenticode certificate and its own installer
+signing flow.

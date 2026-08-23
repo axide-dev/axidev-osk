@@ -28,6 +28,7 @@ $ShortcutMarkerName = "development-shortcut-pending.txt"
 $RegistrationBackupName = "development-accessibility-registration.reg"
 $RegistrationPresenceName = "development-accessibility-registration-presence.txt"
 $RegistrationName = "Axidev_AxidevOSK_Development_v1.0"
+$ResourceDllName = "axidev-osk-resources.dll"
 $RegistrationPath = Join-Path `
     "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Accessibility\ATs" `
     $RegistrationName
@@ -132,12 +133,13 @@ function Remove-RegistrationBackup([string]$Directory) {
 
 function Install-AccessibilityRegistration {
     $profile = '<HCIModel><Accommodation type="severe dexterity"/></HCIModel>'
+    $resourcePath = Join-Path $InstallPath $ResourceDllName
     Remove-Item -LiteralPath $RegistrationPath -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $RegistrationPath -Force | Out-Null
     New-ItemProperty -LiteralPath $RegistrationPath -Name "ApplicationName" `
-        -Value "Axidev OSK Development" -PropertyType String -Force | Out-Null
+        -Value "@$resourcePath,-101" -PropertyType String -Force | Out-Null
     New-ItemProperty -LiteralPath $RegistrationPath -Name "Description" `
-        -Value "Axidev OSK development on-screen keyboard." -PropertyType String -Force | Out-Null
+        -Value "@$resourcePath,-102" -PropertyType String -Force | Out-Null
     New-ItemProperty -LiteralPath $RegistrationPath -Name "ATExe" `
         -Value "axidev-osk.exe" -PropertyType String -Force | Out-Null
     New-ItemProperty -LiteralPath $RegistrationPath -Name "Profile" `
@@ -224,6 +226,24 @@ function Rollback-Installation {
     }
 }
 
+function Assert-ExpectedSignature(
+    [string]$Path,
+    [string]$Description,
+    [switch]$RequireTrusted
+) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "The staged $Description is missing."
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($null -eq $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $CertificateThumbprint) {
+        throw "The staged $Description was not signed by the expected development certificate."
+    }
+    if ($RequireTrusted -and $signature.Status -ne "Valid") {
+        throw "The staged $Description signature is not trusted: $($signature.Status)."
+    }
+}
+
 if ($Mode -eq "Uninstall") {
     if (-not $TransactionPath -or -not (Test-Path -LiteralPath $TransactionPath -PathType Container)) {
         throw "The uninstall transaction directory is missing."
@@ -280,11 +300,9 @@ if (-not $TransactionPath -or -not (Test-Path -LiteralPath $TransactionPath -Pat
 }
 
 $sourceExecutable = Join-Path $SourceDirectory "axidev-osk.exe"
-$sourceSignature = Get-AuthenticodeSignature -LiteralPath $sourceExecutable
-if ($null -eq $sourceSignature.SignerCertificate -or
-    $sourceSignature.SignerCertificate.Thumbprint -ne $CertificateThumbprint) {
-    throw "The staged executable was not signed by the expected development certificate."
-}
+$sourceResourceDll = Join-Path $SourceDirectory $ResourceDllName
+Assert-ExpectedSignature $sourceExecutable "executable"
+Assert-ExpectedSignature $sourceResourceDll "resource DLL"
 
 try {
     Import-Certificate -FilePath $CertificatePath -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
@@ -311,11 +329,10 @@ try {
     }
     New-StartMenuShortcut $ShortcutNewPath
 
-    $installedSignature = Get-AuthenticodeSignature `
-        -LiteralPath (Join-Path $NewPath "axidev-osk.exe")
-    if ($installedSignature.Status -ne "Valid") {
-        throw "The staged executable signature is not trusted: $($installedSignature.Status)."
-    }
+    Assert-ExpectedSignature `
+        (Join-Path $NewPath "axidev-osk.exe") "executable" -RequireTrusted
+    Assert-ExpectedSignature `
+        (Join-Path $NewPath $ResourceDllName) "resource DLL" -RequireTrusted
 
     Backup-AccessibilityRegistration $NewPath
     Stop-AxidevOsk

@@ -9,6 +9,7 @@ manifest = Path(SPECPATH) / "axidev-osk.manifest"
 icon_directory = repo_root / "src" / "axidev_osk" / "assets"
 icon_svg = icon_directory / "axidev-osk.svg"
 icon_ico = icon_directory / "axidev-osk.ico"
+resources_dll = Path(SPECPATH) / "axidev-osk-resources.dll"
 
 analysis = Analysis(
     [str(entrypoint)],
@@ -20,6 +21,7 @@ analysis = Analysis(
     datas=[
         (str(icon_svg), "axidev_osk/assets"),
         (str(icon_ico), "axidev_osk/assets"),
+        (str(resources_dll), "."),
     ],
     hiddenimports=collect_submodules("axidev_osk.components"),
     hookspath=[],

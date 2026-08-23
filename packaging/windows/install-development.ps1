@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $AccessibilityPath = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Accessibility"
 $AccessibilityConfigurationName = "Configuration"
 $NormalRegistrationName = "Axidev_AxidevOSK_Development_v1.0"
+$ResourceDllName = "axidev-osk-resources.dll"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
 if (-not $Python) {
@@ -36,6 +37,14 @@ $ExecutablePath = Join-Path $BundlePath "axidev-osk.exe"
 if (-not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
     throw "PyInstaller did not create $ExecutablePath."
 }
+$BundledResourcePath = Join-Path $BundlePath $ResourceDllName
+if (-not (Test-Path -LiteralPath $BundledResourcePath -PathType Leaf)) {
+    $CollectedResourcePath = Join-Path $BundlePath "_internal\$ResourceDllName"
+    if (-not (Test-Path -LiteralPath $CollectedResourcePath -PathType Leaf)) {
+        throw "PyInstaller did not collect $ResourceDllName."
+    }
+    Move-Item -LiteralPath $CollectedResourcePath -Destination $BundledResourcePath
+}
 
 $CertificateSubject = "CN=Axidev OSK Development"
 $Certificate = Get-ChildItem -Path "Cert:\CurrentUser\My" -CodeSigningCert |
@@ -58,14 +67,19 @@ if ($null -eq $Certificate) {
         -NotAfter (Get-Date).AddYears(2)
 }
 
-$Signature = Set-AuthenticodeSignature `
-    -LiteralPath $ExecutablePath `
-    -Certificate $Certificate `
-    -HashAlgorithm SHA256 `
-    -IncludeChain All
-if ($null -eq $Signature.SignerCertificate -or
-    $Signature.SignerCertificate.Thumbprint -ne $Certificate.Thumbprint) {
-    throw "PowerShell did not sign the executable with the expected certificate."
+foreach ($signingTarget in @(
+    [PSCustomObject]@{ Path = $ExecutablePath; Description = "executable" },
+    [PSCustomObject]@{ Path = $BundledResourcePath; Description = "resource DLL" }
+)) {
+    $Signature = Set-AuthenticodeSignature `
+        -LiteralPath $signingTarget.Path `
+        -Certificate $Certificate `
+        -HashAlgorithm SHA256 `
+        -IncludeChain All
+    if ($null -eq $Signature.SignerCertificate -or
+        $Signature.SignerCertificate.Thumbprint -ne $Certificate.Thumbprint) {
+        throw "PowerShell did not sign the $($signingTarget.Description) with the expected certificate."
+    }
 }
 
 if (-not ([System.Management.Automation.PSTypeName]"AxidevTokenInfo").Type) {
