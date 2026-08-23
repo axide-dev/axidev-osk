@@ -224,6 +224,7 @@ upgrade_action() {
     if [ -n "${target_user}" ]; then
         arguments+=(--user "${target_user}")
     fi
+    flock -u 9
     local status=0
     bash "${temp}/${INSTALLER_NAME}" "${arguments[@]}" || status=$?
     rm -rf "${temp}"
@@ -232,6 +233,9 @@ upgrade_action() {
 
 rollback_action() {
     [ -d "${BACKUP_PREFIX}" ] || die "No retained payload is available."
+    [ -d "${INSTALL_PREFIX}" ] || die "The active payload is missing."
+    "${BACKUP_PREFIX}/bin/axidev-osk" --verify-runtime \
+        || die "The retained payload failed runtime verification."
     local temporary="/opt/axidev-osk.rollback.$$"
     [ ! -e "${temporary}" ] || die "Rollback temporary path already exists."
     mv "${INSTALL_PREFIX}" "${temporary}"
@@ -240,8 +244,6 @@ rollback_action() {
         die "Could not activate the retained payload."
     fi
     mv "${temporary}" "${BACKUP_PREFIX}"
-    "${INSTALL_PREFIX}/bin/axidev-osk" --verify-runtime \
-        || warn "The retained payload failed runtime verification."
     install_shared_files
     log "Rollback complete."
 }

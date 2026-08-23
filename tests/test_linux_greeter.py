@@ -89,9 +89,14 @@ class GreetdConfigTests(unittest.TestCase):
                     Path("/usr/local/bin/axidev-osk")
                 )
                 linux_greeter._install_manager(
-                    "greetd", prepared_account, Path("/usr/local/bin/axidev-osk"), details
+                    "greetd",
+                    linux_greeter._manager_adapter("greetd"),
+                    prepared_account,
+                    Path("/usr/local/bin/axidev-osk"),
+                    details,
                 )
                 state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertNotIn("line_index", state)
                 self.assertEqual(
                     linux_greeter._parse_greetd_config(config.read_text(encoding="utf-8")).command,
                     linux_greeter.MANAGED_GREETD_COMMAND,
@@ -104,15 +109,19 @@ class GreetdConfigTests(unittest.TestCase):
                     managed.index(managed_config.original_line),
                 )
 
-                linux_greeter._remove_manager("greetd", state)
+                config.write_text("# added later\n" + managed, encoding="utf-8")
+
+                linux_greeter._manager_adapter("greetd").remove(
+                    Path("/usr/local/bin/axidev-osk"), state
+                )
 
             self.assertEqual(prepared_account.name, account.name)
-            self.assertEqual(config.read_text(encoding="utf-8"), self.CONFIG)
+            self.assertEqual(config.read_text(encoding="utf-8"), "# added later\n" + self.CONFIG)
 
 
 class NativeAdapterTests(unittest.TestCase):
     def test_plasma_service_stops_with_greeter_target(self) -> None:
-        text = linux_greeter._plasma_service_text(Path("/opt/axidev-osk/bin/axidev-osk"))
+        text = linux_greeter._plasma_service_text()
 
         self.assertIn("PartOf=plasma-login-wayland.target", text)
         self.assertIn(str(linux_greeter.NATIVE_SUPERVISOR_PATH), text)
@@ -203,6 +212,15 @@ class DisplayDiscoveryTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_process_identity_allows_spaces_in_command_name(self) -> None:
+        stat = "123 (greeter process) S " + " ".join(str(value) for value in range(4, 30))
+        with patch.object(linux_greeter, "Path") as path:
+            path.return_value.read_text.return_value = stat
+
+            identity = linux_greeter._process_identity(123)
+
+        self.assertEqual(identity, "22")
+
     def test_keyboard_failure_uses_exponential_backoff(self) -> None:
         first = Mock()
         first.poll.return_value = 7

@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     release = commands.add_parser("release", help="assemble Linux release assets")
     release.add_argument("--output", type=str)
     release.add_argument("--engine", default=os.environ.get("DOCKER", "docker"))
+    release.add_argument("--release-version", type=str, help=argparse.SUPPRESS)
     release.set_defaults(handler=build_release)
 
     vm = commands.add_parser("vm", help="manage interactive Linux test machines")

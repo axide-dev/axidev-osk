@@ -207,16 +207,6 @@ def _install_python_tree(python_root: Path, temp: Path) -> None:
     shutil.rmtree(python_root / "bin", ignore_errors=True)
 
 
-def _is_elf(path: Path) -> bool:
-    if not path.is_file():
-        return False
-    try:
-        with path.open("rb") as stream:
-            return stream.read(4) == ELF_MAGIC
-    except OSError as exc:
-        raise BuildError(f"cannot inspect {path}: {exc}") from exc
-
-
 def _build_launcher(lock: dict[str, Any], payload: Path, temp: Path) -> None:
     target_dir = temp / "cargo-target"
     env = os.environ.copy()
@@ -404,9 +394,16 @@ def _repository_source_archives(output: Path, version: str) -> tuple[Path, Path]
 
 def build_release(namespace: argparse.Namespace) -> int:
     output = _output_root(namespace.output)
+    version = project_version()
+    release_version = getattr(namespace, "release_version", None)
+    if release_version is not None:
+        tagged_version = release_version.removeprefix("v")
+        if tagged_version != version:
+            raise BuildError(
+                f"release tag {release_version!r} does not match project version {version!r}"
+            )
     payload_namespace = argparse.Namespace(output=str(output), engine=namespace.engine, inner=False)
     build_payload(payload_namespace)
-    version = project_version()
     assets = output / "release-assets"
     assets.mkdir(parents=True, exist_ok=True)
 

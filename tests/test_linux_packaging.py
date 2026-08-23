@@ -21,6 +21,7 @@ from common import sha256  # noqa: E402
 
 
 LAUNCH_PATH = BUILD_SUPPORT.parent / "resources" / "launch.py"
+INSTALLER_PATH = BUILD_SUPPORT.parent / "install.sh"
 LAUNCH_SPEC = importlib.util.spec_from_file_location("axidev_osk_linux_launch", LAUNCH_PATH)
 assert LAUNCH_SPEC is not None and LAUNCH_SPEC.loader is not None
 launch = importlib.util.module_from_spec(LAUNCH_SPEC)
@@ -28,6 +29,31 @@ LAUNCH_SPEC.loader.exec_module(launch)
 
 
 class LinuxPackagingTests(unittest.TestCase):
+    def test_vm_docs_require_visible_manual_acceptance(self) -> None:
+        documentation = (BUILD_SUPPORT.parent / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("manual acceptance test", documentation)
+        self.assertIn("Do not replace the GTK display with `-display none`", documentation)
+        self.assertIn("it must report the profile as untested", documentation)
+        self.assertIn("GitHub issue #35", documentation)
+        self.assertIn("hides the keyboard in the workspace switcher", documentation)
+
+    def test_upgrade_releases_parent_lock_before_starting_new_installer(self) -> None:
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+
+        self.assertLess(
+            installer.index("flock -u 9"),
+            installer.index('bash "${temp}/${INSTALLER_NAME}"'),
+        )
+
+    def test_rollback_verifies_retained_payload_before_swap(self) -> None:
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+
+        self.assertLess(
+            installer.index('"${BACKUP_PREFIX}/bin/axidev-osk" --verify-runtime'),
+            installer.index('mv "${INSTALL_PREFIX}" "${temporary}"'),
+        )
+
     def test_vm_cloud_config_authorizes_test_key(self) -> None:
         public_key = "ssh-ed25519 test-key test-comment"
 
@@ -200,6 +226,21 @@ class LinuxPackagingTests(unittest.TestCase):
                 "axidev-osk-windows-install.ps1",
             ):
                 self.assertIn(f"{sha256(assets / filename)}  {filename}\n", manifest)
+
+    def test_release_tag_must_match_project_version(self) -> None:
+        namespace = SimpleNamespace(
+            output=None,
+            engine="docker",
+            release_version="v2.0.0",
+        )
+        with (
+            patch.object(payload, "project_version", return_value="1.2.3"),
+            patch.object(payload, "build_payload") as build_payload,
+            self.assertRaisesRegex(payload.BuildError, "does not match"),
+        ):
+            payload.build_release(namespace)
+
+        build_payload.assert_not_called()
 
 
 if __name__ == "__main__":

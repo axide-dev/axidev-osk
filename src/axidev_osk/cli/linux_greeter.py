@@ -47,18 +47,6 @@ RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0)
 HEALTHY_RUNTIME_SECONDS = 60.0
 POLL_SECONDS = 0.1
 
-MANAGER_UNITS = {
-    "plasma-login": "plasmalogin.service",
-    "greetd": "greetd.service",
-    "lightdm": "lightdm.service",
-}
-MANAGER_LABELS = {
-    "plasma-login": "Plasma Login Manager",
-    "greetd": "greetd",
-    "lightdm": "LightDM",
-}
-
-
 @dataclass(frozen=True)
 class GreetdConfig:
     """The exact greetd command assignment that setup may replace."""
@@ -115,11 +103,21 @@ class _FileTransaction:
                 pass
 
 
+@dataclass(frozen=True)
+class _ManagerAdapter:
+    label: str
+    unit: str
+    prepare: Callable[[Path], tuple[linux.Account, dict[str, Any]]]
+    install: Callable[[_FileTransaction, Path, dict[str, Any]], dict[str, Any]]
+    checks: Callable[[Path, dict[str, Any]], list[tuple[str, bool]]]
+    remove: Callable[[Path, dict[str, Any]], None]
+
+
 def register_runtime_commands(commands: argparse._SubParsersAction[Any]) -> None:
     """Register internal commands used by display-manager startup hooks."""
 
     keyboard = commands.add_parser("run-greeter-keyboard", help=argparse.SUPPRESS)
-    keyboard.add_argument("--manager", choices=tuple(MANAGER_UNITS), required=True)
+    keyboard.add_argument("--manager", choices=tuple(_MANAGER_ADAPTERS), required=True)
     keyboard.add_argument("--parent-pid", type=int)
     keyboard.add_argument("--discover-display", action="store_true")
     keyboard.set_defaults(handler=run_runtime_command, runtime="keyboard")
@@ -166,19 +164,17 @@ def _setup(requested_manager: str | None) -> int:
         raise linux.LinuxSetupError("managed greeter state is incomplete; remove it before setup")
 
     manager = requested_manager or _select_manager(_installed_managers())
-    if not _manager_installed(manager):
-        raise linux.LinuxSetupError(f"{MANAGER_LABELS[manager]} is not installed")
+    adapter = _manager_adapter(manager)
+    if not _manager_installed(adapter):
+        raise linux.LinuxSetupError(f"{adapter.label} is not installed")
 
     launcher = _installed_launcher()
-    if manager == "greetd":
-        account, details = _prepare_greetd(launcher)
-    else:
-        account, details = _prepare_native(manager, launcher)
+    account, details = adapter.prepare(launcher)
 
     linux._setup_permissions(account)
-    _install_manager(manager, account, launcher, details)
+    _install_manager(manager, adapter, account, launcher, details)
     print(
-        f"Greeter startup is configured for {MANAGER_LABELS[manager]}. "
+        f"Greeter startup is configured for {adapter.label}. "
         "Reboot or restart the display manager to activate it."
     )
     return 0
@@ -192,9 +188,10 @@ def _status() -> int:
 
 def _status_state(state: dict[str, Any]) -> int:
     manager = _state_manager(state)
+    adapter = _manager_adapter(manager)
     account = linux._resolve_account(_state_string(state, "account"), require_home=False)
-    checks = [("manager installed", _manager_installed(manager))]
-    checks.extend(_manager_checks(manager, state))
+    checks = [("manager installed", _manager_installed(adapter))]
+    checks.extend(adapter.checks(_runtime_launcher(), state))
     for label, passed in checks:
         print(f"{'ok' if passed else 'missing'}: {label}")
     permission_status = linux._status_permissions(account)
@@ -207,7 +204,8 @@ def _remove() -> int:
         print("Greeter startup is not configured.")
         return 0
     manager = _state_manager(state)
-    _remove_manager(manager, state)
+    adapter = _manager_adapter(manager)
+    adapter.remove(_runtime_launcher(), state)
     try:
         STATE_PATH.unlink()
         STATE_PATH.parent.rmdir()
@@ -217,26 +215,30 @@ def _remove() -> int:
         if STATE_PATH.exists():
             raise linux.LinuxSetupError(f"cannot remove {STATE_PATH}: {exc}") from exc
     print(
-        f"Greeter startup is removed for {MANAGER_LABELS[manager]}. "
+        f"Greeter startup is removed for {adapter.label}. "
         "Shared uinput group memberships were preserved."
     )
     return 0
 
 
 def _installed_managers() -> list[str]:
-    managers = [manager for manager in MANAGER_UNITS if _manager_installed(manager)]
+    managers = [
+        manager
+        for manager, adapter in _MANAGER_ADAPTERS.items()
+        if _manager_installed(adapter)
+    ]
     if not managers:
         raise linux.LinuxSetupError("no supported display manager is installed")
     return managers
 
 
-def _manager_installed(manager: str) -> bool:
+def _manager_installed(adapter: _ManagerAdapter) -> bool:
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         return False
     try:
         completed = subprocess.run(
-            [systemctl, "show", "--property=LoadState", "--value", MANAGER_UNITS[manager]],
+            [systemctl, "show", "--property=LoadState", "--value", adapter.unit],
             check=False,
             capture_output=True,
             text=True,
@@ -264,7 +266,7 @@ def _select_manager(
     while True:
         for index, manager in enumerate(managers):
             marker = ">" if index == selected else " "
-            output.write(f"\r\x1b[2K{marker} {MANAGER_LABELS[manager]}\n")
+            output.write(f"\r\x1b[2K{marker} {_manager_adapter(manager).label}\n")
         output.write(f"\x1b[{len(managers)}A")
         output.flush()
         key = key_reader()
@@ -313,22 +315,22 @@ def _installed_launcher() -> Path:
     return path
 
 
-def _prepare_native(manager: str, launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
-    account_names = {"plasma-login": "plasmalogin", "lightdm": "lightdm"}
-    account = linux._resolve_account(account_names[manager], require_home=False)
-    details: dict[str, Any] = {}
-    if manager == "plasma-login":
-        _require_compatible_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-        _require_compatible_file(PLASMA_SERVICE_PATH, _plasma_service_text(launcher))
-        _require_compatible_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-    else:
-        wrapper = _lightdm_wrapper_text(launcher)
-        _require_compatible_file(LIGHTDM_WRAPPER_PATH, wrapper)
-        _require_compatible_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
-        effective = _lightdm_effective_wrapper()
-        if effective not in {None, str(LIGHTDM_WRAPPER_PATH)}:
-            raise linux.LinuxSetupError(f"LightDM already uses a greeter wrapper: {effective}")
-    return account, details
+def _prepare_plasma(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
+    account = linux._resolve_account("plasmalogin", require_home=False)
+    _require_compatible_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+    _require_compatible_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+    _require_compatible_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+    return account, {}
+
+
+def _prepare_lightdm(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
+    account = linux._resolve_account("lightdm", require_home=False)
+    _require_compatible_file(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher))
+    _require_compatible_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
+    effective = _lightdm_effective_wrapper()
+    if effective not in {None, str(LIGHTDM_WRAPPER_PATH)}:
+        raise linux.LinuxSetupError(f"LightDM already uses a greeter wrapper: {effective}")
+    return account, {}
 
 
 def _prepare_greetd(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
@@ -352,13 +354,13 @@ def _prepare_greetd(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
         "managed_text": "".join(lines),
         "original_command": parsed.command,
         "original_line": parsed.original_line,
-        "line_index": parsed.line_index + 1,
         "wrapper_text": _greetd_wrapper_text(launcher, parsed.command),
     }
 
 
 def _install_manager(
     manager: str,
+    adapter: _ManagerAdapter,
     account: linux.Account,
     launcher: Path,
     details: dict[str, Any],
@@ -366,46 +368,73 @@ def _install_manager(
     state: dict[str, Any] = {"schema": 1, "manager": manager, "account": account.name}
     transaction = _FileTransaction()
     try:
-        if manager == "plasma-login":
-            transaction.write(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher), 0o755)
-            transaction.write(PLASMA_SERVICE_PATH, _plasma_service_text(launcher))
-            transaction.symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-        elif manager == "lightdm":
-            transaction.write(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher), 0o755)
-            transaction.write(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
-            effective = _lightdm_effective_wrapper()
-            if effective != str(LIGHTDM_WRAPPER_PATH):
-                raise linux.LinuxSetupError("LightDM did not select the Axidev greeter wrapper")
-        else:
-            transaction.write(GREETD_WRAPPER_PATH, _state_string(details, "wrapper_text"), 0o755)
-            transaction.write(GREETD_CONFIG_PATH, _state_string(details, "managed_text"))
-            state.update(
-                original_command=_state_string(details, "original_command"),
-                original_line=_state_string(details, "original_line"),
-                line_index=details["line_index"],
-            )
+        state.update(adapter.install(transaction, launcher, details))
         transaction.write(STATE_PATH, json.dumps(state, indent=2, sort_keys=True) + "\n", 0o644)
     except Exception:
         transaction.rollback()
         raise
 
 
-def _manager_checks(manager: str, state: dict[str, Any]) -> list[tuple[str, bool]]:
-    launcher = _runtime_launcher()
-    if manager == "plasma-login":
-        service_ok = linux._read_text(PLASMA_SERVICE_PATH) == _plasma_service_text(launcher)
-        link_ok = PLASMA_WANTS_PATH.is_symlink() and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH
-        return [
-            (str(NATIVE_SUPERVISOR_PATH), linux._read_text(NATIVE_SUPERVISOR_PATH) == _native_supervisor_text(launcher)),
-            (str(PLASMA_SERVICE_PATH), service_ok),
-            (str(PLASMA_WANTS_PATH), link_ok),
-        ]
-    if manager == "lightdm":
-        return [
-            (str(LIGHTDM_WRAPPER_PATH), linux._read_text(LIGHTDM_WRAPPER_PATH) == _lightdm_wrapper_text(launcher)),
-            (str(LIGHTDM_CONFIG_PATH), linux._read_text(LIGHTDM_CONFIG_PATH) == _lightdm_config_text()),
-            ("effective LightDM wrapper", _lightdm_effective_wrapper() == str(LIGHTDM_WRAPPER_PATH)),
-        ]
+def _install_plasma(
+    transaction: _FileTransaction,
+    launcher: Path,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    del details
+    transaction.write(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher), 0o755)
+    transaction.write(PLASMA_SERVICE_PATH, _plasma_service_text())
+    transaction.symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+    return {}
+
+
+def _install_lightdm(
+    transaction: _FileTransaction,
+    launcher: Path,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    del details
+    transaction.write(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher), 0o755)
+    transaction.write(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
+    if _lightdm_effective_wrapper() != str(LIGHTDM_WRAPPER_PATH):
+        raise linux.LinuxSetupError("LightDM did not select the Axidev greeter wrapper")
+    return {}
+
+
+def _install_greetd(
+    transaction: _FileTransaction,
+    launcher: Path,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    del launcher
+    transaction.write(GREETD_WRAPPER_PATH, _state_string(details, "wrapper_text"), 0o755)
+    transaction.write(GREETD_CONFIG_PATH, _state_string(details, "managed_text"))
+    return {
+        "original_command": _state_string(details, "original_command"),
+        "original_line": _state_string(details, "original_line"),
+    }
+
+
+def _check_plasma(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool]]:
+    del state
+    service_ok = linux._read_text(PLASMA_SERVICE_PATH) == _plasma_service_text()
+    link_ok = PLASMA_WANTS_PATH.is_symlink() and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH
+    return [
+        (str(NATIVE_SUPERVISOR_PATH), linux._read_text(NATIVE_SUPERVISOR_PATH) == _native_supervisor_text(launcher)),
+        (str(PLASMA_SERVICE_PATH), service_ok),
+        (str(PLASMA_WANTS_PATH), link_ok),
+    ]
+
+
+def _check_lightdm(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool]]:
+    del state
+    return [
+        (str(LIGHTDM_WRAPPER_PATH), linux._read_text(LIGHTDM_WRAPPER_PATH) == _lightdm_wrapper_text(launcher)),
+        (str(LIGHTDM_CONFIG_PATH), linux._read_text(LIGHTDM_CONFIG_PATH) == _lightdm_config_text()),
+        ("effective LightDM wrapper", _lightdm_effective_wrapper() == str(LIGHTDM_WRAPPER_PATH)),
+    ]
+
+
+def _check_greetd(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool]]:
     config = linux._read_text(GREETD_CONFIG_PATH)
     managed = False
     if config is not None:
@@ -422,48 +451,83 @@ def _manager_checks(manager: str, state: dict[str, Any]) -> list[tuple[str, bool
     ]
 
 
-def _remove_manager(manager: str, state: dict[str, Any]) -> None:
-    launcher = _runtime_launcher()
-    if manager == "plasma-login":
-        _require_removable_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-        _require_removable_file(PLASMA_SERVICE_PATH, _plasma_service_text(launcher))
-        _require_removable_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-        _remove_owned_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-        linux._remove_owned_file(PLASMA_SERVICE_PATH, _plasma_service_text(launcher))
-        linux._remove_owned_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-    elif manager == "lightdm":
-        _require_removable_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
-        _require_removable_file(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher))
-        linux._remove_owned_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
-        linux._remove_owned_file(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher))
-    else:
-        config = linux._read_text(GREETD_CONFIG_PATH)
-        if config is None:
-            raise linux.LinuxSetupError(f"greetd config does not exist: {GREETD_CONFIG_PATH}")
-        parsed = _parse_greetd_config(config)
-        if parsed.command != MANAGED_GREETD_COMMAND:
-            raise linux.LinuxSetupError("refusing to replace a changed greetd command")
-        original_line = _state_string(state, "original_line")
-        line_index = state.get("line_index")
-        lines = config.splitlines(keepends=True)
-        if not isinstance(line_index, int) or line_index != parsed.line_index:
-            raise linux.LinuxSetupError("refusing to restore a moved greetd command")
-        indentation = re.match(r"^\s*", parsed.original_line).group(0)  # type: ignore[union-attr]
-        comment_newline = parsed.newline or "\n"
-        expected_comment = f"{indentation}{MANAGED_GREETD_COMMENT}{comment_newline}"
-        if line_index == 0 or lines[line_index - 1] != expected_comment:
-            raise linux.LinuxSetupError("refusing to remove a changed greetd management comment")
-        expected_wrapper = _greetd_wrapper_text(
-            launcher, _state_string(state, "original_command")
-        )
-        _require_removable_file(GREETD_WRAPPER_PATH, expected_wrapper)
-        lines[line_index - 1 : line_index + 1] = [original_line]
-        linux._write_atomic(GREETD_CONFIG_PATH, "".join(lines), 0o644)
-        linux._remove_owned_file(GREETD_WRAPPER_PATH, expected_wrapper)
+def _remove_plasma(launcher: Path, state: dict[str, Any]) -> None:
+    del state
+    _require_removable_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+    _require_removable_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+    _require_removable_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+    _remove_owned_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+    linux._remove_owned_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+    linux._remove_owned_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
 
 
-def _plasma_service_text(launcher: Path) -> str:
-    del launcher
+def _remove_lightdm(launcher: Path, state: dict[str, Any]) -> None:
+    del state
+    _require_removable_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
+    _require_removable_file(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher))
+    linux._remove_owned_file(LIGHTDM_CONFIG_PATH, _lightdm_config_text())
+    linux._remove_owned_file(LIGHTDM_WRAPPER_PATH, _lightdm_wrapper_text(launcher))
+
+
+def _remove_greetd(launcher: Path, state: dict[str, Any]) -> None:
+    config = linux._read_text(GREETD_CONFIG_PATH)
+    if config is None:
+        raise linux.LinuxSetupError(f"greetd config does not exist: {GREETD_CONFIG_PATH}")
+    parsed = _parse_greetd_config(config)
+    if parsed.command != MANAGED_GREETD_COMMAND:
+        raise linux.LinuxSetupError("refusing to replace a changed greetd command")
+    original_line = _state_string(state, "original_line")
+    lines = config.splitlines(keepends=True)
+    indentation = re.match(r"^\s*", parsed.original_line).group(0)  # type: ignore[union-attr]
+    comment_newline = parsed.newline or "\n"
+    expected_comment = f"{indentation}{MANAGED_GREETD_COMMENT}{comment_newline}"
+    if parsed.line_index == 0 or lines[parsed.line_index - 1] != expected_comment:
+        raise linux.LinuxSetupError("refusing to remove a changed greetd management comment")
+    expected_wrapper = _greetd_wrapper_text(
+        launcher, _state_string(state, "original_command")
+    )
+    _require_removable_file(GREETD_WRAPPER_PATH, expected_wrapper)
+    lines[parsed.line_index - 1 : parsed.line_index + 1] = [original_line]
+    linux._write_atomic(GREETD_CONFIG_PATH, "".join(lines), 0o644)
+    linux._remove_owned_file(GREETD_WRAPPER_PATH, expected_wrapper)
+
+
+_MANAGER_ADAPTERS = {
+    "plasma-login": _ManagerAdapter(
+        "Plasma Login Manager",
+        "plasmalogin.service",
+        _prepare_plasma,
+        _install_plasma,
+        _check_plasma,
+        _remove_plasma,
+    ),
+    "greetd": _ManagerAdapter(
+        "greetd",
+        "greetd.service",
+        _prepare_greetd,
+        _install_greetd,
+        _check_greetd,
+        _remove_greetd,
+    ),
+    "lightdm": _ManagerAdapter(
+        "LightDM",
+        "lightdm.service",
+        _prepare_lightdm,
+        _install_lightdm,
+        _check_lightdm,
+        _remove_lightdm,
+    ),
+}
+
+
+def _manager_adapter(manager: str) -> _ManagerAdapter:
+    try:
+        return _MANAGER_ADAPTERS[manager]
+    except KeyError as exc:
+        raise linux.LinuxSetupError(f"unsupported managed greeter: {manager}") from exc
+
+
+def _plasma_service_text() -> str:
     return (
         "[Unit]\n"
         "Description=Axidev OSK login-screen keyboard\n"
@@ -699,8 +763,7 @@ def _load_state(*, required: bool) -> dict[str, Any] | None:
 
 def _state_manager(state: dict[str, Any]) -> str:
     manager = _state_string(state, "manager")
-    if manager not in MANAGER_UNITS:
-        raise linux.LinuxSetupError(f"unsupported managed greeter: {manager}")
+    _manager_adapter(manager)
     return manager
 
 
@@ -751,7 +814,7 @@ class _KeyboardSupervisor:
 
     def stop(self) -> None:
         if self.process is not None:
-            _terminate_process(self.process, process_group=False)
+            _terminate_process(self.process)
             self.process = None
 
 
@@ -819,10 +882,14 @@ def _run_attached_supervisor(
 
 def _process_identity(pid: int) -> str | None:
     try:
-        fields = Path(f"/proc/{pid}/stat").read_text(encoding="ascii").split()
+        contents = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
     except OSError:
         return None
-    return fields[21] if len(fields) > 21 else None
+    command_end = contents.rfind(")")
+    if command_end < 0:
+        return None
+    fields = contents[command_end + 1 :].split()
+    return fields[19] if len(fields) > 19 else None
 
 
 def _discover_display_environment(root_pid: int) -> dict[str, str] | None:
@@ -917,21 +984,15 @@ def _restore_signal_handlers(previous: dict[int, Any]) -> None:
         signal.signal(signum, handler)
 
 
-def _terminate_process(process: subprocess.Popen[Any], *, process_group: bool) -> None:
+def _terminate_process(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
     try:
-        if process_group:
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
+        process.terminate()
         process.wait(timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         try:
-            if process_group:
-                os.killpg(process.pid, signal.SIGKILL)
-            else:
-                process.kill()
+            process.kill()
             process.wait(timeout=5)
         except (OSError, subprocess.TimeoutExpired):
             pass

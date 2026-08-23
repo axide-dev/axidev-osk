@@ -84,21 +84,24 @@ The release directory contains versioned and stable payload archives, versioned 
 
 ## Interactive Linux Checks
 
-The QEMU helper manages three profiles:
+The QEMU helper manages four profiles:
 
 - `hyprland`: Arch Linux with Hyprland
 - `kde`: Fedora with KDE Plasma
 - `gnome`: Fedora with GNOME
+- `lightdm-x11`: Arch Linux with LightDM, Xorg, and Xfce
 
 Prepare, run, or reset a profile:
 
 ```bash
 python packaging/build.py linux vm prepare hyprland
-python packaging/build.py linux vm run hyprland --share dist/linux
+python packaging/build.py linux vm run hyprland
 python packaging/build.py linux vm reset hyprland
 ```
 
-Replace `hyprland` with `kde` or `gnome`. The runner uses KVM when available and falls back to software emulation.
+Replace `hyprland` with `kde`, `gnome`, or `lightdm-x11`. The runner uses KVM when available and falls back to software emulation.
+
+Every profile is a manual acceptance test. Run it with the GTK QEMU window visible and have a person verify the login screen or desktop, the rendered keyboard, and real key input. SSH access, successful cloud-init, an active service, or a running Axidev OSK process are diagnostics only; none of them make a profile pass. Automation may prepare the machine, open the window, and collect diagnostics, but the profile remains untested until the person using the window records the result.
 
 ## Other Packages
 

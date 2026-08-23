@@ -177,7 +177,7 @@ The current VM coverage verifies Plasma Login Manager and greetd on Wayland. The
 
 ## Failure Behavior
 
-A bad signature or checksum stops before extraction.
+A bad checksum stops before extraction. Checksums detect corruption but do not authenticate the publisher because the assets and manifest use the same download channel.
 
 An unsafe archive path stops before extraction.
 
@@ -187,7 +187,7 @@ A failed activation restores the retained payload.
 
 The installer keeps the previous successful payload at `/opt/axidev-osk.old` until another install replaces it.
 
-Rollback warns if the retained payload fails runtime verification, but it leaves the swap complete so the operator can inspect or reverse it.
+Rollback verifies the retained payload before changing the active installation. A failed runtime check leaves both payloads in their existing locations.
 
 Uninstall stops when permission or autostart cleanup fails. `uninstall --force` removes owned files after reporting incomplete cleanup.
 
@@ -233,10 +233,14 @@ python packaging/build.py linux vm reset hyprland
 
 Available profiles are `hyprland`, `kde`, `gnome`, and `lightdm-x11`. The Hyprland and KDE profiles exercise Wayland greeters. The GNOME profile exercises user-session autostart. `lightdm-x11` installs LightDM, its GTK greeter, Xorg, and Xfce on Arch Linux. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
 
+The `gnome` profile tests desktop-session autostart only. GDM stays above external application windows and hides Axidev OSK on the login screen ([GitHub issue #35](https://github.com/axide-dev/axidev-osk/issues/35)); GNOME also hides the keyboard in the workspace switcher.
+
 QEMU exposes the cached source through a read-only 9p device during provisioning. Cloud-init mounts it temporarily, runs the lifecycle installer, and unmounts it before reboot. The installed application runs from `/opt/axidev-osk` through `/usr/local/bin/axidev-osk`; the guest does not retain a host payload mount.
 
 Hyprland, KDE, and `lightdm-x11` enable login-screen startup through the installed application command line. Hyprland keeps its existing greetd session command, KDE uses Plasma Login Manager, and `lightdm-x11` uses LightDM. KDE, GNOME, and `lightdm-x11` also keep the selected user's separate XDG autostart entry.
 
 The runner opens a GTK QEMU window. It uses KVM when `/dev/kvm` is accessible and otherwise uses slower software emulation.
 
-QEMU testing is interactive. It verifies the installer, host package set, and compositor behavior that static container checks cannot observe.
+QEMU testing is a manual acceptance test. Keep the GTK QEMU window visible and have a person test every profile. The person must verify that the expected login screen or desktop appears, Axidev OSK renders in the correct place, and pressing its keys enters the expected input in a focused field.
+
+A profile does not pass because SSH works, cloud-init finishes, configuration status reports `ok`, a display-manager service is active, or an Axidev OSK process exists. Those checks are diagnostics only and cannot prove rendering or interaction behavior. Automation may prepare the machine, open the window, and collect diagnostics, but it must report the profile as untested until the person using the window records a pass or failure. Do not replace the GTK display with `-display none` for an acceptance test.
