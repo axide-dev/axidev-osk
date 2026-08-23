@@ -1,6 +1,3 @@
-Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
-Every call here is inayayousfi's, and no agent acted on its own.
-
 # Packaging
 
 This directory contains Axidev OSK installers, native package recipes, build support, and platform resources.
@@ -100,6 +97,8 @@ python packaging/build.py linux vm reset hyprland
 ```
 
 Replace `hyprland` with `kde`, `gnome`, or `lightdm-x11`. The runner uses KVM when available and falls back to software emulation.
+
+`vm prepare` always recreates the profile's writable disk so the next run installs the selected payload from a clean image. It preserves the downloaded base image cache.
 
 Every profile is a manual acceptance test. Run it with the GTK QEMU window visible and have a person verify the login screen or desktop, the rendered keyboard, and real key input. SSH access, successful cloud-init, an active service, or a running Axidev OSK process are diagnostics only; none of them make a profile pass. Automation may prepare the machine, open the window, and collect diagnostics, but the profile remains untested until the person using the window records the result.
 

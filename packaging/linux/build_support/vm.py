@@ -225,22 +225,23 @@ def prepare_vm(namespace: argparse.Namespace) -> int:
     base, disk, seed = _paths(namespace.profile, details)
     base = download(details["url"], base, details["sha256"])
     disk.parent.mkdir(parents=True, exist_ok=True)
-
-    if not disk.exists():
-        run(
-            [
-                "qemu-img",
-                "create",
-                "-f",
-                "qcow2",
-                "-F",
-                "qcow2",
-                "-b",
-                str(base),
-                str(disk),
-                "80G",
-            ]
-        )
+    if disk.exists():
+        print(f"recreating {namespace.profile}: {disk}")
+    _clear_vm_boot_state(disk, seed)
+    run(
+        [
+            "qemu-img",
+            "create",
+            "-f",
+            "qcow2",
+            "-F",
+            "qcow2",
+            "-b",
+            str(base),
+            str(disk),
+            "80G",
+        ]
+    )
 
     cloud_dir = disk.parent / "cloud-init"
     cloud_dir.mkdir(exist_ok=True)
@@ -256,6 +257,12 @@ def prepare_vm(namespace: argparse.Namespace) -> int:
     run(["cloud-localds", str(seed), str(user_data), str(meta_data)])
     print(f"prepared {namespace.profile}: {disk}")
     return 0
+
+
+def _clear_vm_boot_state(disk: Path, seed: Path) -> None:
+    for path in (disk, seed, disk.parent / "known_hosts"):
+        path.unlink(missing_ok=True)
+    shutil.rmtree(disk.parent / "cloud-init", ignore_errors=True)
 
 
 def _kvm_arguments() -> list[str]:
@@ -341,9 +348,7 @@ def ssh_vm(namespace: argparse.Namespace) -> int:
 def reset_vm(namespace: argparse.Namespace) -> int:
     details = _profile(namespace.profile)
     _, disk, seed = _paths(namespace.profile, details)
-    for path in (disk, seed, disk.parent / "known_hosts"):
-        path.unlink(missing_ok=True)
-    shutil.rmtree(disk.parent / "cloud-init", ignore_errors=True)
+    _clear_vm_boot_state(disk, seed)
     shutil.rmtree(disk.parent / INSTALL_SOURCE_NAME, ignore_errors=True)
     print(f"reset {namespace.profile}")
     return 0

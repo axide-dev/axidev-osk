@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tarfile
 import unittest
@@ -22,6 +23,7 @@ from common import sha256  # noqa: E402
 
 LAUNCH_PATH = BUILD_SUPPORT.parent / "resources" / "launch.py"
 INSTALLER_PATH = BUILD_SUPPORT.parent / "install.sh"
+SOURCE_INSTALLER_PATH = BUILD_SUPPORT.parent / "install-from-source.sh"
 LAUNCH_SPEC = importlib.util.spec_from_file_location("axidev_osk_linux_launch", LAUNCH_PATH)
 assert LAUNCH_SPEC is not None and LAUNCH_SPEC.loader is not None
 launch = importlib.util.module_from_spec(LAUNCH_SPEC)
@@ -29,6 +31,45 @@ LAUNCH_SPEC.loader.exec_module(launch)
 
 
 class LinuxPackagingTests(unittest.TestCase):
+    def test_source_install_preserves_the_invoking_user(self) -> None:
+        installer = SOURCE_INSTALLER_PATH.read_text(encoding="utf-8")
+        documentation = (BUILD_SUPPORT.parent / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn('target_user="${SUDO_USER:-${USER:-}}"', installer)
+        self.assertIn("./packaging/linux/install-from-source.sh", documentation)
+        self.assertNotIn("sudo ./packaging/linux/install-from-source.sh", documentation)
+
+    def test_installer_rejects_archive_links_before_extraction(self) -> None:
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+        validator = installer.split("validate_archive_paths() {", 1)[1].split(
+            "\n}\n\nstage_payload()", 1
+        )[0]
+        validator = "validate_archive_paths() {" + validator + "\n}\n"
+        with TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "payload.tar.gz"
+            with tarfile.open(archive, "w:gz") as bundle:
+                link = tarfile.TarInfo("axidev-osk/bin/axidev-osk")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "/bin/true"
+                bundle.addfile(link)
+
+            completed = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'die() {{ printf "%s\\n" "$*" >&2; exit 1; }}\n'
+                    f'{validator}\nvalidate_archive_paths "$1"',
+                    "bash",
+                    str(archive),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unsupported archive member", completed.stderr)
+
     def test_vm_docs_require_visible_manual_acceptance(self) -> None:
         documentation = (BUILD_SUPPORT.parent / "README.md").read_text(encoding="utf-8")
 
@@ -132,6 +173,52 @@ class LinuxPackagingTests(unittest.TestCase):
             self.assertTrue((source / vm.INSTALLER_NAME).is_file())
             with tarfile.open(archive) as bundle:
                 self.assertIn("axidev-osk/bin/axidev-osk", bundle.getnames())
+
+    def test_vm_prepare_recreates_existing_writable_disk(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            details = {
+                "image": "base.qcow2",
+                "url": "https://example.test/base",
+                "sha256": "a" * 64,
+            }
+            namespace = SimpleNamespace(profile="hyprland", payload=str(root / "payload"))
+            machine = root / "vm" / "hyprland"
+            machine.mkdir(parents=True)
+            disk = machine / "disk.qcow2"
+            seed = machine / "seed.iso"
+            known_hosts = machine / "known_hosts"
+            cloud_init = machine / "cloud-init"
+            disk.write_bytes(b"old disk")
+            seed.write_bytes(b"old seed")
+            known_hosts.write_text("old host key\n", encoding="utf-8")
+            cloud_init.mkdir()
+            old_cloud_init = cloud_init / "old-state"
+            old_cloud_init.write_text("stale\n", encoding="utf-8")
+
+            with (
+                patch.object(vm, "VM_ROOT", root / "vm"),
+                patch.object(vm, "_profile", return_value=details),
+                patch.object(vm, "_prepare_test_key", return_value="ssh-ed25519 test"),
+                patch.object(vm, "_prepare_install_source", return_value="b" * 64),
+                patch.object(
+                    vm,
+                    "download",
+                    side_effect=lambda _url, path, _checksum: path,
+                ),
+                patch.object(vm, "require_commands"),
+                patch.object(vm, "run") as run,
+            ):
+                result = vm.prepare_vm(namespace)
+
+            self.assertEqual(result, 0)
+            self.assertFalse(disk.exists())
+            self.assertFalse(seed.exists())
+            self.assertFalse(known_hosts.exists())
+            self.assertFalse(old_cloud_init.exists())
+            self.assertEqual(
+                run.call_args_list[0].args[0][:3], ["qemu-img", "create", "-f"]
+            )
 
     def test_vm_ssh_command_uses_profile_port_and_cached_key(self) -> None:
         command = vm._ssh_command("kde", {"ssh_port": 22222}, ["--", "uname", "-a"])

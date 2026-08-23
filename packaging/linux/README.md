@@ -1,6 +1,3 @@
-Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
-Every call here is inayayousfi's, and no agent acted on its own.
-
 # Linux Distribution Internals
 
 This document describes the standalone Linux payload, its lifecycle installer, release assets, and interactive test environments.
@@ -82,10 +79,10 @@ Static verification does not import host Qt packages. The launcher's `--verify-r
 Build and install the current checkout with:
 
 ```bash
-sudo ./packaging/linux/install-from-source.sh
+./packaging/linux/install-from-source.sh
 ```
 
-The script builds the payload, archives it, calculates its checksum, and calls `install.sh` with that local archive.
+The script builds the payload as the current user, archives it, calculates its checksum, and uses `sudo` only when it calls `install.sh` with that local archive.
 
 A local payload requires an explicit checksum. Downloaded releases use the published `SHA256SUMS` manifest.
 
@@ -232,6 +229,8 @@ python packaging/build.py linux vm reset hyprland
 ```
 
 Available profiles are `hyprland`, `kde`, `gnome`, and `lightdm-x11`. The Hyprland and KDE profiles exercise Wayland greeters. The GNOME profile exercises user-session autostart. `lightdm-x11` installs LightDM, its GTK greeter, Xorg, and Xfce on Arch Linux. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
+
+Preparation always recreates the profile's writable disk, seed image, SSH host key, and cloud-init files. This ensures that the next run provisions the selected payload instead of reusing an earlier installation. The checksum-pinned base image remains cached.
 
 The `gnome` profile tests desktop-session autostart only. GDM stays above external application windows and hides Axidev OSK on the login screen ([GitHub issue #35](https://github.com/axide-dev/axidev-osk/issues/35)); GNOME also hides the keyboard in the workspace switcher.
 

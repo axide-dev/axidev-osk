@@ -106,7 +106,9 @@ download_release_files() {
 
 validate_archive_paths() {
     local payload="$1"
-    local path
+    local paths entries path entry
+    paths="$(tar -tzf "${payload}")" || die "Cannot inspect payload archive paths."
+    entries="$(tar -tvzf "${payload}")" || die "Cannot inspect payload archive members."
     while IFS= read -r path; do
         case "${path}" in
             axidev-osk|axidev-osk/*) ;;
@@ -115,7 +117,13 @@ validate_archive_paths() {
         case "/${path}/" in
             */../*) die "Payload contains a parent traversal: ${path}" ;;
         esac
-    done < <(tar -tzf "${payload}")
+    done <<< "${paths}"
+    while IFS= read -r entry; do
+        case "${entry:0:1}" in
+            -|d) ;;
+            *) die "Payload contains an unsupported archive member: ${entry}" ;;
+        esac
+    done <<< "${entries}"
 }
 
 stage_payload() {

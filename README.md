@@ -1,6 +1,3 @@
-Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
-Every call here is inayayousfi's, and no agent acted on its own.
-
 # Axidev OSK
 
 An OSK for Windows and Linux that stays out of your way.

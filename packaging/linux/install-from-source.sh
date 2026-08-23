@@ -15,7 +15,8 @@ arguments=(
     --payload "${PAYLOAD}"
     --checksum "${checksum}"
 )
-if [ -n "${USER:-}" ] && [ "${USER}" != root ]; then
-    arguments+=(--user "${USER}")
+target_user="${SUDO_USER:-${USER:-}}"
+if [ -n "${target_user}" ] && [ "${target_user}" != root ]; then
+    arguments+=(--user "${target_user}")
 fi
 exec sudo bash "${ROOT}/packaging/linux/install.sh" "${arguments[@]}"
