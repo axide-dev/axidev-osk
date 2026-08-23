@@ -221,6 +221,69 @@ class KeyboardServiceTests(unittest.TestCase):
         self.assertEqual(left_shift.property("interactionState"), "idle")
         self.assertEqual(right_shift.property("interactionState"), "idle")
 
+    def test_ctrl_shift_left_right_sequences_release_original_backend_presses(self) -> None:
+        _app()
+
+        for ctrl_name in ("CtrlLeft", "CtrlRight"):
+            for shift_name in ("ShiftLeft", "ShiftRight"):
+                with self.subTest(ctrl=ctrl_name, shift=shift_name):
+                    backend = FakeKeyboardBackend()
+                    handles: list[SimpleNamespace] = []
+                    presses: list[tuple[str | None, dict[str, bool]]] = []
+
+                    def key_down(spec: KeySpec, latched_keys: dict[str, bool]) -> SimpleNamespace:
+                        handle = SimpleNamespace(key_name=spec.io_key)
+                        handles.append(handle)
+                        presses.append((spec.io_key, dict(latched_keys)))
+                        return handle
+
+                    backend.key_down.side_effect = key_down
+                    context = make_test_context(backend)
+                    widget = KeyboardWidget(
+                        layout_config=build_us_iso_layout_config(),
+                        context=context,
+                    )
+                    shift = self._button_for_io_key(widget, shift_name)
+                    opposite_shift = self._button_for_io_key(
+                        widget,
+                        "ShiftRight" if shift_name == "ShiftLeft" else "ShiftLeft",
+                    )
+                    ctrl = self._button_for_io_key(widget, ctrl_name)
+                    shifted_letters = [
+                        self._button_for_io_key(widget, key_name)
+                        for key_name in ("B", "C", "D")
+                    ]
+                    final_letter = self._button_for_io_key(widget, "A")
+
+                    ctrl.click()
+                    shift.click()
+                    ctrl.click()
+                    for letter in shifted_letters:
+                        letter.click()
+
+                    opposite_shift.click()
+                    final_letter.click()
+
+                    self.assertEqual(
+                        [handle.key_name for handle in handles],
+                        [ctrl_name, shift_name, "B", "C", "D", "A"],
+                    )
+                    self.assertEqual(
+                        [call.args[0].key_name for call in backend.key_up.call_args_list],
+                        [ctrl_name, "B", "C", "D", shift_name, "A"],
+                    )
+                    for key_name, latched_keys in presses[2:5]:
+                        self.assertIn(key_name, {"B", "C", "D"})
+                        self.assertFalse(latched_keys["ctrl"])
+                        self.assertTrue(latched_keys["shift"])
+                    final_latched_keys = presses[-1][1]
+                    self.assertFalse(final_latched_keys["ctrl"])
+                    self.assertFalse(final_latched_keys["shift"])
+                    self.assertFalse(ctrl.property("latched"))
+                    self.assertFalse(shift.property("latched"))
+                    self.assertFalse(opposite_shift.property("latched"))
+                    widget.close()
+
     def test_key_down_without_backend_press_does_not_emit_pressed_state(self) -> None:
         backend = FakeKeyboardBackend()
         backend.key_down.return_value = None
