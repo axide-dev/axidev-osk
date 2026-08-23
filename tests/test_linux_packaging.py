@@ -39,6 +39,7 @@ class LinuxPackagingTests(unittest.TestCase):
         self.assertIn("./packaging/linux/install-from-source.sh", documentation)
         self.assertNotIn("sudo ./packaging/linux/install-from-source.sh", documentation)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux Bash and GNU tar")
     def test_installer_rejects_archive_links_before_extraction(self) -> None:
         installer = INSTALLER_PATH.read_text(encoding="utf-8")
         validator = installer.split("validate_archive_paths() {", 1)[1].split(
