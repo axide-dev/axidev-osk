@@ -73,11 +73,12 @@ class WindowsPackagingTests(unittest.TestCase):
         workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
+        release_builder = (
+            REPO_ROOT / "packaging" / "linux" / "build_support" / "payload.py"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn(
-            "cp packaging/windows/axidev-osk-windows-install.ps1 release-assets/",
-            workflow,
-        )
+        self.assertIn("files: dist/linux/release-assets/*", workflow)
+        self.assertIn("axidev-osk-windows-install.ps1", release_builder)
 
     def test_development_installer_manages_start_menu_shortcut_transaction(self) -> None:
         admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")

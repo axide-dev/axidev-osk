@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "architecture": "x86_64",
+  "glibc_minimum": "2.34",
+  "container": {
+    "image": "quay.io/pypa/manylinux_2_34_x86_64@sha256:266610f48ef368cca34f521813ef61ed99d396b782e528fd0b0f58aa67c2189c"
+  },
+  "rust": {
+    "version": "1.89.0",
+    "target": "x86_64-unknown-linux-musl"
+  },
+  "system_libraries": [
+    "ld-linux-x86-64.so.2",
+    "libc.so.6",
+    "libevdev.so.2",
+    "libffi.so.8",
+    "libgcc_s.so.1",
+    "libglib-2.0.so.0",
+    "libgobject-2.0.so.0",
+    "libgudev-1.0.so.0",
+    "libinput.so.10",
+    "libm.so.6",
+    "libmtdev.so.1",
+    "libpcre.so.1",
+    "libpthread.so.0",
+    "librt.so.1",
+    "libstdc++.so.6",
+    "libudev.so.1",
+    "libwacom.so.2",
+    "libxkbcommon.so.0"
+  ],
+  "virtual_machines": {
+    "hyprland": {
+      "distribution": "arch",
+      "image": "Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "url": "https://geo.mirror.pkgbuild.com/images/v20260815.573966/Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "sha256": "5d8be8d28cfd290f051b0f67df0a6874596ad23de3f3f18b90c91aeb758eb878",
+      "memory_mb": 4096,
+      "cpus": 4,
+      "ssh_port": 22221
+    },
+    "kde": {
+      "distribution": "fedora",
+      "image": "Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "url": "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "sha256": "28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f",
+      "memory_mb": 6144,
+      "cpus": 4,
+      "ssh_port": 22222
+    },
+    "gnome": {
+      "distribution": "fedora",
+      "image": "Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "url": "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "sha256": "28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f",
+      "memory_mb": 6144,
+      "cpus": 4,
+      "ssh_port": 22223
+    },
+    "lightdm-x11": {
+      "distribution": "arch",
+      "image": "Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "url": "https://geo.mirror.pkgbuild.com/images/v20260815.573966/Arch-Linux-x86_64-cloudimg-20260815.573966.qcow2",
+      "sha256": "5d8be8d28cfd290f051b0f67df0a6874596ad23de3f3f18b90c91aeb758eb878",
+      "memory_mb": 4096,
+      "cpus": 4,
+      "ssh_port": 22224
+    }
+  }
+}

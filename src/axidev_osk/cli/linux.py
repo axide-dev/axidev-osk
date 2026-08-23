@@ -22,6 +22,8 @@ else:
 
 
 UINPUT_GROUP = "uinput"
+MODULES_LOAD_PATH = Path("/etc/modules-load.d/axidev-osk-uinput.conf")
+MODULES_LOAD_TEXT = "uinput\n"
 UDEV_RULE_NAME = "70-axidev-io-uinput.rules"
 UDEV_RULE_TEXT = 'KERNEL=="uinput", MODE="0660", GROUP="uinput", OPTIONS+="static_node=uinput"\n'
 UDEV_RULE_PATH = Path("/etc/udev/rules.d") / UDEV_RULE_NAME
@@ -51,20 +53,36 @@ class Account:
 def register_commands(parser: argparse.ArgumentParser) -> None:
     """Register Linux lifecycle commands on an argparse platform parser."""
 
-    commands = parser.add_subparsers(dest="linux_command", required=True)
     definitions = (
         ("setup-permissions", "setup", "permissions", True, "configure uinput access"),
-        ("status-permissions", "status", "permissions", True, "check uinput access"),
+        ("status-permissions", "status", "permissions", True, "check uinput configuration"),
         ("remove-permissions", "remove", "permissions", False, "disable the Axidev OSK udev rule"),
-        ("setup-autostart", "setup", "autostart", True, "start Axidev OSK with a desktop session"),
-        ("status-autostart", "status", "autostart", True, "check desktop-session autostart"),
-        ("remove-autostart", "remove", "autostart", True, "remove desktop-session autostart"),
+        ("setup-autostart", "setup", "autostart", True, "configure desktop-session startup"),
+        ("status-autostart", "status", "autostart", True, "check desktop-session startup configuration"),
+        ("remove-autostart", "remove", "autostart", True, "remove desktop-session startup configuration"),
+        ("setup-greeter", "setup", "greeter", False, "configure login-screen startup"),
+        ("status-greeter", "status", "greeter", False, "check login-screen startup configuration"),
+        ("remove-greeter", "remove", "greeter", False, "remove login-screen startup configuration"),
+    )
+    command_names = ",".join(definition[0] for definition in definitions)
+    commands = parser.add_subparsers(
+        dest="linux_command", required=True, metavar=f"{{{command_names}}}"
     )
     for name, action, resource, accepts_user, help_text in definitions:
         command = commands.add_parser(name, help=help_text, description=help_text)
         if accepts_user:
             command.add_argument("--user", help="local account to configure")
+        if name == "setup-greeter":
+            command.add_argument(
+                "--manager",
+                choices=("plasma-login", "greetd", "lightdm"),
+                help="login manager to configure",
+            )
         command.set_defaults(handler=run_command, action=action, resource=resource)
+
+    from . import linux_greeter
+
+    linux_greeter.register_runtime_commands(commands)
 
 
 def run_command(namespace: argparse.Namespace, argv: list[str]) -> int:
@@ -75,6 +93,15 @@ def run_command(namespace: argparse.Namespace, argv: list[str]) -> int:
         return 2
 
     try:
+        if namespace.action == "status":
+            print(
+                "Status scope: managed integration configuration and uinput checks where "
+                "applicable; startup, rendering, and key input are not tested."
+            )
+        if namespace.resource == "greeter":
+            from . import linux_greeter
+
+            return linux_greeter.run_setup_command(namespace, argv)
         account = None
         if hasattr(namespace, "user"):
             account = _resolve_account(namespace.user)
@@ -116,7 +143,7 @@ def _run_autostart(action: str, account: Account | None, argv: list[str]) -> int
     return 0
 
 
-def _resolve_account(requested_user: str | None) -> Account:
+def _resolve_account(requested_user: str | None, *, require_home: bool = True) -> Account:
     if pwd is None:
         raise LinuxSetupError("local account lookup requires Linux")
 
@@ -134,7 +161,7 @@ def _resolve_account(requested_user: str | None) -> Account:
         raise LinuxSetupError(f"local user does not exist: {user}") from exc
 
     home = Path(record.pw_dir)
-    if not home.is_dir():
+    if require_home and not home.is_dir():
         raise LinuxSetupError(f"home directory does not exist: {home}")
     return Account(record.pw_name, record.pw_uid, record.pw_gid, home)
 
@@ -143,7 +170,14 @@ def _sudo_reexec(argv: list[str], account: Account | None, *, run_as_account: bo
     explicit_args = list(argv)
     if account is not None and "--user" not in explicit_args:
         explicit_args.extend(("--user", account.name))
-    child_command = [sys.executable, "-m", "axidev_osk", *explicit_args]
+    payload_root = os.environ.get("AXIDEV_OSK_ROOT")
+    if payload_root:
+        launcher = Path(payload_root) / "bin" / "axidev-osk"
+        if not launcher.is_file():
+            raise LinuxSetupError(f"payload launcher does not exist: {launcher}")
+        child_command = [str(launcher), *explicit_args]
+    else:
+        child_command = [sys.executable, "-m", "axidev_osk", *explicit_args]
     if run_as_account and _is_root():
         assert account is not None
         runuser = shutil.which("runuser")
@@ -172,6 +206,7 @@ def _sudo_reexec(argv: list[str], account: Account | None, *, run_as_account: bo
 
 def _setup_permissions(account: Account) -> None:
     assert grp is not None
+    _ensure_owned_file(MODULES_LOAD_PATH, MODULES_LOAD_TEXT)
     try:
         group = grp.getgrnam(UINPUT_GROUP)
     except KeyError:
@@ -198,6 +233,7 @@ def _status_permissions(account: Account) -> int:
         group = None
 
     checks.append((f"group {UINPUT_GROUP}", group is not None))
+    checks.append(("module load", _read_text(MODULES_LOAD_PATH) == MODULES_LOAD_TEXT))
     checks.append(("udev rule", _permission_rule_is_enabled()))
     checks.append(("group membership", group is not None and _account_in_group(account, group)))
     checks.append(("/dev/uinput mode", group is not None and _uinput_mode_is_ready(group.gr_gid)))
@@ -210,6 +246,7 @@ def _status_permissions(account: Account) -> int:
 
 
 def _remove_permissions() -> None:
+    _remove_owned_file(MODULES_LOAD_PATH, MODULES_LOAD_TEXT)
     UDEV_RULE_PATH.parent.mkdir(parents=True, exist_ok=True)
     if UDEV_RULE_PATH.exists() or UDEV_RULE_PATH.is_symlink():
         UDEV_RULE_PATH.unlink()
@@ -244,7 +281,7 @@ def _reload_udev(*, ensure_device: bool = False) -> None:
     _run_checked(["udevadm", "control", "--reload-rules"])
     if ensure_device and not UINPUT_PATH.exists():
         _run_checked(["modprobe", "uinput"])
-        _run_checked(["udevadm", "settle"])
+    _run_checked(["udevadm", "settle"])
     if UINPUT_PATH.exists():
         _run_checked(["udevadm", "trigger", str(UINPUT_PATH)])
         _run_checked(["udevadm", "settle"])
@@ -287,6 +324,7 @@ def _autostart_text() -> str:
     executable = shutil.which("axidev-osk")
     if executable is None:
         raise LinuxSetupError("axidev-osk must be installed on PATH before enabling autostart")
+    executable = str(Path(executable).resolve())
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
@@ -323,6 +361,25 @@ def _ensure_directory(path: Path) -> None:
         raise LinuxSetupError(f"autostart parent is not a directory: {current}")
     for directory in reversed(missing):
         directory.mkdir(mode=0o700)
+
+
+def _ensure_owned_file(path: Path, contents: str) -> None:
+    current = _read_text(path)
+    if current is not None and current != contents:
+        raise LinuxSetupError(f"refusing to replace conflicting file: {path}")
+    _write_atomic(path, contents, 0o644)
+
+
+def _remove_owned_file(path: Path, contents: str) -> None:
+    current = _read_text(path)
+    if current is None:
+        return
+    if current != contents:
+        raise LinuxSetupError(f"refusing to remove conflicting file: {path}")
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise LinuxSetupError(f"cannot remove {path}: {exc}") from exc
 
 
 def _write_atomic(path: Path, contents: str, mode: int) -> None:

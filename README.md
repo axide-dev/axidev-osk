@@ -16,33 +16,42 @@ Axidev OSK gives you a clean, always-on-top keyboard overlay you can pop up when
 
 ### Linux
 
-Install the system dependencies for your distribution, then run the installer. The installer downloads the latest release bundle, places it under `/opt/axidev-osk/`, and sets up the udev rule needed to emit keystrokes.
+The Linux release carries Axidev OSK, its native input extension, and a static launcher. The host must provide x86_64 Linux, glibc 2.34 or newer, Python 3.10 or newer, PySide6 and Qt from the same 6.7-or-newer release below 7.0, Qt's X11 and Wayland plugins, LayerShellQt, and the normal desktop input libraries.
 
 **Fedora:**
 
 ```bash
-sudo dnf install qt6-qtwayland layer-shell-qt python3-pyside6 \
-    libinput systemd-libs libxkbcommon python3 curl tar
-curl -L https://raw.githubusercontent.com/axide-dev/axidev-osk/main/packaging/linux/install.sh | sudo bash
+sudo dnf install python3 python3-pyside6 qt6-qtwayland layer-shell-qt \
+    libinput systemd-libs libxkbcommon curl tar
 ```
 
 **Arch:**
 
 ```bash
-sudo pacman -S --needed qt6-wayland layer-shell-qt pyside6 \
-    libinput systemd libxkbcommon python curl tar
-curl -L https://raw.githubusercontent.com/axide-dev/axidev-osk/main/packaging/linux/install.sh | sudo bash
+sudo pacman -S --needed python pyside6 qt6-wayland layer-shell-qt \
+    libinput systemd libxkbcommon curl tar
 ```
 
-After installing, log out and back in once so the new `uinput` group membership takes effect, then run `axidev-osk`.
-
-To uninstall:
+Download and run the lifecycle installer:
 
 ```bash
-sudo bash /opt/axidev-osk/packaging/linux/uninstall.sh
+curl --fail --location --remote-name \
+    https://github.com/axide-dev/axidev-osk/releases/latest/download/axidev-osk-install
+chmod +x axidev-osk-install
+sudo ./axidev-osk-install install
 ```
 
-For a manual source-based install (development, custom layouts, or distributions not covered above), see [`packaging/MANUAL_INSTALL.md`](./packaging/MANUAL_INSTALL.md).
+The installer checks the downloaded payload against the release checksum manifest before changing `/opt/axidev-osk`. This detects a corrupted download but does not authenticate the publisher. Log out and back in after installation if the installer adds you to the `uinput` group.
+
+The installed lifecycle command supports upgrades, rollback, and removal:
+
+```bash
+sudo axidev-osk-install upgrade
+sudo axidev-osk-install rollback
+sudo axidev-osk-install uninstall
+```
+
+For a manual source installation, see [`packaging/MANUAL_INSTALL.md`](./packaging/MANUAL_INSTALL.md).
 
 ### Windows
 
@@ -68,7 +77,7 @@ A production-signed MSI remains planned for public distribution.
 
 ## Command Line
 
-Running `axidev-osk` without arguments starts the keyboard exactly as before. Passing any argument selects the headless command line instead, without importing Qt or starting the application runtime.
+Running `axidev-osk` without arguments starts the keyboard. Passing an argument selects the command line without starting the graphical runtime.
 
 Linux permission commands default to the invoking user. Administrators can prepare another local account with `--user NAME`.
 
@@ -88,28 +97,44 @@ axidev-osk linux status-autostart
 axidev-osk linux remove-autostart
 ```
 
-These autostart commands support regular user desktop sessions. Login-screen greeters run under display-manager-specific accounts and environments, so GDM, SDDM, and other greeters require separate adapters that are not implemented yet.
+Login-screen startup is separate from user autostart. Axidev OSK supports Plasma Login Manager, greetd, and LightDM.
 
-On Windows, replacing `osk.exe` or another protected system binary is not supported. Future Windows integration should use supported accessibility registration and startup mechanisms instead of modifying Windows system files.
+```bash
+axidev-osk linux setup-greeter
+axidev-osk linux status-greeter
+axidev-osk linux remove-greeter
+```
+
+The status commands verify managed integration configuration and, where applicable, `uinput` access. They do not start Axidev OSK or prove that the keyboard renders or emits key input.
+
+`setup-greeter` shows an arrow-key menu of installed supported managers. Scripts can select one directly with `--manager plasma-login`, `--manager greetd`, or `--manager lightdm`. Setup checks the selected manager and its current configuration before writing files. It does not restart the display manager, so reboot or restart it after setup.
+
+Plasma Login Manager and LightDM use their own greeter startup hooks. The greetd adapter saves and wraps the existing default-session command. It starts that command before Axidev OSK, keeps the greeter authoritative, and restores the exact command during removal.
+
+The keyboard retries with exponential backoff while the greeter remains active. A keyboard or display-detection failure never stops the greeter. Failures appear in the system journal under `axidev-osk-greeter`.
+
+Greeter setup adds the manager's service account to the shared `uinput` group. Removal preserves that membership, matching the normal permission cleanup policy.
+
+On Windows, replacing `osk.exe` or another protected system binary is not supported. Future Windows integration should use supported accessibility registration and startup mechanisms.
 
 ## Wayland Notes
 
-The overlay works best on compositors that support the layer-shell protocol, such as:
+The overlay works best on compositors that support the layer-shell protocol:
 
 - KDE Plasma Wayland
 - `niri`
 - `Hyprland`
 - other wlroots-based compositors
 
-On GNOME/Mutter the app falls back to its X11/XWayland overlay backend, since GNOME does not currently expose the layer-shell behavior the overlay wants.
+On GNOME and Mutter, the app does not request layer-shell behavior. It uses the regular Qt window path instead.
 
-On Linux, install the matching Qt layer-shell plugin (`layer-shell-qt` on most distributions) alongside the packages listed above to get proper overlay support.
+The Linux payload uses the host's Qt Wayland and LayerShellQt components. Its launcher checks the Python, PySide6, Qt, platform plugin, and LayerShellQt versions before startup. PySide6 and Qt must have matching major and minor versions.
 
-On Wayland environments where layer-shell is unavailable or unsupported, the keyboard UI may be constrained by the compositor to the bounds of the application context that launched it. This is a display-surface limitation only: the input backend can still emit key events through the configured Linux input path.
+Without layer-shell support, the compositor can constrain the keyboard to regular application-window behavior. The configured Linux input backend can still emit key events.
 
 ## Project Status
 
-Axidev OSK is usable today as a keyboard overlay, but the project is aimed at something bigger: a modular composition system for on-screen input surfaces, with multiple windows, reusable grids, and user-defined layouts driven by a Lua config.
+Axidev OSK is usable today as a keyboard overlay, but the project is aimed at a modular composition system with multiple windows, reusable grids, and Lua-driven layouts.
 
 What works now:
 
@@ -127,52 +152,45 @@ What's planned:
 
 ## Contributing
 
-Contributions are welcome. Changes should land through pull requests rather than direct pushes to `main`, even for small cleanups.
+Changes should land through pull requests rather than direct pushes to `main`.
 
-To work on the project, clone the repository with submodules:
+Clone the repository with submodules:
 
 ```bash
 git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
 cd axidev-osk
 ```
 
-From there, follow the platform-specific system package steps in the [Install](#install) section, skipping the `curl` and `unzip`/`Expand-Archive` commands.
-
-For normal development, install the vendored input backend and this project into a local virtual environment. The project's Python dependencies come from `pyproject.toml`.
+For normal development, install the vendored input backend and this project into a local virtual environment:
 
 ```bash
-python -m venv .venv && .venv/bin/python -m pip install -e ./vendor/axidev-io-python -e .
+python -m venv .venv
+.venv/bin/python -m pip install -e ./vendor/axidev-io-python -e .
 ```
 
-To start the app from the checkout without relying on the installed entrypoint, use:
+Start the app from the checkout:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m axidev_osk
 ```
 
-Before making structural changes, please read [`AGENTS.md`](./AGENTS.md). It describes the modular architecture rules the project is following while the Lua configuration layer is being built.
+Read [`AGENTS.md`](./AGENTS.md) before structural changes. It documents the modular architecture rules.
 
 PR guidance:
 
 - keep each PR focused on one concern
-- call out architectural impact when touching windows, grids, layouts, or orchestration
-- note platform-specific behavior clearly when Windows, X11, or Wayland behavior changes
+- call out architectural impact when changing windows, grids, layouts, or orchestration
+- note platform-specific behavior when Windows, X11, or Wayland changes
 
 ### Commit Style
 
-Commits follow Conventional Commit-style subjects:
+Commits use this subject format:
 
 ```text
 type(scope): short imperative summary
 ```
 
-Examples from the existing history:
-
-- `fix(ui): add hot-corner window toggle and shared theme palette`
-- `feat(release): add standalone app packaging`
-- `refactor(ci): bump workflows to Python 3.14`
-
-Use lowercase `type` and `scope`, keep the summary short, and prefer imperative phrasing (`add`, `fix`, `refactor`, `remove`).
+Use lowercase `type` and `scope`. Keep the summary short and imperative.
 
 ## License
 

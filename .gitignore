@@ -4,4 +4,5 @@ __pycache__/
 .venv-windows/
 dist/
 build/
+target/
 *.egg-info/

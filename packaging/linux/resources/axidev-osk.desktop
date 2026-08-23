@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Axidev OSK
+Comment=On-screen keyboard overlay
+Exec=/usr/local/bin/axidev-osk
+Icon=axidev-osk
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=false

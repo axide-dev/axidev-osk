@@ -12,191 +12,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  packaging-validate:
-    name: Validate Packaging Metadata
+  linux-release:
+    name: Build And Upload Release
     runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Check shell scripts
-        run: |
-          set -euo pipefail
-          bash -n \
-            packaging/linux/install.sh \
-            packaging/linux/install-from-source.sh \
-            packaging/linux/uninstall.sh \
-            packaging/linux/resources/launcher.sh \
-            packaging/arch/axidev-osk.install \
-            packaging/deb/debian/rules \
-            packaging/deb/debian/postinst \
-            packaging/deb/debian/postrm
-
-      - name: Check Debian metadata
-        run: |
-          set -euo pipefail
-          cp -a packaging/deb/debian ./debian
-          dpkg-parsechangelog --show-field Version
-          dpkg-parsechangelog --show-field Distribution
-
-      - name: Check RPM spec parses
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm
-          rpmspec --parse packaging/rpm/axidev-osk.spec >/dev/null
-
-      - name: Check Arch package metadata shape
-        run: |
-          set -euo pipefail
-          test -f packaging/arch/PKGBUILD
-          test -f packaging/arch/axidev-osk.install
-          grep -q '^pkgname=axidev-osk$' packaging/arch/PKGBUILD
-          grep -q "install=axidev-osk.install" packaging/arch/PKGBUILD
-
-      - name: Check Nix flake syntax
-        uses: DeterminateSystems/nix-installer-action@v22
-
-      - name: Evaluate Nix flake
-        run: nix flake check --no-build
-
-  source-archive:
-    name: Build And Upload Source Archive
-    runs-on: ubuntu-latest
-    needs: packaging-validate
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Build source archive
-        shell: bash
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p release-assets
-          stage_dir="$(mktemp -d)"
-          bundle_root="${stage_dir}/axidev-osk"
-
-          mkdir -p "${bundle_root}"
-
-          # Copy the working tree into the bundle while stripping every
-          # nested .git directory/file. This gives users a clean, installable
-          # source tree without any repository metadata.
-          tar --exclude-vcs -cf - . | tar -xf - -C "${bundle_root}"
-
-          # Ship both a versioned archive (for traceability) and a stable
-          # filename so README install commands can curl the latest release
-          # without templating a version into the URL.
-          versioned_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-${TAG}-source.zip"
-          stable_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-source.zip"
-
-          (cd "${stage_dir}" && zip -r "${versioned_archive}" axidev-osk) > /dev/null
-          cp "${versioned_archive}" "${stable_archive}"
-          cp packaging/windows/axidev-osk-windows-install.ps1 release-assets/
-
-          ls -la release-assets
+      - name: Build release assets
+        run: >-
+          python3 packaging/build.py linux release --output dist/linux
+          --release-version "${{ github.event.release.tag_name }}"
 
       - name: Upload assets to published release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.release.tag_name }}
-          files: release-assets/*
-          fail_on_unmatched_files: true
-          overwrite_files: true
-
-  linux-bundle:
-    name: Build And Upload Linux x86_64 Bundle
-    runs-on: ubuntu-24.04
-    needs: packaging-validate
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Install build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            pkg-config \
-            python3 \
-            python3-dev \
-            python3-venv \
-            libinput-dev \
-            libudev-dev \
-            libxkbcommon-dev
-
-      - name: Build wheels
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 -m venv build-venv
-          ./build-venv/bin/pip install --quiet --upgrade pip
-          ./build-venv/bin/pip install --quiet build wheel setuptools
-
-          mkdir -p wheelhouse
-
-          # Build the C-extension wheel. This wheel is platform-tagged
-          # (linux_x86_64) because it includes the compiled .so.
-          ./build-venv/bin/python -m build \
-            --wheel \
-            --no-isolation \
-            --outdir wheelhouse \
-            ./vendor/axidev-io-python
-
-          # Build the application wheel. This wheel is pure-Python.
-          ./build-venv/bin/python -m build \
-            --wheel \
-            --no-isolation \
-            --outdir wheelhouse \
-            .
-
-          ls -la wheelhouse
-
-      - name: Stage release bundle
-        shell: bash
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p release-assets
-          stage_dir="$(mktemp -d)"
-          bundle_root="${stage_dir}/axidev-osk"
-
-          mkdir -p "${bundle_root}/wheels"
-          mkdir -p "${bundle_root}/packaging/linux/resources"
-
-          # Wheels: precompiled, no source, no tests, no vendor C source.
-          cp wheelhouse/*.whl "${bundle_root}/wheels/"
-
-          # Packaging assets the installed system needs at runtime
-          # (uninstaller and the launcher/udev resources for re-runs).
-          cp packaging/linux/uninstall.sh "${bundle_root}/packaging/linux/"
-          cp packaging/linux/resources/launcher.sh "${bundle_root}/packaging/linux/resources/"
-          cp packaging/linux/resources/70-axidev-io-uinput.rules "${bundle_root}/packaging/linux/resources/"
-
-          find "${bundle_root}" -type f -name '*.sh' -exec chmod 0755 {} +
-
-          versioned_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-${TAG}-linux-x86_64.tar.gz"
-          stable_archive="${GITHUB_WORKSPACE}/release-assets/axidev-osk-linux-x86_64.tar.gz"
-
-          tar -czf "${versioned_archive}" -C "${stage_dir}" axidev-osk
-          cp "${versioned_archive}" "${stable_archive}"
-
-          ls -la release-assets
-
-      - name: Upload assets to published release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: release-assets/*
+          files: dist/linux/release-assets/*
           fail_on_unmatched_files: true
           overwrite_files: true

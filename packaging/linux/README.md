@@ -1,104 +1,247 @@
-# Linux Installer Internals
+# Linux Distribution Internals
 
-This document describes what `install.sh`, `install-from-source.sh`, and `uninstall.sh` actually do, what files they touch, and how to debug a failed install.
+This document describes the standalone Linux payload, its lifecycle installer, release assets, and interactive test environments.
 
-For an architecture overview, see [`../README.md`](../README.md).
+## Supported Host
 
-## What `install.sh` does
+The payload targets x86_64 Linux with glibc 2.34 or newer. It requires `/usr/bin/python3` version 3.10 or newer.
 
-```
-1. Re-exec with sudo if not already root.
-2. Verify the host architecture (currently x86_64 only).
-3. Verify required commands exist (curl, tar, python3, install, udevadm, ...).
-4. Download axidev-osk-linux-x86_64.tar.gz from the latest release.
-5. Extract to a temporary directory.
-6. Stage the new install at /opt/axidev-osk.new/:
-   - python3 -m venv --system-site-packages /opt/axidev-osk.new/.venv
-   - pip install --no-index --no-deps the bundled wheels
-   - import smoke test
-7. Atomic swap: /opt/axidev-osk -> /opt/axidev-osk.old, then
-                /opt/axidev-osk.new -> /opt/axidev-osk, then
-                rm -rf /opt/axidev-osk.old.
-8. Install /usr/local/bin/axidev-osk from the bundled launcher.
-9. Ensure 'uinput' group exists.
-10. Ensure /etc/udev/rules.d/70-axidev-io-uinput.rules has the expected
-    contents; reload udev only if the rule actually changed.
-11. Verify /dev/uinput is owned by group 'uinput' with mode 0660; modprobe
-    if needed; warn if a reboot may be required.
-12. Add the invoking user to the 'uinput' group if not already a member.
-```
+The host supplies PySide6, Qt, Qt's X11 and Wayland platform plugins, LayerShellQt, libinput, libudev, libxkbcommon, and normal desktop libraries. PySide6 and Qt must use matching major and minor versions from 6.7 up to, but not including, 7.0.
 
-## Required system packages
-
-These come from the distribution package manager. The installer does not attempt to install them; the top-level README documents the per-distro commands.
-
-- `qt6-qtwayland` (Fedora) / `qt6-wayland` (Arch)
-- `layer-shell-qt`
-- `python3-pyside6` (Fedora) / `pyside6` (Arch)
-- `libinput`, `systemd-libs` (libudev), `libxkbcommon`
-- `python3` (>= 3.10), `curl`, `tar`
-
-The `-devel` packages are not needed at install time because the C extension is precompiled in the release bundle.
-
-For `install-from-source.sh`, development headers and compiler tooling are also required because the vendored `axidev-io` extension is built locally. On Fedora, install at least `gcc`, `python3-devel`, `libinput-devel`, `systemd-devel`, and `libxkbcommon-devel` in addition to the runtime packages.
-
-## Source-tree install
-
-Use `install-from-source.sh` when you have copied or cloned the repository and want to install that exact checkout system-wide:
+Use these runtime packages on Fedora:
 
 ```bash
-sudo ./packaging/linux/install-from-source.sh
+sudo dnf install python3 python3-pyside6 qt6-qtwayland layer-shell-qt \
+    libinput systemd-libs libxkbcommon
 ```
 
-It creates the same `/opt/axidev-osk`, `/usr/local/bin/axidev-osk`, and udev rule layout as the release installer, but it builds and installs `vendor/axidev-io-python` and `axidev-osk` from the local checkout instead of downloading release wheels.
-
-## Files written
-
-| Path | Owner | Mode | Source |
-|------|-------|------|--------|
-| `/opt/axidev-osk/` | root:root | 0755 | release bundle |
-| `/usr/local/bin/axidev-osk` | root:root | 0755 | `resources/launcher.sh` |
-| `/etc/udev/rules.d/70-axidev-io-uinput.rules` | root:root | 0644 | `resources/70-axidev-io-uinput.rules` |
-
-## Files NOT written
-
-The installer does not create or modify:
-
-- any per-user configuration or state directory
-- any `.desktop` file or icon
-- any systemd unit
-- any file outside `/opt/axidev-osk/`, `/usr/local/bin/`, and `/etc/udev/rules.d/`
-
-## Debugging a failed install
-
-**Download fails.** The script aborts before touching anything. The previous install (if any) is still in place.
-
-**`pip install` fails inside the staging venv.** The script aborts before the swap. `/opt/axidev-osk/` is unchanged. The temporary `/opt/axidev-osk.new/` is removed by the EXIT trap.
-
-**Import smoke test fails.** Same as above; the swap never happens.
-
-**Atomic swap interrupted.** If the script is killed between `mv /opt/axidev-osk /opt/axidev-osk.old` and `mv /opt/axidev-osk.new /opt/axidev-osk`, the install is in a half state. Recovery: `mv /opt/axidev-osk.old /opt/axidev-osk` (or simply re-run the installer, which will detect a missing `/opt/axidev-osk` and proceed cleanly).
-
-**`/dev/uinput` still wrong after install.** The kernel module may not be loaded (`modprobe uinput`), or the udev rule may need a reboot to take effect on some setups. The launcher will fail with a permission error in that case. Confirm with:
+Use these runtime packages on Arch Linux:
 
 ```bash
-stat -c '%a %G' /dev/uinput   # expected: 660 uinput
-groups                        # should include 'uinput' after logout/login
-axidev-osk linux status-permissions
+sudo pacman -S --needed python pyside6 qt6-wayland layer-shell-qt \
+    libinput systemd libxkbcommon
 ```
 
-## What `uninstall.sh` does
+The allowed native input-library sonames are recorded in `release-lock.json`.
 
+## Payload Contents
+
+```text
+axidev-osk/
+  bin/axidev-osk
+  lib/python/
+  libexec/launch.py
+  share/applications/axidev-osk.desktop
+  share/icons/hicolor/scalable/apps/axidev-osk.svg
+  share/licenses/
+  release.json
 ```
-1. Re-exec with sudo if not already root.
-2. rm -rf /opt/axidev-osk
-3. rm -f /usr/local/bin/axidev-osk
-4. rm -f /etc/udev/rules.d/70-axidev-io-uinput.rules
-5. udevadm control --reload-rules
+
+The payload's Python tree contains Axidev OSK and the native `axidev_io` extension. It does not contain PySide6, Qt, or LayerShellQt.
+
+The launcher is a static Rust executable. It resolves the payload from its own path and starts `/usr/bin/python3 -I`.
+
+`launch.py` rejects Python older than 3.10. Before normal startup or `--verify-runtime`, it checks the PySide6 and Qt range, matching major and minor versions, Qt's X11 and Wayland platform plugins, and LayerShellQt compatibility. Runtime verification then reports the resolved versions and plugin paths.
+
+`release.json` records the payload version, architecture, minimum glibc version, host-runtime requirements, and the SHA-256 digest of every regular file.
+
+## Building
+
+Run the root command from the repository checkout:
+
+```bash
+python packaging/build.py linux payload
 ```
 
-The script does not remove the user from the `uinput` group. Other virtual-input software may use the same least-privilege group.
+The outer command builds the pinned manylinux Docker image. Docker writes the result to the `axidev-osk-linux-output` volume, and the build command copies the verified payload into the requested output directory.
 
-## Re-running `install.sh`
+The inner build performs these steps:
 
-`install.sh` is safe to re-run. The bundle is downloaded fresh and `/opt/axidev-osk` is replaced via the atomic swap. The udev rule and group membership steps detect their desired state and only act if a change is needed.
+1. Build the vendored input backend wheel.
+2. Build the Axidev OSK wheel.
+3. Install both wheels into the payload's Python tree without dependencies or bytecode.
+4. Build the static Rust launcher.
+5. Install desktop resources, icons, licenses, and metadata.
+6. Verify file checksums, launcher linkage, native input dependencies, and the host-library allowlist.
+
+The default output is `dist/linux/axidev-osk`.
+
+Verify an existing payload again with:
+
+```bash
+python packaging/build.py linux verify dist/linux/axidev-osk
+```
+
+Static verification does not import host Qt packages. The launcher's `--verify-runtime` check covers those packages on the target system.
+
+## Installing A Local Build
+
+Build and install the current checkout with:
+
+```bash
+./packaging/linux/install-from-source.sh
+```
+
+The script builds the payload as the current user, archives it, calculates its checksum, and uses `sudo` only when it calls `install.sh` with that local archive.
+
+A local payload requires an explicit checksum. Downloaded releases use the published `SHA256SUMS` manifest.
+
+## Release Assets
+
+Create release assets with:
+
+```bash
+python packaging/build.py linux release
+```
+
+The command creates:
+
+```text
+release-assets/
+  axidev-osk-VERSION-linux-x86_64.tar.gz
+  axidev-osk-linux-x86_64.tar.gz
+  axidev-osk-VERSION-source.zip
+  axidev-osk-source.zip
+  axidev-osk-install
+  SHA256SUMS
+```
+
+The repository ZIP includes tracked files and vendored submodule contents.
+
+`SHA256SUMS` covers every uploaded asset. It detects corruption during download but does not authenticate the publisher because GitHub hosts both the assets and their checksums.
+
+## Lifecycle Commands
+
+Install the latest release:
+
+```bash
+sudo axidev-osk-install install
+```
+
+Upgrade to the latest release:
+
+```bash
+sudo axidev-osk-install upgrade
+```
+
+Swap active and retained payloads:
+
+```bash
+sudo axidev-osk-install rollback
+```
+
+Remove Axidev OSK:
+
+```bash
+sudo axidev-osk-install uninstall
+```
+
+The first downloaded installer must be saved to a file and run from that file. A pipe cannot install the lifecycle command because no installer file would remain to copy.
+
+## Login-Screen Startup
+
+The installed command line can configure Axidev OSK before login:
+
+```bash
+sudo axidev-osk linux setup-greeter
+axidev-osk linux status-greeter
+sudo axidev-osk linux remove-greeter
+```
+
+The status commands verify managed integration configuration and, where applicable, `uinput` access. They do not start Axidev OSK or prove that the keyboard renders or emits key input.
+
+Without `--manager`, setup lists the supported managers installed on the host. Use the option for unattended setup:
+
+```bash
+sudo axidev-osk linux setup-greeter --manager plasma-login
+sudo axidev-osk linux setup-greeter --manager greetd
+sudo axidev-osk linux setup-greeter --manager lightdm
+```
+
+Setup validates every required account, hook, and existing file before changing the manager. It configures one manager and never restarts it. Reboot or restart the selected display manager after setup.
+
+Plasma Login Manager uses an `axidev-osk-greeter.service` user unit tied to `plasma-login-wayland.target`. LightDM uses a `greeter-wrapper` drop-in. greetd replaces only the default-session command line with `/etc/axidev-osk/greetd-session-wrapper`, while `/etc/axidev-osk/greeter.json` keeps the exact original value for removal.
+
+The LightDM and greetd shell wrappers start the original greeter before invoking the Axidev launcher. A missing Python package, incompatible Qt runtime, keyboard crash, or display-detection error cannot stop the original greeter. The keyboard retries after 1, 2, 4, 8, 16, 32, and then 60 seconds until the greeter exits.
+
+Runtime failures are written to the existing manager output and the system journal. Read the common journal stream with:
+
+```bash
+journalctl -t axidev-osk-greeter
+```
+
+The diagnostics include the manager, service account, display protocol, failure stage, process status, and retry delay. They do not include passwords or complete process environments.
+
+The current VM coverage verifies Plasma Login Manager and greetd on Wayland. The `lightdm-x11` profile verifies LightDM under Xorg with an Xfce user session. The GNOME profile verifies user-session autostart only.
+
+## Failure Behavior
+
+A bad checksum stops before extraction. Checksums detect corruption but do not authenticate the publisher because the assets and manifest use the same download channel.
+
+An unsafe archive path stops before extraction.
+
+A failed staged runtime check leaves the active payload unchanged and removes the temporary staging directory.
+
+A failed activation restores the retained payload.
+
+The installer keeps the previous successful payload at `/opt/axidev-osk.old` until another install replaces it.
+
+Rollback verifies the retained payload before changing the active installation. A failed runtime check leaves both payloads in their existing locations.
+
+Uninstall stops when permission or autostart cleanup fails. `uninstall --force` removes owned files after reporting incomplete cleanup.
+
+## Files Owned
+
+```text
+/opt/axidev-osk/
+/opt/axidev-osk.old/
+/usr/local/bin/axidev-osk
+/usr/local/sbin/axidev-osk-install
+/usr/local/share/applications/axidev-osk.desktop
+/usr/local/share/icons/hicolor/scalable/apps/axidev-osk.svg
+```
+
+Permission setup manages `/etc/modules-load.d/axidev-osk-uinput.conf` and `/etc/udev/rules.d/70-axidev-io-uinput.rules` through the application command line. Removal deletes only files whose contents still match Axidev OSK's definitions, and it does not unload the shared `uinput` module. Autostart setup manages the selected user's XDG autostart file.
+
+Files owned by a configured manager are conditional. `/etc/axidev-osk/greeter.json` records the selected adapter. Plasma Login Manager owns its user service and target link. LightDM owns its drop-in and wrapper. greetd owns its wrapper and restores the previous command during removal.
+
+The uninstaller removes exact managed greeter files before it disables the Axidev OSK uinput rule. It stops on changed files unless `--force` is selected. Shared `uinput` memberships remain in place.
+
+The uninstaller does not remove the shared `uinput` group or its memberships.
+
+## QEMU Profiles
+
+Prepare one profile from a verified local payload:
+
+```bash
+python packaging/build.py linux vm prepare hyprland \
+    --payload dist/linux/axidev-osk
+```
+
+Run the prepared profile:
+
+```bash
+python packaging/build.py linux vm run hyprland
+```
+
+Reset its writable disk and cached installer source:
+
+```bash
+python packaging/build.py linux vm reset hyprland
+```
+
+Available profiles are `hyprland`, `kde`, `gnome`, and `lightdm-x11`. The Hyprland and KDE profiles exercise Wayland greeters. The GNOME profile exercises user-session autostart. `lightdm-x11` installs LightDM, its GTK greeter, Xorg, and Xfce on Arch Linux. Preparation downloads a checksum-pinned cloud image, archives the selected payload, calculates its checksum, caches a local installer source, and generates cloud-init data.
+
+Preparation always recreates the profile's writable disk, seed image, SSH host key, and cloud-init files. This ensures that the next run provisions the selected payload instead of reusing an earlier installation. The checksum-pinned base image remains cached.
+
+The `gnome` profile tests desktop-session autostart only. GDM stays above external application windows and hides Axidev OSK on the login screen ([GitHub issue #35](https://github.com/axide-dev/axidev-osk/issues/35)); GNOME also hides the keyboard in the workspace switcher.
+
+QEMU exposes the cached source through a read-only 9p device during provisioning. Cloud-init mounts it temporarily, runs the lifecycle installer, and unmounts it before reboot. The installed application runs from `/opt/axidev-osk` through `/usr/local/bin/axidev-osk`; the guest does not retain a host payload mount.
+
+Hyprland, KDE, and `lightdm-x11` enable login-screen startup through the installed application command line. Hyprland keeps its existing greetd session command, KDE uses Plasma Login Manager, and `lightdm-x11` uses LightDM. KDE, GNOME, and `lightdm-x11` also keep the selected user's separate XDG autostart entry.
+
+The runner opens a GTK QEMU window. It uses KVM when `/dev/kvm` is accessible and otherwise uses slower software emulation.
+
+QEMU testing is a manual acceptance test. Keep the GTK QEMU window visible and have a person test every profile. The person must verify that the expected login screen or desktop appears, Axidev OSK renders in the correct place, and pressing its keys enters the expected input in a focused field.
+
+A profile does not pass because SSH works, cloud-init finishes, configuration status reports `ok`, a display-manager service is active, or an Axidev OSK process exists. Those checks are diagnostics only and cannot prove rendering or interaction behavior. Automation may prepare the machine, open the window, and collect diagnostics, but it must report the profile as untested until the person using the window records a pass or failure. Do not replace the GTK display with `-display none` for an acceptance test.
