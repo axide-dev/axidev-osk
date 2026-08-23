@@ -105,6 +105,8 @@ axidev-osk linux status-greeter
 axidev-osk linux remove-greeter
 ```
 
+The status commands verify managed integration configuration and, where applicable, `uinput` access. They do not start Axidev OSK or prove that the keyboard renders or emits key input.
+
 `setup-greeter` shows an arrow-key menu of installed supported managers. Scripts can select one directly with `--manager plasma-login`, `--manager greetd`, or `--manager lightdm`. Setup checks the selected manager and its current configuration before writing files. It does not restart the display manager, so reboot or restart it after setup.
 
 Plasma Login Manager and LightDM use their own greeter startup hooks. The greetd adapter saves and wraps the existing default-session command. It starts that command before Axidev OSK, keeps the greeter authoritative, and restores the exact command during removal.

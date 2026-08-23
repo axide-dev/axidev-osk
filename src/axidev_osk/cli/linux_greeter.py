@@ -116,7 +116,7 @@ class _ManagerAdapter:
 def register_runtime_commands(commands: argparse._SubParsersAction[Any]) -> None:
     """Register internal commands used by display-manager startup hooks."""
 
-    keyboard = commands.add_parser("run-greeter-keyboard", help=argparse.SUPPRESS)
+    keyboard = commands.add_parser("run-greeter-keyboard")
     keyboard.add_argument("--manager", choices=tuple(_MANAGER_ADAPTERS), required=True)
     keyboard.add_argument("--parent-pid", type=int)
     keyboard.add_argument("--discover-display", action="store_true")

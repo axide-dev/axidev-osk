@@ -12,6 +12,39 @@ from axidev_osk.cli import linux
 
 
 class LinuxCliTests(unittest.TestCase):
+    def test_public_help_describes_configuration_and_hides_runtime_command(self) -> None:
+        parser = argparse.ArgumentParser()
+        linux.register_commands(parser)
+        output = io.StringIO()
+
+        with patch("sys.stdout", output), self.assertRaises(SystemExit) as exit_context:
+            parser.parse_args(["--help"])
+
+        self.assertEqual(exit_context.exception.code, 0)
+        help_text = output.getvalue()
+        self.assertIn("setup-autostart", help_text)
+        self.assertIn("configure desktop-session startup", help_text)
+        self.assertIn("status-greeter", help_text)
+        self.assertIn("check login-screen startup configuration", help_text)
+        self.assertNotIn("run-greeter-keyboard", help_text)
+
+    def test_status_command_reports_configuration_only_scope(self) -> None:
+        namespace = argparse.Namespace(action="status", resource="permissions", user=None)
+        account = linux.Account("alice", 1000, 1000, Path("/home/alice"))
+        with (
+            patch.object(linux.sys, "platform", "linux"),
+            patch.object(linux, "_resolve_account", return_value=account),
+            patch.object(linux, "_run_permissions", return_value=0),
+            patch("builtins.print") as output,
+        ):
+            result = linux.run_command(namespace, ["linux", "status-permissions"])
+
+        self.assertEqual(result, 0)
+        output.assert_any_call(
+            "Status scope: managed integration configuration and uinput checks where "
+            "applicable; startup, rendering, and key input are not tested."
+        )
+
     def test_service_account_does_not_require_home_directory(self) -> None:
         record = SimpleNamespace(
             pw_name="lightdm", pw_uid=42, pw_gid=42, pw_dir="/missing/lightdm"

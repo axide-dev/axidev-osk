@@ -53,17 +53,20 @@ class Account:
 def register_commands(parser: argparse.ArgumentParser) -> None:
     """Register Linux lifecycle commands on an argparse platform parser."""
 
-    commands = parser.add_subparsers(dest="linux_command", required=True)
     definitions = (
         ("setup-permissions", "setup", "permissions", True, "configure uinput access"),
-        ("status-permissions", "status", "permissions", True, "check uinput access"),
+        ("status-permissions", "status", "permissions", True, "check uinput configuration"),
         ("remove-permissions", "remove", "permissions", False, "disable the Axidev OSK udev rule"),
-        ("setup-autostart", "setup", "autostart", True, "start Axidev OSK with a desktop session"),
-        ("status-autostart", "status", "autostart", True, "check desktop-session autostart"),
-        ("remove-autostart", "remove", "autostart", True, "remove desktop-session autostart"),
-        ("setup-greeter", "setup", "greeter", False, "start Axidev OSK on a login screen"),
-        ("status-greeter", "status", "greeter", False, "check login-screen startup"),
-        ("remove-greeter", "remove", "greeter", False, "remove login-screen startup"),
+        ("setup-autostart", "setup", "autostart", True, "configure desktop-session startup"),
+        ("status-autostart", "status", "autostart", True, "check desktop-session startup configuration"),
+        ("remove-autostart", "remove", "autostart", True, "remove desktop-session startup configuration"),
+        ("setup-greeter", "setup", "greeter", False, "configure login-screen startup"),
+        ("status-greeter", "status", "greeter", False, "check login-screen startup configuration"),
+        ("remove-greeter", "remove", "greeter", False, "remove login-screen startup configuration"),
+    )
+    command_names = ",".join(definition[0] for definition in definitions)
+    commands = parser.add_subparsers(
+        dest="linux_command", required=True, metavar=f"{{{command_names}}}"
     )
     for name, action, resource, accepts_user, help_text in definitions:
         command = commands.add_parser(name, help=help_text, description=help_text)
@@ -90,6 +93,11 @@ def run_command(namespace: argparse.Namespace, argv: list[str]) -> int:
         return 2
 
     try:
+        if namespace.action == "status":
+            print(
+                "Status scope: managed integration configuration and uinput checks where "
+                "applicable; startup, rendering, and key input are not tested."
+            )
         if namespace.resource == "greeter":
             from . import linux_greeter
 

@@ -148,6 +148,8 @@ axidev-osk linux status-greeter
 sudo axidev-osk linux remove-greeter
 ```
 
+The status commands verify managed integration configuration and, where applicable, `uinput` access. They do not start Axidev OSK or prove that the keyboard renders or emits key input.
+
 Without `--manager`, setup lists the supported managers installed on the host. Use the option for unattended setup:
 
 ```bash
