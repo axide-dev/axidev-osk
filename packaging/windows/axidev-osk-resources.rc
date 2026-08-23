@@ -1,0 +1,7 @@
+LANGUAGE 9, 1
+
+STRINGTABLE
+BEGIN
+    101 "Axidev OSK Development"
+    102 "Axidev OSK development on-screen keyboard."
+END

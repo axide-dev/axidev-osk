@@ -43,6 +43,22 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertTrue((assets / "axidev-osk.svg").is_file())
         self.assertTrue((assets / "axidev-osk.ico").is_file())
 
+    def test_accessibility_resource_dll_is_packaged(self) -> None:
+        resource_source = WINDOWS_PACKAGING / "axidev-osk-resources.rc"
+        resource_dll = WINDOWS_PACKAGING / "axidev-osk-resources.dll"
+        build_script = WINDOWS_PACKAGING / "build-resources.ps1"
+        spec = (WINDOWS_PACKAGING / "axidev-osk.spec").read_text(encoding="utf-8")
+
+        self.assertIn('101 "Axidev OSK Development"', resource_source.read_text(encoding="utf-8"))
+        self.assertIn(
+            '102 "Axidev OSK development on-screen keyboard."',
+            resource_source.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(resource_dll.read_bytes()[:2], b"MZ")
+        self.assertTrue(build_script.is_file())
+        self.assertIn('resources_dll = Path(SPECPATH) / "axidev-osk-resources.dll"', spec)
+        self.assertIn('(str(resources_dll), ".")', spec)
+
     def test_release_bootstrap_uses_latest_release_source(self) -> None:
         bootstrap = (
             WINDOWS_PACKAGING / "axidev-osk-windows-install.ps1"
@@ -74,6 +90,78 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("$ShortcutNewPath", admin_script)
         self.assertIn("$ShortcutOldPath", admin_script)
         self.assertIn("Remove-Item -LiteralPath $ShortcutPath", admin_script)
+
+    def test_development_installer_registers_one_accessibility_application(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
+        install_script = (WINDOWS_PACKAGING / "install-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('"Axidev_AxidevOSK_Development_v1.0"', admin_script)
+        self.assertNotIn("SecureDesktopAccommodation", admin_script)
+        self.assertNotIn("StartParams", admin_script)
+        self.assertNotIn("--secure-desktop", admin_script)
+        self.assertIn("Install-AccessibilityRegistration", admin_script)
+        for property_name in (
+            "ApplicationName",
+            "Description",
+            "ATExe",
+            "StartExe",
+            "Profile",
+            "SimpleProfile",
+            "TerminateOnDesktopSwitch",
+        ):
+            self.assertIn(f'-Name "{property_name}"', admin_script)
+        self.assertIn("Backup-AccessibilityRegistration", admin_script)
+        self.assertIn("Restore-AccessibilityRegistration", admin_script)
+        registration_function = admin_script.split("function Install-AccessibilityRegistration", 1)[1].split(
+            "function New-StartMenuShortcut", 1
+        )[0]
+        self.assertLess(
+            registration_function.index("Remove-Item -LiteralPath $RegistrationPath"),
+            registration_function.index("New-Item -ItemType Directory -Path $RegistrationPath"),
+        )
+        self.assertIn("Enable-AxidevAccessibilityAutoStart", install_script)
+        self.assertEqual(install_script.count("-Verb RunAs"), 1)
+        self.assertIn('Join-Path $TransactionPath "ready"', install_script)
+        self.assertIn('Join-Path $TransactionPath "commit"', install_script)
+        self.assertIn('Join-Path $TransactionPath "rollback"', install_script)
+
+    def test_development_installer_signs_and_registers_resource_dll(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
+        install_script = (WINDOWS_PACKAGING / "install-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$ResourceDllName = "axidev-osk-resources.dll"', install_script)
+        self.assertIn("Path = $BundledResourcePath", install_script)
+        self.assertIn('Description = "resource DLL"', install_script)
+        self.assertIn('Assert-ExpectedSignature $sourceResourceDll "resource DLL"', admin_script)
+        self.assertIn(
+            '(Join-Path $NewPath $ResourceDllName) "resource DLL" -RequireTrusted',
+            admin_script,
+        )
+        self.assertNotIn("function Assert-TrustedSignature", admin_script)
+        self.assertIn('-Value "@$resourcePath,-101"', admin_script)
+        self.assertIn('-Value "@$resourcePath,-102"', admin_script)
+
+    def test_development_uninstaller_removes_only_axidev_auto_start(self) -> None:
+        admin_script = (WINDOWS_PACKAGING / "development-admin.ps1").read_text(encoding="utf-8")
+        uninstall_script = (WINDOWS_PACKAGING / "uninstall-development.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("Disable-AxidevAccessibilityAutoStart", uninstall_script)
+        self.assertIn("$_ -ne $NormalRegistrationName", uninstall_script)
+        self.assertNotIn('Join-Path $AccessibilityRoot "osk"', uninstall_script)
+        self.assertLess(
+            uninstall_script.rindex("Disable-AxidevAccessibilityAutoStart"),
+            uninstall_script.index("$AdminProcess = Start-Process"),
+        )
+        uninstall_block = admin_script.split('if ($Mode -eq "Uninstall")', 1)[1].split(
+            "if (-not $SourceDirectory", 1
+        )[0]
+        self.assertLess(
+            uninstall_block.index("Remove-Item -LiteralPath $RegistrationPath"),
+            uninstall_block.index("Stop-AxidevOsk"),
+        )
+        self.assertIn("Restore-AccessibilityRegistration $TransactionPath", uninstall_block)
+        self.assertIn('Join-Path $TransactionPath "restore-configuration"', uninstall_block)
+        self.assertIn('Join-Path $NativeStage "restore-configuration"', uninstall_script)
 
 
 if __name__ == "__main__":

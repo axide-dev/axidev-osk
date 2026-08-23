@@ -17,6 +17,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  windows-resources:
+    name: Windows Resource DLL
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Rebuild and compare resource DLL
+        shell: pwsh
+        run: |
+          $rebuilt = Join-Path $env:RUNNER_TEMP "axidev-osk-resources.dll"
+          .\packaging\windows\build-resources.ps1 `
+            -OutputPath $rebuilt `
+            -VerifyAgainst .\packaging\windows\axidev-osk-resources.dll
+
   static:
     name: Static Packaging Checks
     runs-on: ubuntu-24.04
