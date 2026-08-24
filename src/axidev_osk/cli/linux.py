@@ -279,7 +279,7 @@ def _uinput_mode_is_ready(group_gid: int) -> bool:
 
 def _reload_udev(*, ensure_device: bool = False) -> None:
     _run_checked(["udevadm", "control", "--reload-rules"])
-    if ensure_device and not UINPUT_PATH.exists():
+    if ensure_device:
         _run_checked(["modprobe", "uinput"])
     _run_checked(["udevadm", "settle"])
     if UINPUT_PATH.exists():

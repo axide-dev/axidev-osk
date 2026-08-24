@@ -1,7 +1,7 @@
 # Maintainer: Axidev <contact@axide.dev>
 
 pkgname=axidev-osk
-pkgver=0.17.1
+pkgver=0.17.2
 pkgrel=1
 pkgdesc='On-screen keyboard overlay with real key emission'
 arch=('x86_64')

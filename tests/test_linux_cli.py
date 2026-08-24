@@ -282,9 +282,9 @@ class LinuxCliTests(unittest.TestCase):
         ensure_module.assert_called_once_with(linux.MODULES_LOAD_PATH, linux.MODULES_LOAD_TEXT)
         reload_udev.assert_called_once_with(ensure_device=True)
 
-    def test_reload_udev_loads_and_settles_missing_device(self) -> None:
+    def test_reload_udev_loads_module_when_static_device_node_exists(self) -> None:
         input_path = Mock()
-        input_path.exists.side_effect = [False, True]
+        input_path.exists.return_value = True
         with (
             patch.object(linux, "UINPUT_PATH", input_path),
             patch.object(linux, "_run_checked") as run,
