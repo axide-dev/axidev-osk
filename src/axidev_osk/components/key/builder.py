@@ -19,9 +19,11 @@ class KeyboardGridHost(Protocol):
     @property
     def key_metrics(self) -> KeyboardMetrics:
         """Pixel metrics inherited by child key/spacer components."""
+        ...
 
     def build_key_from_config(self, config: KeyConfig, context: Context) -> QWidget:
         """Build a key child using the owning grid's runtime wiring."""
+        ...
 
 
 def register(registry: ComponentRegistry) -> None:

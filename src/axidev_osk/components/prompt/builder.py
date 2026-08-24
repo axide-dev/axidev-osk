@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVB
 
 from ...config.models import ButtonConfig, ComponentConfig, PromptConfig
 from ...runtime.context import Context
-from ...runtime.events import PromptResolved
+from ...runtime.events import prompt_resolved
 from ...runtime.identity import prompt_button_id
 from ...runtime.registries import ComponentRegistry
 
@@ -190,4 +190,4 @@ def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, but
     """
 
     del window_child
-    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=button.role))
+    context.dispatcher.dispatch_event(prompt_resolved(prompt_id, button.role))

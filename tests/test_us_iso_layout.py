@@ -92,11 +92,17 @@ def test_ghost_key_uses_the_near_bracket_slot_and_targets_configured_window() ->
     target_window_id = "window:alternate"
     specs = build_us_iso_layout(target_window_id=target_window_id)
     ghost = next(spec for spec in specs if spec.label == "Ghost")
+    config_ghost = next(
+        component
+        for component in build_us_iso_layout_config(target_window_id=target_window_id).grids[0].components
+        if component.spec.label == "Ghost"
+    )
 
     assert (ghost.row, ghost.column, ghost.width) == (2, 54, 1.0)
     assert ghost.io_key is None
     assert ghost.repeats is False
     assert ghost.action is not None
-    assert ghost.action.kind == "toggle-opacity"
-    assert ghost.action.target_window_id == target_window_id
-    assert ghost.action.opacity == 0.01
+    assert ghost.action.action == "window.toggle_opacity"
+    assert ghost.action.arguments["window_id"] == target_window_id
+    assert ghost.action.arguments["component_id"] == config_ghost.id
+    assert ghost.action.arguments["opacity"] == 0.01

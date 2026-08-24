@@ -10,7 +10,8 @@ from uuid import uuid4
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from axidev_osk.runtime.commands import WindowShow
+from axidev_osk.messages import MessageResult
+from axidev_osk.runtime.actions import WINDOW_SHOW, WindowArguments, decode_window, window_show
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.services import register_services
@@ -52,8 +53,13 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
     def test_second_launch_activates_primary_instance(self) -> None:
         _app()
         context = make_test_context(FakeKeyboardBackend())
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, commands.append)
+        actions: list[object] = []
+
+        def record(arguments: WindowArguments) -> MessageResult:
+            actions.append(window_show(arguments.window_id))
+            return []
+
+        context.dispatcher.register_action(WINDOW_SHOW, decode_window, record)
         primary = WindowsSingleInstanceService()
         secondary = WindowsSingleInstanceService()
         server_name = f"axidev-osk-test-{uuid4().hex}"
@@ -74,7 +80,7 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
                 secondary.stop()
                 primary.stop()
 
-        self.assertEqual(commands, [WindowShow(context.config.keyboard_window_id)])
+        self.assertEqual(actions, [window_show(context.config.keyboard_window_id)])
 
 
 if __name__ == "__main__":

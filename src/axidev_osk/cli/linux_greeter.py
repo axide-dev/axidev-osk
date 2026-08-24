@@ -254,9 +254,12 @@ def _select_manager(
     key_reader: Callable[[], str] | None = None,
     output: TextIO | None = None,
 ) -> str:
-    output = output or sys.stdout
+    output = output if output is not None else sys.stdout
+    if output is None:
+        raise linux.LinuxSetupError("interactive selection requires an output stream")
     if key_reader is None:
-        if not sys.stdin.isatty() or not output.isatty():
+        input_stream = sys.stdin
+        if input_stream is None or not input_stream.isatty() or not output.isatty():
             raise linux.LinuxSetupError("--manager is required without an interactive terminal")
         key_reader = _terminal_key_reader
 
@@ -287,10 +290,13 @@ def _select_manager(
 def _terminal_key_reader() -> str:
     if termios is None or tty is None:
         raise linux.LinuxSetupError("interactive selection is unavailable in this terminal")
-    descriptor = sys.stdin.fileno()
-    previous = termios.tcgetattr(descriptor)
+    input_stream = sys.stdin
+    if input_stream is None:
+        raise linux.LinuxSetupError("interactive selection requires an input stream")
+    descriptor = input_stream.fileno()
+    previous = termios.tcgetattr(descriptor)  # type: ignore[attr-defined]
     try:
-        tty.setraw(descriptor)
+        tty.setraw(descriptor)  # type: ignore[attr-defined]
         first = os.read(descriptor, 1)
         if first in {b"\r", b"\n"}:
             return "enter"
@@ -304,7 +310,7 @@ def _terminal_key_reader() -> str:
         third = os.read(descriptor, 1)
         return {b"A": "up", b"B": "down"}.get(third, "unknown")
     finally:
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, previous)  # type: ignore[attr-defined]
 
 
 def _installed_launcher() -> Path:
@@ -974,7 +980,11 @@ def _read_process_environment(pid: int) -> dict[str, str] | None:
 
 def _install_signal_handlers(handler: Callable[[int, Any], None]) -> dict[int, Any]:
     previous = {}
-    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signals = [signal.SIGTERM, signal.SIGINT]
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None:
+        signals.append(sighup)
+    for signum in signals:
         previous[signum] = signal.signal(signum, handler)
     return previous
 

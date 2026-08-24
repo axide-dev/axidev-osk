@@ -16,7 +16,11 @@ embedded Python knowledge.
 
 from __future__ import annotations
 
-from ...models import KeyDisplay, KeySpec, WindowAction
+from dataclasses import replace
+
+from ...messages import RuntimeAction
+from ...models import KeyDisplay, KeySpec
+from ...runtime.actions import window_toggle_opacity
 from ...runtime.identity import key_component_id, stable_id, validate_unique_ids
 from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
@@ -24,6 +28,8 @@ from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 UNIT = 4
 MAIN_BLOCK_WIDTH = 60
 NAV_START = 64
+LAYOUT_ID = "layout:us-iso"
+GRID_ID = "grid:us-iso:keyboard"
 
 
 def key(
@@ -42,7 +48,7 @@ def key(
     honors_latched_modifiers: bool = True,
     repeats: bool = True,
     display_variants: tuple[KeyDisplay, ...] = (),
-    action: WindowAction | None = None,
+    action: RuntimeAction | None = None,
 ) -> KeySpec:
     """Build a key spec with default keyboard-layout behavior."""
 
@@ -100,6 +106,21 @@ def u(value: int) -> int:
     """Convert logical layout units to sparse grid columns."""
 
     return value * UNIT
+
+
+def _component_id(grid_id: str, spec: KeySpec) -> str:
+    kind = "spacer" if spec.is_spacer else "key"
+    return key_component_id(
+        grid_id,
+        kind,
+        row=spec.row,
+        column=spec.column,
+        width=spec.width,
+        height=spec.height,
+        key_id=spec.key_id,
+        io_key=spec.io_key,
+        label=spec.label,
+    )
 
 
 def shifted_key(
@@ -179,7 +200,7 @@ def letter_key(
 def build_us_iso_layout(*, target_window_id: str = "window:keyboard") -> list[KeySpec]:
     """Return the bundled US ISO layout as ordered key specs."""
 
-    return [
+    specs = [
         key("Esc", row=0, column=u(0), io_key="Escape"),
         key("F1", row=0, column=u(2)),
         key("F2", row=0, column=u(3)),
@@ -232,11 +253,6 @@ def build_us_iso_layout(*, target_window_id: str = "window:keyboard") -> list[Ke
             row=2,
             column=54,
             repeats=False,
-            action=WindowAction(
-                kind="toggle-opacity",
-                target_window_id=target_window_id,
-                opacity=0.01,
-            ),
         ),
         key("Del", row=2, column=NAV_START, io_key="Delete"),
         key("End", row=2, column=NAV_START + u(1), io_key="End"),
@@ -319,6 +335,13 @@ def build_us_iso_layout(*, target_window_id: str = "window:keyboard") -> list[Ke
         key("↓", row=5, column=NAV_START + u(1), io_key="Down"),
         key("→", row=5, column=NAV_START + u(2), io_key="Right"),
     ]
+    ghost_index = next(index for index, spec in enumerate(specs) if spec.label == "Ghost")
+    ghost = specs[ghost_index]
+    specs[ghost_index] = replace(
+        ghost,
+        action=window_toggle_opacity(target_window_id, _component_id(GRID_ID, ghost), 0.01),
+    )
+    return specs
 
 
 def build_us_iso_layout_config(
@@ -338,22 +361,11 @@ def build_us_iso_layout_config(
         Raises ``ValueError`` if deterministic IDs collide.
     """
 
-    layout_id = stable_id(parent_id, "layout", "us_iso", stable_override="layout:us-iso")
-    grid_id = stable_id(layout_id, "grid", "keyboard", stable_override="grid:us-iso:keyboard")
+    layout_id = stable_id(parent_id, "layout", "us_iso", stable_override=LAYOUT_ID)
+    grid_id = stable_id(layout_id, "grid", "keyboard", stable_override=GRID_ID)
     components: list[KeyConfig | SpacerConfig] = []
     for spec in build_us_iso_layout(target_window_id=target_window_id):
-        kind = "spacer" if spec.is_spacer else "key"
-        component_id = key_component_id(
-            grid_id,
-            kind,
-            row=spec.row,
-            column=spec.column,
-            width=spec.width,
-            height=spec.height,
-            key_id=spec.key_id,
-            io_key=spec.io_key,
-            label=spec.label,
-        )
+        component_id = _component_id(grid_id, spec)
         if spec.is_spacer:
             components.append(SpacerConfig(id=component_id, spec=spec))
             continue

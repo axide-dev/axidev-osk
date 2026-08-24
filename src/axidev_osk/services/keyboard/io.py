@@ -6,6 +6,7 @@ import logging
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
 
@@ -304,6 +305,12 @@ class AxidevIoKeyboardBackend:
         if submodule_path.is_dir():
             return "Install the submodule package with `python -m pip install -e ./vendor/axidev-io-python`."
         return "Initialize the submodule, then install it with `python -m pip install -e ./vendor/axidev-io-python`."
+
+    @staticmethod
+    def _repo_root() -> Path:
+        """Return the source checkout root containing the vendored backend."""
+
+        return Path(__file__).resolve().parents[4]
 
     def _build_permission_setup_text(self) -> str:
         return (

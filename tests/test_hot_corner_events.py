@@ -9,11 +9,25 @@ from unittest.mock import patch
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication
 
+from axidev_osk.messages import MessageResult, RuntimeAction
 from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.commands import WindowHide, WindowShow, WindowToggleOpacity
-from axidev_osk.runtime.events import ComponentPressed, HotCornerTriggered
+from axidev_osk.runtime.actions import (
+    WINDOW_SHOW,
+    WindowArguments,
+    decode_window,
+    window_hide,
+    window_show,
+    window_toggle_opacity,
+)
+from axidev_osk.runtime.events import (
+    HOT_CORNER_TRIGGERED,
+    HotCornerTriggeredArguments,
+    component_pressed,
+    decode_component_pressed,
+    hot_corner_triggered,
+)
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 
@@ -78,8 +92,13 @@ class HotCornerEventTests(unittest.TestCase):
 
     def test_dwell_completion_emits_hot_corner_triggered(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
-        events: list[object] = []
-        context.dispatcher.add_event_handler(events.append)
+        events: list[HotCornerTriggeredArguments] = []
+
+        def record_event(event: HotCornerTriggeredArguments) -> MessageResult:
+            events.append(event)
+            return []
+
+        context.dispatcher.add_event_handler(HOT_CORNER_TRIGGERED, record_event)
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
 
         with patch(
@@ -98,7 +117,7 @@ class HotCornerEventTests(unittest.TestCase):
             with patch.object(controller, "_show_indicator_for_screen"):
                 controller._poll_active_sensor()
 
-            self.assertEqual(events, [HotCornerTriggered(corner="bottom_left")])
+            self.assertEqual(events, [HotCornerTriggeredArguments(corner="bottom_left")])
         finally:
             controller.stop()
             controller._indicator.close()
@@ -109,10 +128,6 @@ class HotCornerEventTests(unittest.TestCase):
             context.config,
             hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
         )
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
-        context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
-
         class FakeWindowManager:
             def is_minimized(self, window_id: str) -> bool:
                 return False
@@ -128,9 +143,9 @@ class HotCornerEventTests(unittest.TestCase):
         runtime._dispatcher = context.dispatcher
         runtime._window_manager = FakeWindowManager()
 
-        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+        actions = runtime._handle_hot_corner_triggered(HotCornerTriggeredArguments(corner="bottom_left"))
 
-        self.assertEqual(commands, [WindowShow("window:keyboard")])
+        self.assertEqual(actions, [window_show("window:keyboard")])
 
     def test_runtime_handler_hides_visible_bound_window(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
@@ -138,10 +153,6 @@ class HotCornerEventTests(unittest.TestCase):
             context.config,
             hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
         )
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
-        context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
-
         class FakeWindowManager:
             def is_minimized(self, window_id: str) -> bool:
                 return False
@@ -157,9 +168,9 @@ class HotCornerEventTests(unittest.TestCase):
         runtime._dispatcher = context.dispatcher
         runtime._window_manager = FakeWindowManager()
 
-        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+        actions = runtime._handle_hot_corner_triggered(HotCornerTriggeredArguments(corner="bottom_left"))
 
-        self.assertEqual(commands, [WindowHide("window:keyboard")])
+        self.assertEqual(actions, [window_hide("window:keyboard")])
 
     def test_runtime_handler_restores_minimized_bound_window(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
@@ -167,9 +178,6 @@ class HotCornerEventTests(unittest.TestCase):
             context.config,
             hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
         )
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
-
         class FakeWindowManager:
             def is_minimized(self, window_id: str) -> bool:
                 return True
@@ -185,9 +193,9 @@ class HotCornerEventTests(unittest.TestCase):
         runtime._dispatcher = context.dispatcher
         runtime._window_manager = FakeWindowManager()
 
-        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+        actions = runtime._handle_hot_corner_triggered(HotCornerTriggeredArguments(corner="bottom_left"))
 
-        self.assertEqual(commands, [WindowShow("window:keyboard")])
+        self.assertEqual(actions, [window_show("window:keyboard")])
 
     def test_runtime_handler_restores_ghosted_window_without_hiding_it(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
@@ -195,10 +203,6 @@ class HotCornerEventTests(unittest.TestCase):
             context.config,
             hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
         )
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
-        context.dispatcher.add_command_handler(WindowHide, lambda command: commands.append(command))
-
         class FakeWindowManager:
             def is_minimized(self, window_id: str) -> bool:
                 return False
@@ -214,9 +218,9 @@ class HotCornerEventTests(unittest.TestCase):
         runtime._dispatcher = context.dispatcher
         runtime._window_manager = FakeWindowManager()
 
-        runtime._handle_hot_corner_triggered(HotCornerTriggered(corner="bottom_left"))
+        actions = runtime._handle_hot_corner_triggered(HotCornerTriggeredArguments(corner="bottom_left"))
 
-        self.assertEqual(commands, [WindowShow("window:keyboard")])
+        self.assertEqual(actions, [window_show("window:keyboard")])
 
     def test_make_test_context_installs_default_event_handlers(self) -> None:
         config = replace(
@@ -224,12 +228,17 @@ class HotCornerEventTests(unittest.TestCase):
             hot_corner=HotCornerConfig(bindings={"bottom_left": ["window:keyboard"]}),
         )
         context = make_test_context(FakeKeyboardBackend(), config=config, event_handlers=True)
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, lambda command: commands.append(command))
+        actions: list[RuntimeAction] = []
 
-        context.dispatcher.dispatch_event(HotCornerTriggered(corner="bottom_left"))
+        def record_action(arguments: WindowArguments) -> MessageResult:
+            actions.append(window_show(arguments.window_id))
+            return []
 
-        self.assertEqual(commands, [WindowShow("window:keyboard")])
+        context.dispatcher.register_action(WINDOW_SHOW, decode_window, record_action, override=True)
+
+        context.dispatcher.dispatch_event(hot_corner_triggered("bottom_left"))
+
+        self.assertEqual(actions, [window_show("window:keyboard")])
 
     def test_component_action_dispatches_configured_window_opacity_command(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
@@ -238,26 +247,17 @@ class HotCornerEventTests(unittest.TestCase):
             for component in context.config.windows[0].surface.components[0].layout.grids[0].components
             if component.spec.label == "Ghost"
         )
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(
-            WindowToggleOpacity,
-            lambda command: commands.append(command),
-        )
         runtime = ApplicationRuntime.__new__(ApplicationRuntime)
         runtime._dispatcher = context.dispatcher
 
-        runtime._handle_component_pressed(
-            ComponentPressed(component_id=ghost.id, key_spec=ghost.spec)
-        )
+        event = component_pressed(ghost.id, ghost.spec.action)
+        arguments = decode_component_pressed(event.arguments)
+        actions = runtime._handle_component_pressed(arguments)
 
         self.assertEqual(
-            commands,
+            actions,
             [
-                WindowToggleOpacity(
-                    window_id="window:keyboard",
-                    component_id=ghost.id,
-                    opacity=0.01,
-                )
+                window_toggle_opacity("window:keyboard", ghost.id, 0.01)
             ],
         )
 

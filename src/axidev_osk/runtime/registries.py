@@ -4,7 +4,7 @@
 component and surface registries instead of extending ``Dispatcher`` directly.
 Application/window orchestration handlers need runtime-owned collaborators such
 as ``WindowManager`` and ``QApplication``; keeping those factories in a registry
-preserves ``Dispatcher`` as a generic command/event router rather than making it
+preserves ``Dispatcher`` as a generic action/event router rather than making it
 aware of application policy.
 """
 
@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import ComponentConfig, SurfaceConfig
-from .commands import RuntimeCommand
-from .events import RuntimeEvent
+from ..messages import DataMap, MessageResult
 
 if TYPE_CHECKING:
     from .context import Context
@@ -39,8 +38,10 @@ class RuntimeService(Protocol):
         """Stop the service and release owned resources."""
 
 
-CommandHandlerFactory = Callable[[RuntimeT], Callable[[RuntimeCommand], object | None]]
-EventHandlerFactory = Callable[[RuntimeT], Callable[[RuntimeEvent], object | None]]
+DecodedT = TypeVar("DecodedT")
+Decoder = Callable[[DataMap], DecodedT]
+MessageHandler = Callable[[DecodedT], MessageResult]
+MessageHandlerFactory = Callable[[RuntimeT], MessageHandler[DecodedT]]
 
 
 class ComponentRegistry:
@@ -201,32 +202,47 @@ class ServiceRegistry:
 
 
 class EventHandlerRegistry:
-    """Stores default command and event handler factories for installation."""
+    """Stores default action and event handler factories for installation."""
 
     def __init__(self) -> None:
         """Create an empty handler registry."""
 
-        self._command_handlers: list[tuple[type[object], CommandHandlerFactory[object]]] = []
-        self._event_handlers: list[EventHandlerFactory[object]] = []
+        self._action_handlers: list[
+            tuple[str, Decoder[object], MessageHandlerFactory[object, object]]
+        ] = []
+        self._event_handlers: list[tuple[str, MessageHandlerFactory[object, object]]] = []
 
-    def register_command_handler(
+    def register_action_handler(
         self,
-        command_type: type[object],
-        factory: CommandHandlerFactory[RuntimeT],
+        name: str,
+        decoder: Decoder[DecodedT],
+        factory: MessageHandlerFactory[RuntimeT, DecodedT],
     ) -> None:
-        """Register a command handler factory."""
+        """Register an action decoder and typed handler factory."""
 
-        self._command_handlers.append((command_type, cast(CommandHandlerFactory[object], factory)))
+        self._action_handlers.append(
+            (
+                name,
+                cast(Decoder[object], decoder),
+                cast(MessageHandlerFactory[object, object], factory),
+            )
+        )
 
-    def register_event_handler(self, factory: EventHandlerFactory[RuntimeT]) -> None:
-        """Register an event handler factory."""
+    def register_event_handler(
+        self,
+        name: str,
+        factory: MessageHandlerFactory[RuntimeT, DecodedT],
+    ) -> None:
+        """Register a typed event handler factory."""
 
-        self._event_handlers.append(cast(EventHandlerFactory[object], factory))
+        self._event_handlers.append(
+            (name, cast(MessageHandlerFactory[object, object], factory))
+        )
 
     def install(self, dispatcher: "Dispatcher", runtime: object) -> None:
         """Install all registered handlers onto a dispatcher."""
 
-        for command_type, factory in self._command_handlers:
-            dispatcher.add_command_handler(command_type, factory(runtime))
-        for factory in self._event_handlers:
-            dispatcher.add_event_handler(factory(runtime))
+        for name, decoder, factory in self._action_handlers:
+            dispatcher.register_action(name, decoder, factory(runtime))
+        for name, factory in self._event_handlers:
+            dispatcher.add_event_handler(name, factory(runtime))

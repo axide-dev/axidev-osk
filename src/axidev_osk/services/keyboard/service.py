@@ -1,4 +1,4 @@
-"""Keyboard service boundary used by runtime commands and components."""
+"""Keyboard service boundary used by runtime actions and components."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ...models import KeySpec
-from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, KeyLatchChanged
+from ...runtime.events import keyboard_key_registered, keyboard_key_state_changed, keyboard_latch_changed
 from ...runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
 from .io import AxidevIoKeyboardBackend
 
 if TYPE_CHECKING:
-    from ..runtime.context import Context
+    from ...runtime.context import Context
 
 Unsubscribe = Callable[[], None]
 
@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 
 class KeyboardService:
-    """Owns keyboard backend lifecycle and exposes command-friendly methods."""
+    """Owns keyboard backend lifecycle and exposes action-friendly methods."""
 
     def __init__(self, backend: AxidevIoKeyboardBackend | None = None) -> None:
         """Create a keyboard service.
@@ -42,6 +42,7 @@ class KeyboardService:
         self._press_handles: dict[tuple[str, str], object | None] = {}
         self._latched_keys: dict[tuple[str, str], bool] = {}
         self._specs_by_key_name: dict[str, list[tuple[str, KeySpec]]] = {}
+        self._specs_by_component: dict[tuple[str, str], KeySpec] = {}
         self._layouts: set[str] = set()
         self._backend_listener_unsubscribe: Unsubscribe | None = None
 
@@ -132,6 +133,8 @@ class KeyboardService:
         key_name = self._backend.key_name_for_spec(spec)
         state_key = self._state_key_for_spec(spec)
         self._layouts.add(layout_id)
+        if component_id is not None:
+            self._specs_by_component[(layout_id, component_id)] = spec
         if state_key is None:
             return key_name
         latched = self._is_spec_latched(layout_id, spec)
@@ -148,11 +151,7 @@ class KeyboardService:
                 self._emit_key_state(layout_id, state_key, pressed=True, latched=latched)
         if component_id is not None and self._context is not None:
             self._context.dispatcher.dispatch_event(
-                BackendKeyRegistered(
-                    layout_id=layout_id,
-                    component_id=component_id,
-                    io_key_name=key_name,
-                )
+                keyboard_key_registered(layout_id, component_id, key_name)
             )
         return key_name
 
@@ -173,15 +172,19 @@ class KeyboardService:
         layouts.update(layout for layout, _key_id in self._latched_keys)
         self._release_press_handles()
         self._latched_keys.clear()
+        self._specs_by_key_name.clear()
+        self._specs_by_component.clear()
+        self._layouts.clear()
         if self._context is None:
             return
         for layout_id in layouts:
             self._context.state.clear_namespace(keyboard_key_states_namespace(layout_id))
             self._context.state.clear_namespace(keyboard_latches_namespace(layout_id))
 
-    def key_down(self, layout_id: str, spec: KeySpec) -> None:
+    def key_down(self, layout_id: str, component_id: str) -> None:
         """Emit a key-down action through the backend."""
 
+        spec = self._registered_spec(layout_id, component_id)
         latched_keys = self._latched_snapshot(layout_id)
         press_handle = self._backend.key_down(spec, latched_keys)
         state_key = self._state_key_for_spec(spec)
@@ -189,9 +192,10 @@ class KeyboardService:
             self._press_handles[self._press_handle_key(layout_id, spec, state_key)] = press_handle
             self._emit_key_state(layout_id, state_key, pressed=True, latched=self._is_spec_latched(layout_id, spec))
 
-    def key_up(self, layout_id: str, spec: KeySpec) -> None:
+    def key_up(self, layout_id: str, component_id: str) -> None:
         """Emit a key-up action through the backend."""
 
+        spec = self._registered_spec(layout_id, component_id)
         state_key = self._state_key_for_spec(spec)
         latched = self._is_spec_latched(layout_id, spec)
         press_handle = (
@@ -208,9 +212,10 @@ class KeyboardService:
                 latched=latched,
             )
 
-    def sync_latched_key(self, layout_id: str, spec: KeySpec, latched: bool) -> None:
+    def sync_latched_key(self, layout_id: str, component_id: str, latched: bool) -> None:
         """Synchronize logical latch state without changing backend activity."""
 
+        spec = self._registered_spec(layout_id, component_id)
         if spec.key_id is not None:
             self._set_latch_state(layout_id, spec.key_id, latched)
 
@@ -231,13 +236,13 @@ class KeyboardService:
         self._latched_keys[(layout_id, key_id)] = latched
         self._write_latch_state(layout_id, key_id, latched)
         if self._context is not None:
-            self._context.dispatcher.dispatch_event(KeyLatchChanged(layout_id=layout_id, key_id=key_id, latched=latched))
+            self._context.dispatcher.dispatch_event(keyboard_latch_changed(layout_id, key_id, latched))
 
     def _emit_key_state(self, layout_id: str, key_id: str, *, pressed: bool, latched: bool) -> None:
         self._write_key_state(layout_id, key_id, pressed=pressed, latched=latched)
         if self._context is not None:
             self._context.dispatcher.dispatch_event(
-                BackendKeyStateChanged(layout_id=layout_id, key_id=key_id, pressed=pressed, latched=latched)
+                keyboard_key_state_changed(layout_id, key_id, pressed, latched)
             )
 
     def _write_key_state(self, layout_id: str, key_id: str, *, pressed: bool, latched: bool) -> None:
@@ -267,6 +272,14 @@ class KeyboardService:
 
     def _registered_specs_for_layout(self, layout_id: str) -> list[tuple[str, KeySpec]]:
         return [registration for registrations in self._specs_by_key_name.values() for registration in registrations if registration[0] == layout_id]
+
+    def _registered_spec(self, layout_id: str, component_id: str) -> KeySpec:
+        spec = self._specs_by_component.get((layout_id, component_id))
+        if spec is None:
+            raise ValueError(
+                f"No key specification registered for layout {layout_id!r}, component {component_id!r}"
+            )
+        return spec
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
         return spec.io_key or spec.label or spec.key_id

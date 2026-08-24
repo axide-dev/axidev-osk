@@ -146,6 +146,10 @@ class LayoutConfig:
         """Validate IDs at the layout composition boundary."""
 
         validate_unique_ids((grid.id for grid in self.grids), scope=f"layout {self.id!r} grids")
+        validate_unique_ids(
+            (component.id for grid in self.grids for component in grid.components),
+            scope=f"layout {self.id!r} components",
+        )
 
 
 @dataclass(frozen=True, slots=True)

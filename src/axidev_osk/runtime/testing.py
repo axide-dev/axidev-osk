@@ -19,23 +19,29 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
-from .commands import AppQuit
+from ..messages import MessageResult
+from .actions import app_quit
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import (
-    register_context_command_handlers,
+    register_context_action_handlers,
     register_event_handlers,
     route_component_pressed,
     route_hot_corner_triggered,
 )
-from .events import WindowCloseRequested
+from .events import (
+    ComponentPressedArguments,
+    HotCornerTriggeredArguments,
+    WindowCloseRequestedArguments,
+    register_builtin_events,
+)
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
 
 
 class _TestApplication:
-    """Minimal QApplication-shaped adapter for default command handlers."""
+    """Minimal QApplication-shaped adapter for default action handlers."""
 
     def __init__(self) -> None:
         """Create an adapter that records requested exit codes."""
@@ -59,21 +65,21 @@ class _TestRuntime:
         self._window_manager = WindowManager(context)
         self._app = _TestApplication()
 
-    def _handle_window_close_requested(self, event: object) -> None:
-        """Map close requests to a direct test quit command."""
+    def _handle_window_close_requested(self, event: WindowCloseRequestedArguments) -> MessageResult:
+        """Map close requests to a direct test quit action."""
 
-        if isinstance(event, WindowCloseRequested):
-            self._dispatcher.dispatch_command(AppQuit())
+        del event
+        return [app_quit()]
 
-    def _handle_hot_corner_triggered(self, event: object) -> None:
-        """Route hot-corner visibility commands through production helper."""
+    def _handle_hot_corner_triggered(self, event: HotCornerTriggeredArguments) -> MessageResult:
+        """Route hot-corner visibility actions through production helper."""
 
-        route_hot_corner_triggered(event, self)
+        return route_hot_corner_triggered(event, self)
 
-    def _handle_component_pressed(self, event: object) -> None:
+    def _handle_component_pressed(self, event: ComponentPressedArguments) -> MessageResult:
         """Route configured component actions through production helper."""
 
-        route_component_pressed(event, self)
+        return route_component_pressed(event, self)
 
 def make_test_context(
     keyboard_backend: Any,
@@ -87,7 +93,7 @@ def make_test_context(
     """Build a runtime ``Context`` wrapping a test keyboard backend.
 
     The returned context is fully functional: it owns its own
-    ``Dispatcher`` (with default command handlers bound), ``StateStore``,
+    ``Dispatcher`` (with default action handlers bound), ``StateStore``,
     and registries. Tests can therefore exercise the same dispatch and
     state paths the production runtime uses.
 
@@ -117,6 +123,7 @@ def make_test_context(
     """
 
     dispatcher = Dispatcher()
+    register_builtin_events(dispatcher)
     keyboard = KeyboardService(cast(Any, keyboard_backend))
     if components is None:
         # Lazy import: avoids pulling Qt-bound builders into modules
@@ -133,9 +140,8 @@ def make_test_context(
         components=components,
         surfaces=surfaces or SurfaceRegistry(),
     )
-    dispatcher.bind_context(context)
     context_handlers = EventHandlerRegistry()
-    register_context_command_handlers(context_handlers)
+    register_context_action_handlers(context_handlers)
     context_handlers.install(dispatcher, context)
     if services is None:
         keyboard.bind_context(context)

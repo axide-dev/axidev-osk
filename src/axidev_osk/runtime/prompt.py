@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEventLoop
 
+from ..messages import MessageResult
 from .dispatcher import Dispatcher, Unsubscribe
-from .events import PromptResolved
+from .events import PROMPT_RESOLVED, PromptResolvedArguments
 
 
 class PromptResolutionWaiter:
@@ -29,7 +30,7 @@ class PromptResolutionWaiter:
     def start(self) -> None:
         """Subscribe to prompt resolution events."""
 
-        self._unsubscribe = self._dispatcher.add_event_handler(self._handle_prompt)
+        self._unsubscribe = self._dispatcher.add_event_handler(PROMPT_RESOLVED, self._handle_prompt)
 
     def stop(self) -> None:
         """Unsubscribe from prompt resolution events."""
@@ -38,11 +39,10 @@ class PromptResolutionWaiter:
             self._unsubscribe()
             self._unsubscribe = None
 
-    def _handle_prompt(self, event: object) -> None:
-        if not isinstance(event, PromptResolved):
-            return
+    def _handle_prompt(self, event: PromptResolvedArguments) -> MessageResult:
         if event.prompt_id != self._prompt_id:
-            return
+            return []
         self._result = event.result
         if self._event_loop.isRunning():
             self._event_loop.quit()
+        return []

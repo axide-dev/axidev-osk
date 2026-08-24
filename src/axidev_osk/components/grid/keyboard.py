@@ -8,12 +8,29 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QPushButton, QWidget
 
-from ...config.models import GridConfig, KeyConfig, LayoutConfig
+from ...config.models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 from ...models import KeySpec
-from ...runtime.commands import KeyboardKeyDown, KeyboardRegisterKeySpec, KeyboardKeyUp, KeyboardSyncLatchedKey, StateSet
+from ...messages import MessageResult, RuntimeAction, RuntimeEvent
+from ...runtime.actions import (
+    keyboard_key_down,
+    keyboard_key_up,
+    keyboard_register_key_spec,
+    keyboard_sync_latched_key,
+    state_set,
+)
 from ...runtime.context import Context
 from ...runtime.diagnostics import keyboard_debug_enabled
-from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, ComponentPressed, ComponentReleased, ComponentStateChanged, KeyLatchChanged
+from ...runtime.events import (
+    KEYBOARD_KEY_REGISTERED,
+    KEYBOARD_KEY_STATE_CHANGED,
+    KEYBOARD_LATCH_CHANGED,
+    KeyboardKeyRegisteredArguments,
+    KeyboardKeyStateChangedArguments,
+    KeyboardLatchChangedArguments,
+    component_pressed,
+    component_released,
+    component_state_changed,
+)
 from ...runtime.identity import component_state_namespace, keyboard_key_states_namespace, keyboard_latches_namespace
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
@@ -36,7 +53,7 @@ class KeyboardWidget(QFrame):
     """Keyboard grid component built from declarative layout data.
 
     The widget is a reusable composition primitive: it accepts a ``LayoutConfig``
-    and uses the runtime ``Context`` (when present) to dispatch commands and
+    and uses the runtime ``Context`` (when present) to dispatch actions and
     events through the central runtime instead of calling backend services
     directly.
 
@@ -90,7 +107,7 @@ class KeyboardWidget(QFrame):
         self._buttons_by_component_id: dict[str, QPushButton] = {}
         self._state_machines_by_key_id: dict[str, list[KeyStateMachine]] = {}
         self._key_state_bridge = _KeyStateBridge(self)
-        self._event_unsubscribe: Unsubscribe | None = None
+        self._event_unsubscribes: list[Unsubscribe] = []
 
         self.setObjectName("keyboard")
         self.setProperty("componentType", "grid")
@@ -180,7 +197,7 @@ class KeyboardWidget(QFrame):
     def _add_function_row(
         self,
         container: QGridLayout,
-        components: list[KeyConfig],
+        components: list[KeyConfig | SpacerConfig],
         *,
         nav_start_column: int,
         body_column_map: dict[int, int],
@@ -215,7 +232,11 @@ class KeyboardWidget(QFrame):
             )
             container.addWidget(self._build_item(component), 0, dense_column, spec.height, column_span)
 
-    def _add_body_grid(self, container: QGridLayout, components: list[KeyConfig]) -> None:
+    def _add_body_grid(
+        self,
+        container: QGridLayout,
+        components: list[KeyConfig | SpacerConfig],
+    ) -> None:
         """Place body-row components using a dense column map."""
 
         column_map = self._build_dense_column_map([component.spec for component in components])
@@ -225,7 +246,7 @@ class KeyboardWidget(QFrame):
             dense_column = column_map[spec.column]
             container.addWidget(self._build_item(component), spec.row, dense_column, spec.height, column_span)
 
-    def _build_item(self, component: KeyConfig) -> QWidget:
+    def _build_item(self, component: KeyConfig | SpacerConfig) -> QWidget:
         """Build one child widget for the grid via the component registry.
 
         The keyboard widget passes itself as the explicit ``host`` so the
@@ -346,22 +367,22 @@ class KeyboardWidget(QFrame):
         self._buttons_by_spec.append((button, spec))
         self._buttons_by_component_id[component_id] = button
         if spec.action is None:
-            self._dispatch_command(KeyboardRegisterKeySpec(self._layout_config.id, component_id, spec))
+            self._dispatch_action(keyboard_register_key_spec(self._layout_config.id, component_id, spec))
         return button
 
     def _handle_key_press(self, component_id: str, spec: KeySpec) -> None:
-        """Dispatch a press event/command through the runtime."""
+        """Dispatch a press event/action through the runtime."""
 
-        self._dispatch_event(ComponentPressed(component_id=component_id, key_spec=spec))
+        self._dispatch_event(component_pressed(component_id, spec.action))
         if spec.action is None and not spec.holds_when_latched:
-            self._context.dispatcher.dispatch_command(KeyboardKeyDown(self._layout_config.id, spec, component_id))
+            self._context.dispatcher.dispatch_action(keyboard_key_down(self._layout_config.id, component_id))
 
     def _handle_key_release(self, component_id: str, spec: KeySpec) -> None:
-        """Dispatch a release event/command through the runtime."""
+        """Dispatch a release event/action through the runtime."""
 
-        self._dispatch_event(ComponentReleased(component_id=component_id))
+        self._dispatch_event(component_released(component_id))
         if spec.action is None and not spec.holds_when_latched:
-            self._context.dispatcher.dispatch_command(KeyboardKeyUp(self._layout_config.id, spec, component_id))
+            self._context.dispatcher.dispatch_action(keyboard_key_up(self._layout_config.id, component_id))
 
     def _handle_key_registered(self, layout_id: str, component_id: str, io_key_name: object) -> None:
         """Apply backend registration metadata returned through runtime events."""
@@ -401,23 +422,30 @@ class KeyboardWidget(QFrame):
         self._key_state_bridge.key_latch_changed.connect(self._handle_key_latch_change)
         self._key_state_bridge.key_registered.connect(self._handle_key_registered)
 
-        def handle_event(event: object) -> None:
-            if isinstance(event, BackendKeyRegistered):
-                self._key_state_bridge.key_registered.emit(event.layout_id, event.component_id, event.io_key_name)
-            elif isinstance(event, BackendKeyStateChanged):
-                self._key_state_bridge.key_state_changed.emit(event.layout_id, event.key_id, event.pressed, event.latched)
-            elif isinstance(event, KeyLatchChanged):
-                self._key_state_bridge.key_latch_changed.emit(event.layout_id, event.key_id, event.latched)
-
-        self._event_unsubscribe = self._context.dispatcher.add_event_handler(handle_event)
+        self._event_unsubscribes = [
+            self._context.dispatcher.add_event_handler(KEYBOARD_KEY_REGISTERED, self._receive_key_registered),
+            self._context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, self._receive_key_state_changed),
+            self._context.dispatcher.add_event_handler(KEYBOARD_LATCH_CHANGED, self._receive_latch_changed),
+        ]
 
     def _unsubscribe_from_runtime_key_state(self) -> None:
         """Detach runtime event handling when the widget is destroyed."""
 
-        if self._event_unsubscribe is None:
-            return
-        self._event_unsubscribe()
-        self._event_unsubscribe = None
+        for unsubscribe in self._event_unsubscribes:
+            unsubscribe()
+        self._event_unsubscribes.clear()
+
+    def _receive_key_registered(self, event: KeyboardKeyRegisteredArguments) -> MessageResult:
+        self._key_state_bridge.key_registered.emit(event.layout_id, event.component_id, event.io_key_name)
+        return []
+
+    def _receive_key_state_changed(self, event: KeyboardKeyStateChangedArguments) -> MessageResult:
+        self._key_state_bridge.key_state_changed.emit(event.layout_id, event.key_id, event.pressed, event.latched)
+        return []
+
+    def _receive_latch_changed(self, event: KeyboardLatchChangedArguments) -> MessageResult:
+        self._key_state_bridge.key_latch_changed.emit(event.layout_id, event.key_id, event.latched)
+        return []
 
     def _handle_latch_state_change(
         self,
@@ -439,7 +467,7 @@ class KeyboardWidget(QFrame):
             None.
 
         Side effects:
-            Updates latched-key registry, dispatches state events/commands,
+            Updates latched-key registry, dispatches state events/actions,
             and synchronizes sibling latch buttons in the same group.
         """
 
@@ -468,10 +496,12 @@ class KeyboardWidget(QFrame):
         }
 
         if previously_latched != currently_latched:
-            self._dispatch_event(ComponentStateChanged(component_id=component_id, key_id=key_id, latched=currently_latched))
-            self._dispatch_command(StateSet(namespace=component_state_namespace(component_id), key="latched", value=currently_latched))
+            self._dispatch_event(component_state_changed(component_id, key_id, currently_latched))
+            self._dispatch_action(state_set(component_state_namespace(component_id), "latched", currently_latched))
             if key_id not in self._syncing_latch_keys:
-                self._dispatch_command(KeyboardSyncLatchedKey(self._layout_config.id, spec, currently_latched, component_id))
+                self._dispatch_action(
+                    keyboard_sync_latched_key(self._layout_config.id, component_id, currently_latched)
+                )
 
                 self._syncing_latch_keys.add(key_id)
                 try:
@@ -484,9 +514,9 @@ class KeyboardWidget(QFrame):
 
         if spec.holds_when_latched:
             if not change.previous.is_active and change.current.is_active:
-                self._dispatch_command(KeyboardKeyDown(self._layout_config.id, spec, component_id))
+                self._dispatch_action(keyboard_key_down(self._layout_config.id, component_id))
             elif change.previous.is_active and not change.current.is_active:
-                self._dispatch_command(KeyboardKeyUp(self._layout_config.id, spec, component_id))
+                self._dispatch_action(keyboard_key_up(self._layout_config.id, component_id))
 
         if previously_latched != currently_latched or spec.holds_when_latched:
             self._refresh_key_legends()
@@ -508,15 +538,15 @@ class KeyboardWidget(QFrame):
             display = spec.resolve_display(active_modifiers)
             set_key_button_label(button, display.label, display.secondary_label)
 
-    def _dispatch_event(self, event: object) -> None:
+    def _dispatch_event(self, event: RuntimeEvent) -> None:
         """Forward an event to the runtime dispatcher."""
 
-        self._context.dispatcher.dispatch_event(event)  # type: ignore[arg-type]
+        self._context.dispatcher.dispatch_event(event)
 
-    def _dispatch_command(self, command: object) -> None:
-        """Forward a fire-and-forget command to the runtime dispatcher."""
+    def _dispatch_action(self, action: RuntimeAction) -> None:
+        """Forward a fire-and-forget action to the runtime dispatcher."""
 
-        self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]
+        self._context.dispatcher.dispatch_action(action)
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
         return spec.io_key or spec.label or spec.key_id

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from axidev_osk.config.models import GridConfig, KeyConfig, LayoutConfig
+from axidev_osk.models import KeySpec
 from axidev_osk.runtime.identity import key_component_id, prompt_button_id, stable_id, validate_unique_ids
 
 
@@ -48,6 +50,21 @@ class RuntimeIdentityTests(unittest.TestCase):
         )
 
         self.assertEqual(first, second)
+
+    def test_layout_rejects_component_ids_reused_across_grids(self) -> None:
+        first = GridConfig(
+            id="grid:first",
+            components=(KeyConfig(id="component:shared", spec=KeySpec("A", 0, 0)),),
+            nav_start_column=0,
+        )
+        second = GridConfig(
+            id="grid:second",
+            components=(KeyConfig(id="component:shared", spec=KeySpec("B", 0, 0)),),
+            nav_start_column=0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "layout 'layout:test' components: component:shared"):
+            LayoutConfig(id="layout:test", name="test", grids=(first, second))
 
 
 if __name__ == "__main__":

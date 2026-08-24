@@ -11,7 +11,7 @@ from axidev_osk.app import _set_application_icon
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import WindowConfig
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.events import PromptResolved
+from axidev_osk.runtime.events import prompt_resolved
 
 
 def _app() -> QApplication:
@@ -33,7 +33,7 @@ class FakePromptWindow(QWidget):
         QTimer.singleShot(
             0,
             lambda: self._runtime.context.dispatcher.dispatch_event(
-                PromptResolved(prompt_id=prompt.id, result=self._result),
+                prompt_resolved(prompt.id, self._result),
             ),
         )
 

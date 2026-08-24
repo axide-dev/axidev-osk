@@ -3,26 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
-
-@dataclass(frozen=True)
-class WindowAction:
-    """Declarative action targeting a configured window."""
-
-    kind: Literal["toggle-opacity"]
-    target_window_id: str
-    opacity: float = 0.01
-
-    def __post_init__(self) -> None:
-        """Validate values before the action reaches runtime routing."""
-
-        if self.kind != "toggle-opacity":
-            raise ValueError(f"Unsupported window action kind: {self.kind!r}")
-        if not self.target_window_id.strip():
-            raise ValueError("Window action target ID must not be empty")
-        if not 0.0 <= self.opacity < 1.0:
-            raise ValueError("Window action opacity must be at least 0.0 and less than 1.0")
+from .messages import DataMap, DataValue, RuntimeAction, runtime_action_to_data
 
 
 @dataclass(frozen=True)
@@ -78,7 +60,7 @@ class KeySpec:
     honors_latched_modifiers: bool = True
     repeats: bool = True
     display_variants: tuple[KeyDisplay, ...] = ()
-    action: WindowAction | None = None
+    action: RuntimeAction | None = None
 
     def __post_init__(self) -> None:
         """Reject action keys with conflicting keyboard behavior."""
@@ -113,3 +95,42 @@ class KeySpec:
             return best_match
 
         return KeyDisplay(label=self.label, secondary_label=self.secondary_label)
+
+
+def key_spec_to_data(spec: KeySpec) -> DataMap:
+    """Encode a key specification as queue-safe native data."""
+
+    display_variants: list[DataValue] = []
+    for variant in spec.display_variants:
+        required_modifiers: list[DataValue] = []
+        required_modifiers.extend(sorted(variant.requires_modifiers))
+        excluded_modifiers: list[DataValue] = []
+        excluded_modifiers.extend(sorted(variant.excludes_modifiers))
+        display_variant: DataMap = {
+            "label": variant.label,
+            "secondary_label": variant.secondary_label,
+            "requires_modifiers": required_modifiers,
+            "excludes_modifiers": excluded_modifiers,
+        }
+        display_variants.append(display_variant)
+    action_data: DataMap | None = None
+    if spec.action is not None:
+        action_data = runtime_action_to_data(spec.action)
+    data: DataMap = {
+        "label": spec.label,
+        "row": spec.row,
+        "column": spec.column,
+        "width": spec.width,
+        "height": spec.height,
+        "is_spacer": spec.is_spacer,
+        "secondary_label": spec.secondary_label,
+        "key_id": spec.key_id,
+        "latchable": spec.latchable,
+        "io_key": spec.io_key,
+        "holds_when_latched": spec.holds_when_latched,
+        "honors_latched_modifiers": spec.honors_latched_modifiers,
+        "repeats": spec.repeats,
+        "display_variants": display_variants,
+        "action": action_data,
+    }
+    return data

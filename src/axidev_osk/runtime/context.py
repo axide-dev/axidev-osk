@@ -20,7 +20,7 @@ class Context:
 
     Attributes:
         config: Loaded declarative app config.
-        dispatcher: Synchronous dispatcher with queue-ready command/event shape.
+        dispatcher: Synchronous dispatcher with queue-ready action/event shape.
         keyboard: Keyboard service wrapping backend access.
         state: Central state store.
         components: Component builder registry.

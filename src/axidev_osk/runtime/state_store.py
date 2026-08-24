@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 
 class StateStore:
     """Owns durable runtime state outside widgets and services.
 
     The store is intentionally small in this refactor. It provides the boundary that
-    future config reloads, profile switches, and queued command replay can target.
+    future config reloads, profile switches, and queued action replay can target.
     """
 
     def __init__(self) -> None:
@@ -40,7 +42,7 @@ class StateStore:
             Mutates the in-memory state store.
         """
 
-        self._values.setdefault(namespace, {})[key] = value
+        self._values.setdefault(namespace, {})[key] = deepcopy(value)
 
     def get(self, namespace: str, key: str, default: object | None = None) -> object | None:
         """Read a value from a namespace.
@@ -57,7 +59,7 @@ class StateStore:
             None.
         """
 
-        return self._values.get(namespace, {}).get(key, default)
+        return deepcopy(self._values.get(namespace, {}).get(key, default))
 
     def clear_namespace(self, namespace: str) -> None:
         """Remove all state in a namespace.
