@@ -35,18 +35,23 @@ class FakeKeyboardBackend:
     def is_key_down(self, key_name: str) -> bool:
         return False
 
-    def key_name_for_spec(self, spec):
-        return spec.io_key or (spec.label if len(spec.label) == 1 else None)
+    def key_name_for_output(self, output):
+        return output.output_key
 
-    def key_down(self, spec, latched_keys):
+    def state_tags_for_key(self, output_key):
+        tags = {
+            "ShiftLeft": frozenset({"shift"}),
+            "ShiftRight": frozenset({"shift"}),
+            "CapsLock": frozenset({"caps"}),
+        }
+        return tags.get(output_key, frozenset())
+
+    def key_down(self, output, active_state_tags):
+        del output, active_state_tags
         return None
 
     def key_up(self, press_handle) -> None:
         return None
-
-    def sync_latched_key(self, spec, latched: bool, press_handle=None):
-        return press_handle
-
 
 class FakeOverlayController:
     def __init__(self, *, uses_custom_chrome: bool = True) -> None:
@@ -236,16 +241,15 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         key = next(
             button
             for button in window.findChildren(QPushButton)
-            if button.property("ioKey") == "A"
+            if button.text() == "a"
         )
         self.assertEqual(key.property("componentType"), "key")
         self.assertIsInstance(key.property("componentId"), str)
-        self.assertIsNone(key.property("keyId"))
-        self.assertEqual(key.property("ioKey"), "A")
+        self.assertIsNone(key.property("ioKey"))
         self.assertEqual(key.property("interactionState"), "idle")
         self.assertFalse(key.property("latched"))
         self.assertFalse(key.property("pressed"))
-        self.assertEqual(key.property("profile"), "default")
+        self.assertEqual(key.property("profile"), "profile:default")
         self.assertEqual(key.property("layout"), "layout:us-iso")
 
 if __name__ == "__main__":

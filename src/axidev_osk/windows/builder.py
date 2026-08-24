@@ -8,7 +8,8 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
-from ..runtime.events import WindowCloseRequested
+from ..runtime.config_paths import window_source_path
+from ..runtime.events import window_close_requested
 from .chrome import install_overlay_chrome
 from .overlay import configure_always_on_top_window, configure_plain_window
 
@@ -51,7 +52,10 @@ class RuntimeWindow(QMainWindow):
         else:
             self._overlay = configure_plain_window(self)
 
-        central = context.surfaces.build(config.surface, context)
+        surface_path = window_source_path(context.config, config.id).child(
+            "surface", config.surface.id
+        )
+        central = context.surfaces.build(config.surface, context, surface_path)
         if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
             central_layout = central.layout()
             if isinstance(central_layout, QVBoxLayout):
@@ -116,7 +120,7 @@ class RuntimeWindow(QMainWindow):
         if not self._quit_controller_managed:
             super().closeEvent(event)
             return
-        self._context.dispatcher.dispatch_event(WindowCloseRequested(window_id=self._config.id))
+        self._context.dispatcher.dispatch_event(window_close_requested(self._config.id))
         event.ignore()
 
     def showEvent(self, event: QShowEvent) -> None:  # type: ignore[override]

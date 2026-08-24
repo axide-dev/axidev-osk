@@ -11,6 +11,7 @@ from .state_store import StateStore
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
+    from .behaviors import BehaviorRegistry
     from ..services.keyboard import KeyboardService
 
 
@@ -20,11 +21,12 @@ class Context:
 
     Attributes:
         config: Loaded declarative app config.
-        dispatcher: Synchronous dispatcher with queue-ready command/event shape.
+        dispatcher: Synchronous dispatcher with queue-ready action/event shape.
         keyboard: Keyboard service wrapping backend access.
         state: Central state store.
         components: Component builder registry.
         surfaces: Surface builder registry.
+        behaviors: Runtime component behavior registry.
     """
 
     config: AppConfig
@@ -33,3 +35,4 @@ class Context:
     state: StateStore
     components: ComponentRegistry
     surfaces: SurfaceRegistry
+    behaviors: "BehaviorRegistry"

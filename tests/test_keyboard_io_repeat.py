@@ -5,7 +5,7 @@ from os import environ
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from axidev_osk.models import KeySpec
+from axidev_osk.runtime.behavior_models import KeyboardOutput
 from axidev_osk.runtime.diagnostics import KEYBOARD_DEBUG_ENV
 from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend
 
@@ -14,40 +14,35 @@ class KeyboardIoRepeatTests(unittest.TestCase):
     def test_key_down_sends_repeat_by_default(self) -> None:
         backend, sender = self._ready_backend()
 
-        backend.key_down(KeySpec("A", row=0, column=0, io_key="A"), {})
+        backend.key_down(KeyboardOutput("A"), frozenset())
 
         sender.key_down.assert_called_once_with("A", repeat=True)
 
-    def test_key_down_can_disable_repeat_from_key_spec(self) -> None:
+    def test_key_down_can_disable_repeat_from_output(self) -> None:
         backend, sender = self._ready_backend()
 
-        backend.key_down(KeySpec("A", row=0, column=0, io_key="A", repeats=False), {})
+        backend.key_down(KeyboardOutput("A", repeats=False), frozenset())
 
         sender.key_down.assert_called_once_with("A", repeat=False)
 
     def test_key_down_preserves_repeat_flag_with_modifiers(self) -> None:
         backend, sender = self._ready_backend()
 
-        backend.key_down(KeySpec("a", row=0, column=0, io_key="A"), {"shift": True})
+        backend.key_down(KeyboardOutput("A"), frozenset({"shift"}))
 
         sender.key_down.assert_called_once_with("A", mods="Shift", repeat=True)
 
     def test_modifier_trace_records_transitions_without_typed_keys(self) -> None:
         backend, _sender = self._ready_backend()
-        shift = KeySpec(
-            "Shift",
-            row=0,
-            column=0,
-            key_id="shift",
-            io_key="ShiftLeft",
-            latchable=True,
-            holds_when_latched=True,
+        shift = KeyboardOutput(
+            "ShiftLeft",
             repeats=False,
+            uses_active_state_tags=False,
         )
 
         with patch.dict(environ, {KEYBOARD_DEBUG_ENV: "1"}, clear=False):
             with self.assertLogs("axidev_osk.services.keyboard.io", level="INFO") as logs:
-                press = backend.key_down(shift, {})
+                press = backend.key_down(shift, frozenset())
                 backend.key_up(press)
 
         trace = "\n".join(logs.output)

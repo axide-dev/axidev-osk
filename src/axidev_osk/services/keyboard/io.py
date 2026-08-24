@@ -6,10 +6,11 @@ import logging
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
-from typing import Any, Mapping
+from typing import Any
 
-from ...models import KeySpec
+from ...runtime.behavior_models import KeyboardOutput
 from ...runtime.diagnostics import keyboard_debug_enabled
 
 _logger = logging.getLogger(__name__)
@@ -30,6 +31,22 @@ _MODIFIER_KEY_NAMES = frozenset(
         "superright",
     }
 )
+
+_STATE_TAGS_BY_KEY = {
+    "shift": frozenset({"shift"}),
+    "shiftleft": frozenset({"shift"}),
+    "shiftright": frozenset({"shift"}),
+    "capslock": frozenset({"caps"}),
+    "ctrl": frozenset({"ctrl"}),
+    "ctrlleft": frozenset({"ctrl"}),
+    "ctrlright": frozenset({"ctrl"}),
+    "alt": frozenset({"alt"}),
+    "altleft": frozenset({"alt"}),
+    "altright": frozenset({"altgr"}),
+    "super": frozenset({"super"}),
+    "superleft": frozenset({"super"}),
+    "superright": frozenset({"super"}),
+}
 
 KeyStateListener = Callable[[str, bool], None]
 Unsubscribe = Callable[[], None]
@@ -174,35 +191,37 @@ class AxidevIoKeyboardBackend:
         with self._key_state_lock:
             return canonical_name in self._pressed_key_names
 
-    def key_name_for_spec(self, spec: KeySpec) -> str | None:
-        """Resolve a key spec to a canonical backend key name."""
+    def key_name_for_output(self, output: KeyboardOutput) -> str:
+        """Resolve keyboard output to a canonical backend key name."""
 
-        key_name = self._resolve_key_name(spec)
-        if key_name is None:
-            return None
-        return self._canonical_key_name(key_name)
+        return self._canonical_key_name(output.output_key) or output.output_key
 
-    def key_down(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
-        """Emit a key press for ``spec`` and return a handle for release."""
+    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
+        """Return runtime state tags published by one backend key name."""
+
+        canonical = self._canonical_key_name(output_key) or output_key
+        return _STATE_TAGS_BY_KEY.get(canonical.casefold(), frozenset())
+
+    def key_down(
+        self,
+        output: KeyboardOutput,
+        active_state_tags: frozenset[str],
+    ) -> KeyPressHandle | None:
+        """Emit keyboard output and return a handle for release."""
 
         if not self._ready or self._keyboard is None:
             return None
-        if spec.latchable and not spec.holds_when_latched:
-            return None
         try:
-            press = self._resolve_key_press(spec, latched_keys)
-            if press is None:
-                return None
-
-            if spec.holds_when_latched:
-                self._debug_modifier("request-down", key_id=spec.key_id, press=self._describe_press(press))
+            press = self._resolve_key_press(output, active_state_tags)
+            if _is_modifier_key_name(press.key_name):
+                self._debug_modifier("request-down", key_id=None, press=self._describe_press(press))
             self._send_key_down(press)
             self._set_key_down(press.key_name, True)
-            if spec.holds_when_latched:
-                self._debug_modifier("press-active", key_id=spec.key_id, press=self._describe_press(press))
+            if _is_modifier_key_name(press.key_name):
+                self._debug_modifier("press-active", key_id=None, press=self._describe_press(press))
             return press
         except Exception as exc:
-            _logger.exception("axidev_io key_down failed for %r: %s", spec.label, exc)
+            _logger.exception("axidev_io key_down failed for %r: %s", output.output_key, exc)
             return None
 
     def key_up(self, press: object | None) -> None:
@@ -224,13 +243,14 @@ class AxidevIoKeyboardBackend:
         except Exception as exc:
             _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
 
-    def _resolve_key_press(self, spec: KeySpec, latched_keys: Mapping[str, bool]) -> KeyPressHandle | None:
-        key_name = self._resolve_key_name(spec)
-        if key_name is None:
-            return None
-
-        mods = self._resolve_sender_modifiers(spec, latched_keys)
-        return KeyPressHandle(key_name=key_name, mods=mods, repeats=spec.repeats)
+    def _resolve_key_press(
+        self,
+        output: KeyboardOutput,
+        active_state_tags: frozenset[str],
+    ) -> KeyPressHandle:
+        key_name = self.key_name_for_output(output)
+        mods = self._resolve_sender_modifiers(output, active_state_tags)
+        return KeyPressHandle(key_name=key_name, mods=mods, repeats=output.repeats)
 
     def _send_key_down(self, press: KeyPressHandle) -> None:
         if self._keyboard is None:
@@ -256,13 +276,6 @@ class AxidevIoKeyboardBackend:
             return None
         return f"{press.key_name} mods={press.mods!r} repeat={press.repeats}"
 
-    def _resolve_key_name(self, spec: KeySpec) -> str | None:
-        if spec.io_key is not None:
-            return spec.io_key
-        if len(spec.label) == 1:
-            return spec.label
-        return None
-
     def _canonical_key_name(self, key_name: str) -> str | None:
         if self._keyboard is None:
             return key_name
@@ -276,18 +289,18 @@ class AxidevIoKeyboardBackend:
 
     def _resolve_sender_modifiers(
         self,
-        spec: KeySpec,
-        latched_keys: Mapping[str, bool],
+        output: KeyboardOutput,
+        active_state_tags: frozenset[str],
     ) -> str | None:
-        if not spec.honors_latched_modifiers:
+        if not output.uses_active_state_tags:
             return None
 
-        shift = bool(latched_keys.get("shift", False))
-        caps = bool(latched_keys.get("caps", False))
+        shift = "shift" in active_state_tags
+        caps = "caps" in active_state_tags
         shift_is_held = self.is_key_down("ShiftLeft") or self.is_key_down("ShiftRight")
         modifiers: list[str] = []
 
-        if len(spec.label) == 1 and spec.label.isalpha():
+        if len(output.output_key) == 1 and output.output_key.isalpha():
             if (shift and not shift_is_held) ^ caps:
                 modifiers.append("Shift")
         elif shift and not shift_is_held:
@@ -304,6 +317,12 @@ class AxidevIoKeyboardBackend:
         if submodule_path.is_dir():
             return "Install the submodule package with `python -m pip install -e ./vendor/axidev-io-python`."
         return "Initialize the submodule, then install it with `python -m pip install -e ./vendor/axidev-io-python`."
+
+    @staticmethod
+    def _repo_root() -> Path:
+        """Return the source checkout root containing the vendored backend."""
+
+        return Path(__file__).resolve().parents[4]
 
     def _build_permission_setup_text(self) -> str:
         return (

@@ -536,7 +536,7 @@ class AlwaysOnTopWindowController:
         screen = self._window.screen()
         if screen is None:
             app = QGuiApplication.instance()
-            screen = app.primaryScreen() if app is not None else None
+            screen = app.primaryScreen() if isinstance(app, QGuiApplication) else None
         if screen is None:
             geometry = None
         elif for_layer_shell:

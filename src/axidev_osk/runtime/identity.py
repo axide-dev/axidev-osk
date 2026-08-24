@@ -30,24 +30,6 @@ def stable_id(parent_id: str, kind: str, *identity_fields: object, stable_overri
     return f"{kind}-{digest}"
 
 
-def key_component_id(
-    parent_id: str,
-    kind: str,
-    *,
-    row: int,
-    column: int,
-    width: float,
-    height: int,
-    key_id: str | None,
-    io_key: str | None,
-    label: str,
-) -> str:
-    """Return the deterministic component ID for a keyboard grid item."""
-
-    del key_id, io_key, label
-    return stable_id(parent_id, kind, row, column, width, height)
-
-
 def prompt_button_id(parent_id: str, role: str) -> str:
     """Return the deterministic component ID for a prompt action button."""
 
@@ -77,27 +59,3 @@ def validate_unique_ids(ids: Iterable[str], *, scope: str) -> None:
     if duplicates:
         duplicate_list = ", ".join(sorted(duplicates))
         raise ValueError(f"Duplicate config IDs in {scope}: {duplicate_list}")
-
-
-def state_namespace(kind: str, *identity_ids: str) -> str:
-    """Return a central-state namespace built from deterministic runtime IDs."""
-
-    return ":".join((kind, *identity_ids))
-
-
-def keyboard_key_states_namespace(layout_id: str) -> str:
-    """Return the key-state namespace for a deterministic keyboard layout ID."""
-
-    return state_namespace("keyboard.key_states", layout_id)
-
-
-def keyboard_latches_namespace(layout_id: str) -> str:
-    """Return the latch-state namespace for a deterministic keyboard layout ID."""
-
-    return state_namespace("keyboard.latches", layout_id)
-
-
-def component_state_namespace(component_id: str) -> str:
-    """Return the state namespace for a deterministic component ID."""
-
-    return state_namespace("component", component_id)

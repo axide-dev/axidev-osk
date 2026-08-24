@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QMessageBox
 from ..runtime.prompt import PromptResolutionWaiter
 
 if TYPE_CHECKING:
-    from ..config.models import AppConfig, WindowConfig
+    from ..config.models import AppConfig, PromptConfig, WindowConfig
     from ..runtime.dispatcher import Dispatcher
     from ..runtime.window_manager import WindowManager
     from ..services.keyboard import KeyboardService
@@ -32,7 +32,7 @@ class LinuxPermissionController:
         dispatcher: "Dispatcher",
         keyboard: "KeyboardService",
         window_manager: "WindowManager",
-        build_prompt_window_config: Callable[[object], "WindowConfig"],
+        build_prompt_window_config: Callable[["PromptConfig"], "WindowConfig"],
     ) -> None:
         self._config = config
         self._dispatcher = dispatcher

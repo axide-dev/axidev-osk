@@ -1,151 +1,183 @@
-"""Synchronous event and command dispatcher with queue-ready DTO boundaries."""
+"""Registered generic messages routed through one synchronous FIFO queue."""
 
 from __future__ import annotations
 
+import logging
+from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Generic, TypeVar, cast
 
-from typing import TYPE_CHECKING
-
-from .commands import RuntimeCommand
-from .events import RuntimeEvent
-
-if TYPE_CHECKING:
-    from .context import Context
+from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage
 
 
-EventHandler = Callable[[RuntimeEvent], object | None]
-CommandHandler = Callable[[RuntimeCommand], object | None]
+DecodedT = TypeVar("DecodedT")
+Decoder = Callable[[DataMap], DecodedT]
+MessageHandler = Callable[[DecodedT], MessageResult]
 Unsubscribe = Callable[[], None]
+
+_logger = logging.getLogger(__name__)
+_DRAIN_WARNING_INTERVAL = 10_000
+
+
+@dataclass(slots=True)
+class _ActionDefinition(Generic[DecodedT]):
+    decoder: Decoder[DecodedT]
+    handler: MessageHandler[DecodedT]
+
+
+@dataclass(slots=True)
+class _EventDefinition(Generic[DecodedT]):
+    decoder: Decoder[DecodedT]
+    handlers: list[MessageHandler[DecodedT]] = field(default_factory=list)
 
 
 class Dispatcher:
-    """Routes runtime events and commands synchronously for now.
-
-    The public shape accepts DTOs and applies commands without returning service
-    results, which keeps UI code independent from direct service calls and allows
-    a later async queue swap.
-    """
+    """Own registered message definitions and drain them in FIFO order."""
 
     def __init__(self) -> None:
-        """Create an unbound dispatcher.
+        self._actions: dict[str, _ActionDefinition[object]] = {}
+        self._events: dict[str, _EventDefinition[object]] = {}
+        self._queue: deque[RuntimeMessage] = deque()
+        self._draining = False
 
-        Args:
-            None.
+    def register_action(
+        self,
+        name: str,
+        decoder: Decoder[DecodedT],
+        handler: MessageHandler[DecodedT],
+        *,
+        override: bool = False,
+    ) -> None:
+        """Register one action definition, optionally replacing it in full."""
 
-        Returns:
-            None.
+        if name in self._actions and not override:
+            raise ValueError(f"Action {name!r} is already registered")
+        if name in self._actions:
+            _logger.warning("Overriding registered action %s", name)
+        definition = _ActionDefinition(decoder=decoder, handler=handler)
+        self._actions[name] = cast(_ActionDefinition[object], definition)
 
-        Side effects:
-            None.
-        """
+    def register_event(
+        self,
+        name: str,
+        decoder: Decoder[DecodedT],
+        *,
+        override: bool = False,
+    ) -> None:
+        """Register one event definition, optionally replacing it in full."""
 
-        self._context: Context | None = None
-        self._event_handlers: list[EventHandler] = []
-        self._command_handlers: dict[type[object], CommandHandler] = {}
+        if name in self._events and not override:
+            raise ValueError(f"Event {name!r} is already registered")
+        if name in self._events:
+            _logger.warning("Overriding registered event %s", name)
+        definition: _EventDefinition[DecodedT] = _EventDefinition(decoder=decoder)
+        self._events[name] = cast(_EventDefinition[object], definition)
 
-    def bind_context(self, context: "Context") -> None:
-        """Bind the main context after all runtime objects are created.
+    def add_event_handler(
+        self,
+        name: str,
+        handler: MessageHandler[DecodedT],
+    ) -> Unsubscribe:
+        """Subscribe a typed handler to one registered event name."""
 
-        Args:
-            context: Runtime context.
-
-        Returns:
-            None.
-
-        Side effects:
-            Stores the context for diagnostics and future queue ownership.
-        """
-
-        self._context = context
-
-    def add_event_handler(self, handler: EventHandler) -> Unsubscribe:
-        """Register an event observer.
-
-        Args:
-            handler: Callable invoked for every dispatched event.
-
-        Returns:
-            Callable that removes the handler when invoked.
-
-        Side effects:
-            Mutates dispatcher handler list.
-        """
-
-        self._event_handlers.append(handler)
+        definition = self._events.get(name)
+        if definition is None:
+            raise ValueError(f"Event {name!r} is not registered")
+        erased_handler = cast(MessageHandler[object], handler)
+        definition.handlers.append(erased_handler)
 
         def unsubscribe() -> None:
-            if handler in self._event_handlers:
-                self._event_handlers.remove(handler)
+            if erased_handler in definition.handlers:
+                definition.handlers.remove(erased_handler)
 
         return unsubscribe
 
-    def add_command_handler(self, command_type: type[object], handler: CommandHandler) -> None:
-        """Register or replace a command handler.
+    def dispatch_action(self, action: RuntimeAction) -> None:
+        """Append an action and drain the queue unless a drain is active."""
 
-        Args:
-            command_type: DTO class handled by ``handler``.
-            handler: Callable that applies the command.
-
-        Returns:
-            None.
-
-        Side effects:
-            Mutates dispatcher handler map.
-        """
-
-        self._command_handlers[command_type] = handler
+        self._enqueue(action)
 
     def dispatch_event(self, event: RuntimeEvent) -> None:
-        """Dispatch an event to registered observers.
+        """Append an event and drain the queue unless a drain is active."""
 
-        Args:
-            event: Runtime event DTO.
+        self._enqueue(event)
 
-        Returns:
-            None.
+    def _enqueue(self, message: RuntimeMessage) -> None:
+        self._queue.append(message)
+        if self._draining:
+            return
+        self._draining = True
+        processed = 0
+        try:
+            while self._queue:
+                current = self._queue.popleft()
+                processed += 1
+                if processed % _DRAIN_WARNING_INTERVAL == 0:
+                    _logger.warning("Runtime queue drain has processed %d messages without returning", processed)
+                if isinstance(current, RuntimeAction):
+                    self._process_action(current)
+                else:
+                    self._process_event(current)
+        finally:
+            self._draining = False
 
-        Side effects:
-            Invokes registered handlers synchronously.
-        """
+    def _process_action(self, action: RuntimeAction) -> None:
+        definition = self._actions.get(action.action)
+        if definition is None:
+            self._fail_action(action, stage="lookup", error=ValueError(f"Action {action.action!r} is not registered"))
+            return
+        try:
+            decoded = definition.decoder(action.arguments)
+        except Exception as exc:
+            self._fail_action(action, stage="decode", error=exc)
+            return
+        try:
+            self._append_results(definition.handler(decoded))
+        except Exception as exc:
+            self._fail_action(action, stage="execute", error=exc)
 
-        for handler in tuple(self._event_handlers):
-            handler(event)
+    def _process_event(self, event: RuntimeEvent) -> None:
+        definition = self._events.get(event.event)
+        if definition is None:
+            _logger.error("Discarding unregistered event %s with arguments %r", event.event, event.arguments)
+            return
+        try:
+            decoded = definition.decoder(event.arguments)
+        except Exception:
+            _logger.exception("Discarding event %s with invalid arguments %r", event.event, event.arguments)
+            return
+        for handler in tuple(definition.handlers):
+            try:
+                self._append_results(handler(decoded))
+            except Exception:
+                _logger.exception("Event handler failed for %s with arguments %r", event.event, event.arguments)
+                return
 
-    def dispatch_command(self, command: RuntimeCommand) -> None:
-        """Apply a command without returning its handler result.
+    def _append_results(self, messages: MessageResult) -> None:
+        for message in messages:
+            if not isinstance(message, (RuntimeAction, RuntimeEvent)):
+                raise TypeError(f"Message handlers must return runtime messages, got {type(message).__name__}")
+        self._queue.extend(messages)
 
-        This is the queue-ready dispatch path: when the runtime gains a
-        proper async queue, ``dispatch_command`` will enqueue the command
-        for asynchronous handling and callers will receive results
-        through events. New call sites should use this method.
-
-        Args:
-            command: Runtime command DTO.
-
-        Returns:
-            None.
-
-        Side effects:
-            Invokes the command handler synchronously.
-        """
-
-        self._dispatch_command_internal(command)
-
-    def _dispatch_command_internal(self, command: RuntimeCommand) -> object | None:
-        """Look up and invoke a command handler.
-
-        Args:
-            command: Runtime command DTO.
-
-        Returns:
-            Handler-specific result, or ``None`` for fire-and-forget
-            handlers.
-
-        Side effects:
-            Invokes the command handler synchronously.
-        """
-
-        handler = self._command_handlers.get(type(command))
-        if handler is None:
-            raise ValueError(f"No command handler registered for {type(command).__name__}")
-        return handler(command)
+    def _fail_action(self, action: RuntimeAction, *, stage: str, error: Exception) -> None:
+        _logger.error(
+            "Action %s failed during %s with arguments %r: %s: %s",
+            action.action,
+            stage,
+            action.arguments,
+            type(error).__name__,
+            error,
+        )
+        self._queue.append(
+            RuntimeEvent(
+                event="action.failed",
+                arguments={
+                    "action": action.action,
+                    "arguments": action.arguments,
+                    "stage": stage,
+                    "exception_type": type(error).__name__,
+                    "message": str(error),
+                },
+            )
+        )

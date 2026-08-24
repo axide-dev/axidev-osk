@@ -150,48 +150,6 @@ What's planned:
 - config-driven composition of grids and layouts
 - more reusable grid and container primitives
 
-## Contributing
-
-Changes should land through pull requests rather than direct pushes to `main`.
-
-Clone the repository with submodules:
-
-```bash
-git clone --recurse-submodules https://github.com/axide-dev/axidev-osk.git
-cd axidev-osk
-```
-
-For normal development, install the vendored input backend and this project into a local virtual environment:
-
-```bash
-python -m venv .venv
-.venv/bin/python -m pip install -e ./vendor/axidev-io-python -e .
-```
-
-Start the app from the checkout:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m axidev_osk
-```
-
-Read [`AGENTS.md`](./AGENTS.md) before structural changes. It documents the modular architecture rules.
-
-PR guidance:
-
-- keep each PR focused on one concern
-- call out architectural impact when changing windows, grids, layouts, or orchestration
-- note platform-specific behavior when Windows, X11, or Wayland changes
-
-### Commit Style
-
-Commits use this subject format:
-
-```text
-type(scope): short imperative summary
-```
-
-Use lowercase `type` and `scope`. Keep the summary short and imperative.
-
 ## License
 
 Axidev OSK is licensed under GPLv3. See [`LICENSE`](./LICENSE).

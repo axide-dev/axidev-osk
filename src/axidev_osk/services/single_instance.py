@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QLockFile, QObject
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
-from ..runtime.commands import WindowShow
+from ..runtime.actions import window_show
 from ..runtime.context import Context
 
 
@@ -30,7 +30,7 @@ def _lock_path() -> Path:
 
 
 class WindowsSingleInstanceService(QObject):
-    """Keep one Windows process and route later launches through the command queue."""
+    """Keep one Windows process and route later launches through the action queue."""
 
     def __init__(self, *, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -102,4 +102,4 @@ class WindowsSingleInstanceService(QObject):
             connection.deleteLater()
             received_request = True
         if received_request:
-            context.dispatcher.dispatch_command(WindowShow(context.config.keyboard_window_id))
+            context.dispatcher.dispatch_action(window_show(context.config.keyboard_window_id))

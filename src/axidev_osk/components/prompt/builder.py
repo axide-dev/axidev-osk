@@ -7,9 +7,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVB
 
 from ...config.models import ButtonConfig, ComponentConfig, PromptConfig
 from ...runtime.context import Context
-from ...runtime.events import PromptResolved
 from ...runtime.identity import prompt_button_id
 from ...runtime.registries import ComponentRegistry
+from ...runtime.source import SourcePath
 
 _ACCEPT_BUTTON_QSS = """
 QPushButton#confirmAcceptButton {
@@ -62,13 +62,15 @@ def build_prompt_component(
     config: ComponentConfig,
     context: Context,
     *,
+    source_path: SourcePath,
     host: QWidget | None = None,
 ) -> QWidget:
     """Build a prompt component.
 
     Args:
         config: Prompt component config.
-        context: Runtime context, used to dispatch ``PromptResolved`` events.
+        context: Runtime context used to build the prompt buttons.
+        source_path: Exact runtime identity of the prompt component.
         host: Unused; accepted for registry signature parity.
 
     Returns:
@@ -76,8 +78,7 @@ def build_prompt_component(
         action buttons.
 
     Side effects:
-        Wires button click signals to dispatch ``PromptResolved``. Prompt
-        window lifecycle remains owned by the runtime prompt flow.
+        Builds visual buttons whose behavior bindings resolve the prompt.
     """
 
     del host
@@ -135,10 +136,14 @@ def build_prompt_component(
     buttons = QHBoxLayout()
     buttons.setSpacing(8)
     for button_config in config.buttons:
-        button = context.components.build(button_config, context, host=widget)
+        button = context.components.build(
+            button_config,
+            context,
+            source_path=source_path.child("component", button_config.id),
+            host=widget,
+        )
         if not isinstance(button, QPushButton):
             raise TypeError("Prompt button builder must return QPushButton")
-        button.clicked.connect(lambda _checked=False, item=button_config: _resolve_prompt(widget, context, config.id, item))
         buttons.addWidget(button)
     layout.addLayout(buttons)
     return widget
@@ -166,28 +171,6 @@ def prompt_button_config(parent_id: str, *, role: str, label: str) -> ButtonConf
     return ButtonConfig(
         id=prompt_button_id(parent_id, role),
         label=f"{glyph}  {label}",
-        role=role,
         object_name=object_name,
         style_sheet=style_sheet,
     )
-
-
-def _resolve_prompt(window_child: QWidget, context: Context, prompt_id: str, button: ButtonConfig) -> None:
-    """Dispatch the prompt resolution event.
-
-    Args:
-        window_child: Any widget inside the prompt window; accepted so signal
-            wiring can keep a stable signature without owning window lifecycle.
-        context: Runtime context used to dispatch the event.
-        prompt_id: Stable ID of the resolving prompt component.
-        button: Button config describing which action was clicked.
-
-    Returns:
-        None.
-
-    Side effects:
-        Dispatches ``PromptResolved``.
-    """
-
-    del window_child
-    context.dispatcher.dispatch_event(PromptResolved(prompt_id=prompt_id, result=button.role))

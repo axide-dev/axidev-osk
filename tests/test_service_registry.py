@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.registries import ComponentRegistry, ServiceRegistry, SurfaceRegistry
+from axidev_osk.runtime.source import SourcePath, SourcePathSegment
 from axidev_osk.services.keyboard import KeyboardService
 
 
@@ -40,8 +41,19 @@ class FakeKeyboardBackend:
         del key_name
         return False
 
-    def key_name_for_spec(self, spec) -> str | None:
-        return getattr(spec, "io_key", None)
+    def key_name_for_output(self, output) -> str:
+        return output.output_key
+
+    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
+        del output_key
+        return frozenset()
+
+    def key_down(self, output, active_state_tags):
+        del output, active_state_tags
+        return None
+
+    def key_up(self, handle) -> None:
+        del handle
 
 
 class RecordingService:
@@ -79,17 +91,27 @@ class ServiceRegistryTests(unittest.TestCase):
 
 
 class RegistryErrorTests(unittest.TestCase):
+    _source = SourcePath((SourcePathSegment("test", "source"),))
+
     def test_component_registry_reports_missing_kind(self) -> None:
         registry = ComponentRegistry()
 
         with self.assertRaisesRegex(ValueError, "No component registered for kind 'missing-component'"):
-            registry.build(SimpleNamespace(kind="missing-component"), None)  # type: ignore[arg-type]
+            registry.build(
+                SimpleNamespace(kind="missing-component"),
+                None,
+                source_path=self._source,
+            )  # type: ignore[arg-type]
 
     def test_surface_registry_reports_missing_kind(self) -> None:
         registry = SurfaceRegistry()
 
         with self.assertRaisesRegex(ValueError, "No surface registered for kind 'missing-surface'"):
-            registry.build(SimpleNamespace(kind="missing-surface"), None)  # type: ignore[arg-type]
+            registry.build(
+                SimpleNamespace(kind="missing-surface"),
+                None,
+                self._source,
+            )  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
