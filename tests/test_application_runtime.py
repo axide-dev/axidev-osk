@@ -42,10 +42,13 @@ class ApplicationRuntimePromptTests(unittest.TestCase):
     def test_linux_permission_prompt_has_one_setup_action(self) -> None:
         prompt = build_default_app_config().linux_permission_prompt
 
-        roles = [button.role for button in prompt.buttons]
+        button_ids = [button.id for button in prompt.buttons]
 
-        self.assertEqual(roles.count("open_terminal"), 1)
-        self.assertNotIn("setup_here", roles)
+        self.assertEqual(
+            button_ids.count("prompt:linux-permission:button:open_terminal"),
+            1,
+        )
+        self.assertFalse(any("setup_here" in button_id for button_id in button_ids))
 
     def test_prompt_windows_remain_fully_opaque(self) -> None:
         config = build_default_app_config()

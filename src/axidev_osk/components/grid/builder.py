@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 from ...config.models import ComponentConfig, KeyboardGridConfig, KeyboardStatusConfig
 from ...runtime.context import Context
 from ...runtime.registries import ComponentRegistry
+from ...runtime.source import SourcePath
 from .keyboard import KeyboardWidget
 
 
@@ -31,20 +32,22 @@ def build_keyboard_grid_component(
     config: ComponentConfig,
     context: Context,
     *,
+    source_path: SourcePath,
     host: QWidget | None = None,
 ) -> QWidget:
     """Build a keyboard grid component from layout config.
 
     Args:
         config: Keyboard grid config carrying a ``LayoutConfig`` payload.
-        context: Runtime context, used for the keyboard service and dispatcher.
+        context: Runtime context used for state and interaction events.
+        source_path: Exact runtime identity of the grid component.
         host: Unused; accepted for registry signature parity.
 
     Returns:
         Constructed ``KeyboardWidget`` populated with keys from the layout.
 
     Side effects:
-        Subscribes the widget to the keyboard service for live key state.
+        Subscribes the widget to runtime-owned state snapshots.
     """
 
     del host
@@ -53,6 +56,7 @@ def build_keyboard_grid_component(
     widget = KeyboardWidget(
         layout_config=config.layout,
         context=context,
+        source_path=source_path,
         metrics=config.metrics,
     )
     widget.setProperty("componentId", config.id)
@@ -63,6 +67,7 @@ def build_keyboard_status_component(
     config: ComponentConfig,
     context: Context,
     *,
+    source_path: SourcePath,
     host: QWidget | None = None,
 ) -> QWidget:
     """Build a keyboard backend status label when output is unavailable.
@@ -79,7 +84,7 @@ def build_keyboard_status_component(
         None beyond widget construction.
     """
 
-    del host
+    del host, source_path
     if not isinstance(config, KeyboardStatusConfig):
         raise TypeError(f"Expected KeyboardStatusConfig, got {type(config).__name__}")
     label = QLabel(context.keyboard.status_text)

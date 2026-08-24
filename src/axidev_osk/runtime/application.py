@@ -19,15 +19,14 @@ from ..services.keyboard import KeyboardService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
+from .behaviors import BehaviorRegistry, register_builtin_behaviors
 from .dispatcher import Dispatcher
 from .event_handlers import (
     register_context_action_handlers,
     register_event_handlers,
-    route_component_pressed,
     route_hot_corner_triggered,
 )
 from .events import (
-    ComponentPressedArguments,
     HotCornerTriggeredArguments,
     WindowCloseRequestedArguments,
     register_builtin_events,
@@ -77,6 +76,9 @@ class ApplicationRuntime:
         self._state = StateStore()
         self._components = ComponentRegistry()
         self._surfaces = SurfaceRegistry()
+        self._behaviors = BehaviorRegistry()
+        register_builtin_behaviors(self._behaviors)
+        self._behaviors.load(self._config)
         self._event_handlers = event_handlers or EventHandlerRegistry()
         if event_handlers is None:
             register_event_handlers(self._event_handlers)
@@ -89,10 +91,12 @@ class ApplicationRuntime:
             state=self._state,
             components=self._components,
             surfaces=self._surfaces,
+            behaviors=self._behaviors,
         )
         context_handlers = EventHandlerRegistry()
         register_context_action_handlers(context_handlers)
         context_handlers.install(self._dispatcher, self.context)
+        self._behaviors.bind_context(self.context)
         self._window_manager = WindowManager(self.context)
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
@@ -124,6 +128,7 @@ class ApplicationRuntime:
         apply_theme(self._app)
         for service in self._services.services():
             service.start(self.context)
+        self._behaviors.activate()
         for window_id in self._config.startup_window_ids:
             window = self._window_manager.show(window_id)
             self._quit_controller.register_window(window)
@@ -155,11 +160,6 @@ class ApplicationRuntime:
         """Map hot-corner events to managed window visibility actions."""
 
         return route_hot_corner_triggered(event, self)
-
-    def _handle_component_pressed(self, event: ComponentPressedArguments) -> MessageResult:
-        """Map configured component actions to runtime actions."""
-
-        return route_component_pressed(event, self)
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

@@ -21,16 +21,15 @@ from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..messages import MessageResult
 from .actions import app_quit
+from .behaviors import BehaviorRegistry, register_builtin_behaviors
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import (
     register_context_action_handlers,
     register_event_handlers,
-    route_component_pressed,
     route_hot_corner_triggered,
 )
 from .events import (
-    ComponentPressedArguments,
     HotCornerTriggeredArguments,
     WindowCloseRequestedArguments,
     register_builtin_events,
@@ -76,10 +75,6 @@ class _TestRuntime:
 
         return route_hot_corner_triggered(event, self)
 
-    def _handle_component_pressed(self, event: ComponentPressedArguments) -> MessageResult:
-        """Route configured component actions through production helper."""
-
-        return route_component_pressed(event, self)
 
 def make_test_context(
     keyboard_backend: Any,
@@ -87,8 +82,10 @@ def make_test_context(
     config: AppConfig | None = None,
     components: ComponentRegistry | None = None,
     surfaces: SurfaceRegistry | None = None,
+    behavior_registry: BehaviorRegistry | None = None,
     services: set[str] | None = None,
     event_handlers: bool = False,
+    activate_behaviors: bool = True,
 ) -> Context:
     """Build a runtime ``Context`` wrapping a test keyboard backend.
 
@@ -110,10 +107,14 @@ def make_test_context(
             component builders are registered into it.
         surfaces: Optional pre-populated surface registry. Defaults to
             an empty registry.
+        behavior_registry: Optional pre-populated behavior registry. Defaults
+            to a fresh registry containing the built-in behavior kinds.
         services: Optional explicit service names to register and start.
             When omitted, only the supplied keyboard backend is bound.
         event_handlers: Whether to install bundled application-level event
             handler factories against a lightweight runtime adapter.
+        activate_behaviors: Whether to register configured outputs and publish
+            initial state snapshots. Focused service tests can disable this.
 
     Returns:
         A bound ``Context`` ready to pass into widgets and builders.
@@ -125,6 +126,11 @@ def make_test_context(
     dispatcher = Dispatcher()
     register_builtin_events(dispatcher)
     keyboard = KeyboardService(cast(Any, keyboard_backend))
+    resolved_config = config or build_default_app_config()
+    behaviors = behavior_registry or BehaviorRegistry()
+    if behavior_registry is None:
+        register_builtin_behaviors(behaviors)
+    behaviors.load(resolved_config)
     if components is None:
         # Lazy import: avoids pulling Qt-bound builders into modules
         # that import this helper purely for the Context type.
@@ -133,16 +139,18 @@ def make_test_context(
         components = ComponentRegistry()
         register_components(components)
     context = Context(
-        config=config or build_default_app_config(),
+        config=resolved_config,
         dispatcher=dispatcher,
         keyboard=keyboard,
         state=StateStore(),
         components=components,
         surfaces=surfaces or SurfaceRegistry(),
+        behaviors=behaviors,
     )
     context_handlers = EventHandlerRegistry()
     register_context_action_handlers(context_handlers)
     context_handlers.install(dispatcher, context)
+    behaviors.bind_context(context)
     if services is None:
         keyboard.bind_context(context)
     else:
@@ -150,6 +158,8 @@ def make_test_context(
         register_services(service_registry, include=services, keyboard=keyboard)
         for service in service_registry.services():
             service.start(context)
+    if activate_behaviors:
+        behaviors.activate()
     if event_handlers:
         handler_registry = EventHandlerRegistry()
         register_event_handlers(handler_registry)

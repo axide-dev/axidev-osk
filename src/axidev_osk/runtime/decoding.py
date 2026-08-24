@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from ..messages import DataMap, DataValue, RuntimeAction
-from ..models import KeyDisplay, KeySpec
 
 
 def require_keys(arguments: DataMap, required: Iterable[str], *, optional: Iterable[str] = ()) -> None:
@@ -84,78 +83,9 @@ def runtime_action_from_data(arguments: DataMap) -> RuntimeAction:
     )
 
 
-def key_spec_from_data(arguments: DataMap) -> KeySpec:
-    """Decode a native-data key specification."""
+def string_set_value(arguments: DataMap, key: str) -> frozenset[str]:
+    """Decode a list of unique strings as an immutable set."""
 
-    require_keys(
-        arguments,
-        (
-            "label",
-            "row",
-            "column",
-            "width",
-            "height",
-            "is_spacer",
-            "secondary_label",
-            "key_id",
-            "latchable",
-            "io_key",
-            "holds_when_latched",
-            "honors_latched_modifiers",
-            "repeats",
-            "display_variants",
-            "action",
-        ),
-    )
-    variants_value = arguments["display_variants"]
-    if not isinstance(variants_value, list):
-        raise TypeError("Argument 'display_variants' must be a list")
-    variants: list[KeyDisplay] = []
-    for index, value in enumerate(variants_value):
-        if not isinstance(value, dict):
-            raise TypeError(f"Display variant {index} must be a map")
-        require_keys(
-            value,
-            ("label", "secondary_label", "requires_modifiers", "excludes_modifiers"),
-        )
-        required = _string_set(value, "requires_modifiers")
-        excluded = _string_set(value, "excludes_modifiers")
-        variants.append(
-            KeyDisplay(
-                label=string_value(value, "label"),
-                secondary_label=optional_string_value(value, "secondary_label"),
-                requires_modifiers=required,
-                excludes_modifiers=excluded,
-            )
-        )
-
-    action_value = arguments["action"]
-    action: RuntimeAction | None = None
-    if action_value is not None:
-        if not isinstance(action_value, dict):
-            raise TypeError("Argument 'action' must be a map or null")
-        action = runtime_action_from_data(action_value)
-
-    return KeySpec(
-        label=string_value(arguments, "label"),
-        row=int_value(arguments, "row"),
-        column=int_value(arguments, "column"),
-        width=number_value(arguments, "width"),
-        height=int_value(arguments, "height"),
-        is_spacer=bool_value(arguments, "is_spacer"),
-        secondary_label=optional_string_value(arguments, "secondary_label"),
-        key_id=optional_string_value(arguments, "key_id"),
-        latchable=bool_value(arguments, "latchable"),
-        io_key=optional_string_value(arguments, "io_key"),
-        holds_when_latched=bool_value(arguments, "holds_when_latched"),
-        honors_latched_modifiers=bool_value(arguments, "honors_latched_modifiers"),
-        repeats=bool_value(arguments, "repeats"),
-        display_variants=tuple(variants),
-        action=action,
-    )
-
-
-def _string_set(arguments: DataMap, key: str) -> frozenset[str]:
     value = arguments[key]
     if not isinstance(value, list):
         raise TypeError(f"Argument {key!r} must be a list")

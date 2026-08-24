@@ -6,23 +6,25 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..messages import DataMap, DataValue, RuntimeAction
-from ..models import KeySpec, key_spec_to_data
+from .behavior_models import KeyboardOutput
 from .decoding import (
     bool_value,
     data_value,
     int_value,
-    key_spec_from_data,
     map_value,
     non_empty_string_value,
     number_value,
     require_keys,
+    string_set_value,
 )
+from .source import SourcePath, source_path_from_data, source_path_to_data
 
 APP_QUIT = "app.quit"
 KEYBOARD_KEY_DOWN = "keyboard.key_down"
 KEYBOARD_KEY_UP = "keyboard.key_up"
-KEYBOARD_REGISTER_KEY_SPEC = "keyboard.register_key_spec"
-KEYBOARD_SYNC_LATCHED_KEY = "keyboard.sync_latched_key"
+KEYBOARD_REGISTER_OUTPUT = "keyboard.register_output"
+PROMPT_RESOLVE = "prompt.resolve"
+STATE_REPLACE = "state.replace"
 STATE_SET = "state.set"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
@@ -36,23 +38,27 @@ class AppQuitArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class KeyboardRegisterKeySpecArguments:
-    layout_id: str
-    component_id: str
-    key_spec: KeySpec
-
-
-@dataclass(frozen=True, slots=True)
 class KeyboardKeyArguments:
-    layout_id: str
-    component_id: str
+    source: SourcePath
+    active_state_tags: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
-class KeyboardSyncLatchedKeyArguments:
-    layout_id: str
-    component_id: str
-    latched: bool
+class KeyboardRegisterOutputArguments:
+    source: SourcePath
+    output: KeyboardOutput
+
+
+@dataclass(frozen=True, slots=True)
+class PromptResolveArguments:
+    prompt_id: str
+    result: str
+
+
+@dataclass(frozen=True, slots=True)
+class StateReplaceArguments:
+    source: SourcePath
+    state: DataMap
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,35 +84,35 @@ def app_quit(exit_code: int = 0) -> RuntimeAction:
     return _validated_action(APP_QUIT, {"exit_code": exit_code}, decode_app_quit)
 
 
-def keyboard_register_key_spec(layout_id: str, component_id: str, key_spec: KeySpec) -> RuntimeAction:
+def keyboard_register_output(source: SourcePath, output: KeyboardOutput) -> RuntimeAction:
     return _validated_action(
-        KEYBOARD_REGISTER_KEY_SPEC,
-        {"layout_id": layout_id, "component_id": component_id, "key_spec": key_spec_to_data(key_spec)},
-        decode_keyboard_register_key_spec,
+        KEYBOARD_REGISTER_OUTPUT,
+        {"source": source_path_to_data(source), "output": keyboard_output_to_data(output)},
+        decode_keyboard_register_output,
     )
 
 
-def keyboard_key_down(layout_id: str, component_id: str) -> RuntimeAction:
+def keyboard_key_down(source: SourcePath, active_state_tags: frozenset[str]) -> RuntimeAction:
+    return _keyboard_key_action(KEYBOARD_KEY_DOWN, source, active_state_tags)
+
+
+def keyboard_key_up(source: SourcePath, active_state_tags: frozenset[str]) -> RuntimeAction:
+    return _keyboard_key_action(KEYBOARD_KEY_UP, source, active_state_tags)
+
+
+def prompt_resolve(prompt_id: str, result: str) -> RuntimeAction:
     return _validated_action(
-        KEYBOARD_KEY_DOWN,
-        {"layout_id": layout_id, "component_id": component_id},
-        decode_keyboard_key,
+        PROMPT_RESOLVE,
+        {"prompt_id": prompt_id, "result": result},
+        decode_prompt_resolve,
     )
 
 
-def keyboard_key_up(layout_id: str, component_id: str) -> RuntimeAction:
+def state_replace(source: SourcePath, state: DataMap) -> RuntimeAction:
     return _validated_action(
-        KEYBOARD_KEY_UP,
-        {"layout_id": layout_id, "component_id": component_id},
-        decode_keyboard_key,
-    )
-
-
-def keyboard_sync_latched_key(layout_id: str, component_id: str, latched: bool) -> RuntimeAction:
-    return _validated_action(
-        KEYBOARD_SYNC_LATCHED_KEY,
-        {"layout_id": layout_id, "component_id": component_id, "latched": latched},
-        decode_keyboard_sync_latched_key,
+        STATE_REPLACE,
+        {"source": source_path_to_data(source), "state": state},
+        decode_state_replace,
     )
 
 
@@ -138,34 +144,57 @@ def window_toggle_opacity(window_id: str, component_id: str, opacity: float) -> 
     )
 
 
+def keyboard_output_to_data(output: KeyboardOutput) -> DataMap:
+    return {
+        "output_key": output.output_key,
+        "repeats": output.repeats,
+        "uses_active_state_tags": output.uses_active_state_tags,
+    }
+
+
+def decode_keyboard_output(arguments: DataMap) -> KeyboardOutput:
+    require_keys(arguments, ("output_key", "repeats", "uses_active_state_tags"))
+    return KeyboardOutput(
+        output_key=non_empty_string_value(arguments, "output_key"),
+        repeats=bool_value(arguments, "repeats"),
+        uses_active_state_tags=bool_value(arguments, "uses_active_state_tags"),
+    )
+
+
 def decode_app_quit(arguments: DataMap) -> AppQuitArguments:
     require_keys(arguments, ("exit_code",))
     return AppQuitArguments(exit_code=int_value(arguments, "exit_code"))
 
 
-def decode_keyboard_register_key_spec(arguments: DataMap) -> KeyboardRegisterKeySpecArguments:
-    require_keys(arguments, ("layout_id", "component_id", "key_spec"))
-    return KeyboardRegisterKeySpecArguments(
-        layout_id=non_empty_string_value(arguments, "layout_id"),
-        component_id=non_empty_string_value(arguments, "component_id"),
-        key_spec=key_spec_from_data(map_value(arguments, "key_spec")),
+def decode_keyboard_register_output(arguments: DataMap) -> KeyboardRegisterOutputArguments:
+    require_keys(arguments, ("source", "output"))
+    return KeyboardRegisterOutputArguments(
+        source=source_path_from_data(arguments["source"]),
+        output=decode_keyboard_output(map_value(arguments, "output")),
     )
 
 
 def decode_keyboard_key(arguments: DataMap) -> KeyboardKeyArguments:
-    require_keys(arguments, ("layout_id", "component_id"))
+    require_keys(arguments, ("source", "active_state_tags"))
     return KeyboardKeyArguments(
-        layout_id=non_empty_string_value(arguments, "layout_id"),
-        component_id=non_empty_string_value(arguments, "component_id"),
+        source=source_path_from_data(arguments["source"]),
+        active_state_tags=string_set_value(arguments, "active_state_tags"),
     )
 
 
-def decode_keyboard_sync_latched_key(arguments: DataMap) -> KeyboardSyncLatchedKeyArguments:
-    require_keys(arguments, ("layout_id", "component_id", "latched"))
-    return KeyboardSyncLatchedKeyArguments(
-        layout_id=non_empty_string_value(arguments, "layout_id"),
-        component_id=non_empty_string_value(arguments, "component_id"),
-        latched=bool_value(arguments, "latched"),
+def decode_prompt_resolve(arguments: DataMap) -> PromptResolveArguments:
+    require_keys(arguments, ("prompt_id", "result"))
+    return PromptResolveArguments(
+        prompt_id=non_empty_string_value(arguments, "prompt_id"),
+        result=non_empty_string_value(arguments, "result"),
+    )
+
+
+def decode_state_replace(arguments: DataMap) -> StateReplaceArguments:
+    require_keys(arguments, ("source", "state"))
+    return StateReplaceArguments(
+        source=source_path_from_data(arguments["source"]),
+        state=map_value(arguments, "state"),
     )
 
 
@@ -192,6 +221,19 @@ def decode_window_toggle_opacity(arguments: DataMap) -> WindowToggleOpacityArgum
         window_id=non_empty_string_value(arguments, "window_id"),
         component_id=non_empty_string_value(arguments, "component_id"),
         opacity=opacity,
+    )
+
+
+def _keyboard_key_action(
+    name: str,
+    source: SourcePath,
+    active_state_tags: frozenset[str],
+) -> RuntimeAction:
+    state_tags: list[DataValue] = list(sorted(active_state_tags))
+    return _validated_action(
+        name,
+        {"source": source_path_to_data(source), "active_state_tags": state_tags},
+        decode_keyboard_key,
     )
 
 

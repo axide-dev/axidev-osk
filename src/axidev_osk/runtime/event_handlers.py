@@ -10,8 +10,9 @@ from .actions import (
     APP_QUIT,
     KEYBOARD_KEY_DOWN,
     KEYBOARD_KEY_UP,
-    KEYBOARD_REGISTER_KEY_SPEC,
-    KEYBOARD_SYNC_LATCHED_KEY,
+    KEYBOARD_REGISTER_OUTPUT,
+    PROMPT_RESOLVE,
+    STATE_REPLACE,
     STATE_SET,
     WINDOW_CLOSE,
     WINDOW_HIDE,
@@ -19,15 +20,17 @@ from .actions import (
     WINDOW_TOGGLE_OPACITY,
     AppQuitArguments,
     KeyboardKeyArguments,
-    KeyboardRegisterKeySpecArguments,
-    KeyboardSyncLatchedKeyArguments,
+    KeyboardRegisterOutputArguments,
+    PromptResolveArguments,
+    StateReplaceArguments,
     StateSetArguments,
     WindowArguments,
     WindowToggleOpacityArguments,
     decode_app_quit,
     decode_keyboard_key,
-    decode_keyboard_register_key_spec,
-    decode_keyboard_sync_latched_key,
+    decode_keyboard_register_output,
+    decode_prompt_resolve,
+    decode_state_replace,
     decode_state_set,
     decode_window,
     decode_window_toggle_opacity,
@@ -35,13 +38,15 @@ from .actions import (
     window_show,
 )
 from .events import (
-    COMPONENT_PRESSED,
     HOT_CORNER_TRIGGERED,
     WINDOW_CLOSE_REQUESTED,
-    ComponentPressedArguments,
     HotCornerTriggeredArguments,
     WindowCloseRequestedArguments,
+    keyboard_output_registered,
+    prompt_resolved,
+    state_changed,
 )
+from .source import source_state_namespace
 from .registries import EventHandlerRegistry
 
 
@@ -62,18 +67,13 @@ class _ApplicationEventRuntime(Protocol):
         event: HotCornerTriggeredArguments,
     ) -> MessageResult: ...
 
-    def _handle_component_pressed(
-        self,
-        event: ComponentPressedArguments,
-    ) -> MessageResult: ...
-
 
 def register_context_action_handlers(registry: EventHandlerRegistry) -> None:
     """Register context-owned built-in actions."""
 
     registry.register_action_handler(
-        KEYBOARD_REGISTER_KEY_SPEC,
-        decode_keyboard_register_key_spec,
+        KEYBOARD_REGISTER_OUTPUT,
+        decode_keyboard_register_output,
         lambda context: lambda arguments: _keyboard_register(context, arguments),
     )
     registry.register_action_handler(
@@ -87,14 +87,19 @@ def register_context_action_handlers(registry: EventHandlerRegistry) -> None:
         lambda context: lambda arguments: _keyboard_up(context, arguments),
     )
     registry.register_action_handler(
-        KEYBOARD_SYNC_LATCHED_KEY,
-        decode_keyboard_sync_latched_key,
-        lambda context: lambda arguments: _keyboard_sync_latch(context, arguments),
+        STATE_REPLACE,
+        decode_state_replace,
+        lambda context: lambda arguments: _state_replace(context, arguments),
     )
     registry.register_action_handler(
         STATE_SET,
         decode_state_set,
         lambda context: lambda arguments: _state_set(context, arguments),
+    )
+    registry.register_action_handler(
+        PROMPT_RESOLVE,
+        decode_prompt_resolve,
+        lambda context: lambda arguments: _prompt_resolve(context, arguments),
     )
 
 
@@ -134,10 +139,6 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         HOT_CORNER_TRIGGERED,
         _hot_corner_triggered_handler,
     )
-    registry.register_event_handler(
-        COMPONENT_PRESSED,
-        _component_pressed_handler,
-    )
 
 
 def route_hot_corner_triggered(
@@ -161,18 +162,6 @@ def route_hot_corner_triggered(
     return actions
 
 
-def route_component_pressed(
-    event: ComponentPressedArguments,
-    runtime: object,
-) -> MessageResult:
-    """Return the configured action attached to a pressed key."""
-
-    del runtime
-    if event.action is None:
-        return []
-    return [event.action]
-
-
 def _window_close_requested_handler(
     runtime: _ApplicationEventRuntime,
 ) -> Callable[[WindowCloseRequestedArguments], MessageResult]:
@@ -185,43 +174,41 @@ def _hot_corner_triggered_handler(
     return runtime._handle_hot_corner_triggered
 
 
-def _component_pressed_handler(
-    runtime: _ApplicationEventRuntime,
-) -> Callable[[ComponentPressedArguments], MessageResult]:
-    return runtime._handle_component_pressed
-
-
-def _keyboard_register(context: object, arguments: KeyboardRegisterKeySpecArguments) -> MessageResult:
-    context.keyboard.register_key_spec(  # type: ignore[attr-defined]
-        arguments.layout_id,
-        arguments.key_spec,
-        component_id=arguments.component_id,
+def _keyboard_register(context: object, arguments: KeyboardRegisterOutputArguments) -> MessageResult:
+    output_key, state_tags = context.keyboard.register_output(  # type: ignore[attr-defined]
+        arguments.source,
+        arguments.output,
     )
-    return []
+    return [keyboard_output_registered(arguments.source, output_key, state_tags)]
 
 
 def _keyboard_down(context: object, arguments: KeyboardKeyArguments) -> MessageResult:
-    context.keyboard.key_down(arguments.layout_id, arguments.component_id)  # type: ignore[attr-defined]
+    context.keyboard.key_down(arguments.source, arguments.active_state_tags)  # type: ignore[attr-defined]
     return []
 
 
 def _keyboard_up(context: object, arguments: KeyboardKeyArguments) -> MessageResult:
-    context.keyboard.key_up(arguments.layout_id, arguments.component_id)  # type: ignore[attr-defined]
+    context.keyboard.key_up(arguments.source)  # type: ignore[attr-defined]
     return []
 
 
-def _keyboard_sync_latch(context: object, arguments: KeyboardSyncLatchedKeyArguments) -> MessageResult:
-    context.keyboard.sync_latched_key(  # type: ignore[attr-defined]
-        arguments.layout_id,
-        arguments.component_id,
-        arguments.latched,
+def _state_replace(context: object, arguments: StateReplaceArguments) -> MessageResult:
+    context.state.set(  # type: ignore[attr-defined]
+        source_state_namespace(arguments.source),
+        "snapshot",
+        arguments.state,
     )
-    return []
+    return [state_changed(arguments.source, arguments.state)]
 
 
 def _state_set(context: object, arguments: StateSetArguments) -> MessageResult:
     context.state.set(arguments.namespace, arguments.key, arguments.value)  # type: ignore[attr-defined]
     return []
+
+
+def _prompt_resolve(context: object, arguments: PromptResolveArguments) -> MessageResult:
+    del context
+    return [prompt_resolved(arguments.prompt_id, arguments.result)]
 
 
 def _window_show(runtime: object, arguments: WindowArguments) -> MessageResult:

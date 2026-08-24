@@ -58,6 +58,20 @@ When adding or refactoring code, keep these boundaries clear:
 - runtime/orchestration concerns:
   Event queue ownership, action routing, callback scheduling, state store updates, and subsystem boundaries.
 
+## Visual And Behavior Configuration
+
+Visual config describes what a component looks like and where it appears. It may contain labels, display variants, geometry, component kinds, and stable IDs. It must not contain backend keys, runtime actions, latch policy, callbacks, or durable interaction state.
+
+Behavior config is separate and belongs to the root application config. Each interactive key or generic button must have exactly one `BehaviorBinding` addressed by its full `SourcePath`. Loading must fail before window construction when a target is missing, duplicated, unresolved, attached to a non-interactive node, or uses an unknown behavior or hook kind.
+
+Components emit only raw interactions such as `component.pressed` and `component.released`. They render complete state snapshots from the central runtime store. Components must not decide keyboard policy, resolve prompt results, call backend services, or keep durable latch state.
+
+Behavior handlers and hooks return queue messages. Blocking before-hooks may cancel or replace default behavior. Later before-hooks still run, and the last cancel or replace decision wins. After-hooks may extend completed behavior but cannot undo it.
+
+Keyboard behavior must declare an explicit output key and interaction mode. The keyboard service owns backend lifecycle, output registration, backend observations, and active press handles. It does not own visual data, latch policy, or durable component state.
+
+A `SourcePath` contains ordered app, profile, window, surface, component, layout, grid, and child-component segments as applicable. Queue messages carry the path as native data. Runtime state uses a collision-free encoding of the full path.
+
 ## Preferred Direction For New Work
 
 - Prefer data-driven builders over handwritten widget trees.

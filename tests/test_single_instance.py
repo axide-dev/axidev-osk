@@ -26,9 +26,25 @@ def _app() -> QApplication:
 
 
 class FakeKeyboardBackend:
+    ready = True
+    status_text = "ready"
+    needs_permission_setup = False
+    permission_setup_text = ""
+
     def add_key_state_listener(self, listener):
         del listener
         return lambda: None
+
+    def key_name_for_output(self, output):
+        return output.output_key
+
+    def state_tags_for_key(self, output_key):
+        del output_key
+        return frozenset()
+
+    def is_key_down(self, key_name):
+        del key_name
+        return False
 
 
 class WindowsSingleInstanceServiceTests(unittest.TestCase):

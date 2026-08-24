@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
-from ..models import KeySpec
+from ..messages import DataMap, RuntimeAction
+from ..models import KeyVisual, SpacerVisual
 from ..runtime.identity import validate_unique_ids
+from ..runtime.source import SourcePath
 
 
 class OverlayPlacement(str, Enum):
@@ -60,15 +62,15 @@ class ChromeConfig:
 
 @dataclass(frozen=True, slots=True)
 class KeyConfig:
-    """Declarative key component placement and behavior.
+    """Declarative visual key component.
 
     Attributes:
         id: Deterministic component ID used by events, state, and Qt properties.
-        spec: Keyboard key semantics and grid placement inherited from the prototype model.
+        visual: Visible text and grid placement.
     """
 
     id: str
-    spec: KeySpec
+    visual: KeyVisual
     kind: Literal["key"] = "key"
 
 
@@ -78,11 +80,11 @@ class SpacerConfig:
 
     Attributes:
         id: Deterministic component ID used by validation and Qt properties.
-        spec: Spacer geometry stored in the same unit system as keys.
+        visual: Spacer geometry stored in the same unit system as keys.
     """
 
     id: str
-    spec: KeySpec
+    visual: SpacerVisual
     kind: Literal["spacer"] = "spacer"
 
 
@@ -93,14 +95,12 @@ class ButtonConfig:
     Attributes:
         id: Deterministic component ID used by events and Qt properties.
         label: Visible text shown on the button.
-        role: Semantic action emitted by the button.
         object_name: Optional Qt object name for existing QSS/tests.
         style_sheet: Optional local stylesheet for prompt buttons.
     """
 
     id: str
     label: str
-    role: str
     object_name: str | None = None
     style_sheet: str | None = None
     kind: Literal["button"] = "button"
@@ -247,6 +247,43 @@ ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig | PromptConfig | Keybo
 
 
 @dataclass(frozen=True, slots=True)
+class BehaviorConfig:
+    """Registered behavior kind plus queue-safe native arguments."""
+
+    kind: str
+    arguments: DataMap
+
+    def __post_init__(self) -> None:
+        validated = RuntimeAction(self.kind, self.arguments)
+        object.__setattr__(self, "arguments", validated.arguments)
+
+
+@dataclass(frozen=True, slots=True)
+class BehaviorHook:
+    """One event-filtered hook around a component's default behavior."""
+
+    events: frozenset[str]
+    blocking: bool
+    config: BehaviorConfig
+
+    def __post_init__(self) -> None:
+        if not self.events:
+            raise ValueError("Behavior hook must match at least one event")
+        for event in self.events:
+            RuntimeAction(event, {})
+
+
+@dataclass(frozen=True, slots=True)
+class BehaviorBinding:
+    """Attach one default behavior and its hooks to an exact source path."""
+
+    target: SourcePath
+    default: BehaviorConfig
+    before_hooks: tuple[BehaviorHook, ...] = ()
+    after_hooks: tuple[BehaviorHook, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class HotCornerConfig:
     """Hot-corner trigger behavior and runtime window bindings.
 
@@ -325,7 +362,10 @@ class AppConfig:
     """Root application configuration owned by the runtime.
 
     Attributes:
+        app_id: Stable application identity used by paths and state.
+        active_profile_id: Active profile identity used by paths and state.
         windows: Windows available to the runtime, keyed by deterministic IDs.
+        behaviors: Exact behavior bindings for every interactive control.
         startup_window_ids: IDs of windows shown during startup.
         keyboard_window_id: ID of the default keyboard surface.
         quit_prompt: Declarative quit confirmation prompt.
@@ -333,7 +373,10 @@ class AppConfig:
         hot_corner: Hot-corner trigger behavior and window bindings.
     """
 
+    app_id: str
+    active_profile_id: str
     windows: tuple[WindowConfig, ...]
+    behaviors: tuple[BehaviorBinding, ...]
     startup_window_ids: tuple[str, ...]
     keyboard_window_id: str
     quit_prompt: PromptConfig
@@ -342,6 +385,11 @@ class AppConfig:
 
     def __post_init__(self) -> None:
         """Validate IDs at the root app composition boundary."""
+
+        if not self.app_id:
+            raise ValueError("App ID cannot be empty")
+        if not self.active_profile_id:
+            raise ValueError("Active profile ID cannot be empty")
 
         validate_unique_ids((window.id for window in self.windows), scope="app windows")
         validate_unique_ids(
@@ -363,4 +411,8 @@ class AppConfig:
                 self.linux_permission_prompt.surface_id,
             ),
             scope="app surface and prompt surface IDs",
+        )
+        validate_unique_ids(
+            (repr(binding.target) for binding in self.behaviors),
+            scope="app behavior targets",
         )

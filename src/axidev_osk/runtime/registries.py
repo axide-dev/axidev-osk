@@ -21,10 +21,11 @@ from ..messages import DataMap, MessageResult
 if TYPE_CHECKING:
     from .context import Context
     from .dispatcher import Dispatcher
+    from .source import SourcePath
 
 
 ComponentBuilder = Callable[..., QWidget]
-SurfaceBuilder = Callable[[SurfaceConfig, "Context"], QWidget]
+SurfaceBuilder = Callable[[SurfaceConfig, "Context", "SourcePath"], QWidget]
 RuntimeT = TypeVar("RuntimeT")
 
 
@@ -94,6 +95,7 @@ class ComponentRegistry:
         config: ComponentConfig,
         context: "Context",
         *,
+        source_path: "SourcePath",
         host: QWidget | None = None,
     ) -> QWidget:
         """Build a component widget from config.
@@ -115,7 +117,7 @@ class ComponentRegistry:
         builder = self._builders.get(config.kind)
         if builder is None:
             raise ValueError(f"No component registered for kind {config.kind!r}")
-        return builder(config, context, host=host)
+        return builder(config, context, source_path=source_path, host=host)
 
 
 class SurfaceRegistry:
@@ -152,7 +154,12 @@ class SurfaceRegistry:
 
         self._builders[kind] = builder
 
-    def build(self, config: SurfaceConfig, context: "Context") -> QWidget:
+    def build(
+        self,
+        config: SurfaceConfig,
+        context: "Context",
+        source_path: "SourcePath",
+    ) -> QWidget:
         """Build root window content from config.
 
         Args:
@@ -169,7 +176,7 @@ class SurfaceRegistry:
         builder = self._builders.get(config.kind)
         if builder is None:
             raise ValueError(f"No surface registered for kind {config.kind!r}")
-        return builder(config, context)
+        return builder(config, context, source_path)
 
 
 class ServiceRegistry:

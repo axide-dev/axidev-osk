@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 from axidev_osk.messages import MessageResult
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.events import PROMPT_RESOLVED, PromptResolvedArguments
+from axidev_osk.runtime.config_paths import surface_source_path
 from axidev_osk.runtime.testing import make_test_context
 
 
@@ -18,6 +19,17 @@ class FakeKeyboardBackend:
     def add_key_state_listener(self, listener: object) -> object:
         del listener
         return lambda: None
+
+    def key_name_for_output(self, output):
+        return output.output_key
+
+    def state_tags_for_key(self, output_key):
+        del output_key
+        return frozenset()
+
+    def is_key_down(self, key_name):
+        del key_name
+        return False
 
 
 def _app() -> QApplication:
@@ -42,14 +54,24 @@ class PromptComponentTests(unittest.TestCase):
         context.dispatcher.add_event_handler(PROMPT_RESOLVED, record)
         window = QWidget()
         self.addCleanup(window.close)
-        prompt_widget = context.components.build(prompt, context, host=window)
+        prompt_path = surface_source_path(
+            config,
+            prompt.window_id,
+            prompt.surface_id,
+        ).child("component", prompt.id)
+        prompt_widget = context.components.build(
+            prompt,
+            context,
+            source_path=prompt_path,
+            host=window,
+        )
         prompt_widget.setParent(window)
         window.show()
 
         button = next(
             child
             for child in prompt_widget.findChildren(QPushButton)
-            if child.property("role") == "accepted"
+            if child.property("componentId") == prompt.buttons[0].id
         )
         button.click()
 

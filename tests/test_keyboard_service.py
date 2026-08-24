@@ -1,393 +1,221 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import Mock
+from dataclasses import dataclass
 
-from PySide6.QtWidgets import QApplication, QPushButton
-
-from axidev_osk.components.grid.keyboard import KeyboardWidget
-from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
-from axidev_osk.messages import MessageResult, RuntimeAction
-from axidev_osk.models import KeySpec
-from axidev_osk.runtime.actions import (
-    keyboard_key_down,
-    keyboard_sync_latched_key,
-    window_toggle_opacity,
-)
+from axidev_osk.messages import MessageResult
+from axidev_osk.runtime.behavior_models import KeyboardOutput
 from axidev_osk.runtime.events import (
-    COMPONENT_PRESSED,
     KEYBOARD_KEY_STATE_CHANGED,
-    KEYBOARD_LATCH_CHANGED,
-    ComponentPressedArguments,
     KeyboardKeyStateChangedArguments,
-    KeyboardLatchChangedArguments,
 )
-from axidev_osk.runtime.identity import keyboard_key_states_namespace, keyboard_latches_namespace
+from axidev_osk.runtime.source import SourcePath, SourcePathSegment
 from axidev_osk.runtime.testing import make_test_context
 
-LAYOUT_ID = "layout:us-iso"
 
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+@dataclass(frozen=True)
+class PressHandle:
+    key_name: str
 
 
 class FakeKeyboardBackend:
-    def __init__(self, pressed_key_names: set[str] | None = None) -> None:
-        self.ready = True
-        self.status_text = "ready"
-        self.needs_permission_setup = False
-        self.permission_setup_text = ""
-        self._pressed_key_names = pressed_key_names or set()
-        self._listeners = []
-        self.key_down = Mock(return_value=SimpleNamespace(name="press"))
-        self.key_up = Mock()
-        self.sync_latched_key = Mock(return_value=None)
+    ready = True
+    status_text = "ready"
+    needs_permission_setup = False
+    permission_setup_text = ""
+
+    def __init__(self) -> None:
+        self.initialize_calls = 0
+        self.shutdown_calls = 0
+        self.listeners = []
+        self.pressed: set[str] = set()
+        self.down_calls: list[tuple[KeyboardOutput, frozenset[str]]] = []
+        self.up_calls: list[object | None] = []
 
     def initialize(self) -> bool:
+        self.initialize_calls += 1
         return True
 
     def shutdown(self) -> None:
-        return None
+        self.shutdown_calls += 1
 
     def add_key_state_listener(self, listener):
-        self._listeners.append(listener)
+        self.listeners.append(listener)
 
         def unsubscribe() -> None:
-            self._listeners.remove(listener)
+            self.listeners.remove(listener)
 
         return unsubscribe
 
+    def key_name_for_output(self, output: KeyboardOutput) -> str:
+        return output.output_key.casefold()
+
+    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
+        return {
+            "shiftleft": frozenset({"shift"}),
+            "capslock": frozenset({"caps"}),
+        }.get(output_key.casefold(), frozenset())
+
     def is_key_down(self, key_name: str) -> bool:
-        return key_name in self._pressed_key_names
+        return key_name in self.pressed
 
-    def key_name_for_spec(self, spec: KeySpec) -> str | None:
-        return spec.io_key or (spec.label if len(spec.label) == 1 else None)
+    def key_down(
+        self,
+        output: KeyboardOutput,
+        active_state_tags: frozenset[str],
+    ) -> PressHandle:
+        self.down_calls.append((output, active_state_tags))
+        key_name = self.key_name_for_output(output)
+        self.emit(key_name, True)
+        return PressHandle(key_name)
 
-    def emit_key_state(self, key_name: str, pressed: bool) -> None:
+    def key_up(self, handle: object | None) -> None:
+        self.up_calls.append(handle)
+        if isinstance(handle, PressHandle):
+            self.emit(handle.key_name, False)
+
+    def emit(self, key_name: str, pressed: bool) -> None:
         if pressed:
-            self._pressed_key_names.add(key_name)
+            self.pressed.add(key_name)
         else:
-            self._pressed_key_names.discard(key_name)
-        for listener in tuple(self._listeners):
+            self.pressed.discard(key_name)
+        for listener in tuple(self.listeners):
             listener(key_name, pressed)
 
 
+def _source(component_id: str) -> SourcePath:
+    return SourcePath(
+        (
+            SourcePathSegment("app", "axidev-osk"),
+            SourcePathSegment("profile", "default"),
+            SourcePathSegment("window", "keyboard"),
+            SourcePathSegment("surface", "keyboard"),
+            SourcePathSegment("component", "keyboard-grid"),
+            SourcePathSegment("layout", "us-iso"),
+            SourcePathSegment("grid", "main"),
+            SourcePathSegment("component", component_id),
+        )
+    )
+
+
 class KeyboardServiceTests(unittest.TestCase):
-    def test_runtime_actions_reject_non_namespaced_names(self) -> None:
-        with self.assertRaisesRegex(ValueError, "dot-separated"):
-            RuntimeAction(action="unknown", arguments={})
-
-    def test_action_keys_reject_keyboard_behavior(self) -> None:
-        action = window_toggle_opacity("window:keyboard", "key:ghost", 0.01)
-
-        with self.assertRaisesRegex(ValueError, "keyboard output or latch behavior"):
-            KeySpec(label="Ghost", row=0, column=0, io_key="A", repeats=False, action=action)
-        with self.assertRaisesRegex(ValueError, "cannot repeat"):
-            KeySpec(label="Ghost", row=0, column=0, action=action)
-
-    def test_ghost_key_emits_action_event_without_keyboard_output(self) -> None:
-        _app()
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        events: list[ComponentPressedArguments] = []
-
-        def record(event: ComponentPressedArguments) -> MessageResult:
-            events.append(event)
-            return []
-
-        context.dispatcher.add_event_handler(COMPONENT_PRESSED, record)
-        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
-        self.addCleanup(widget.close)
-        ghost = next(
-            button
-            for button in widget.findChildren(QPushButton)
-            if button.text() == "Ghost"
+    def setUp(self) -> None:
+        self.backend = FakeKeyboardBackend()
+        self.context = make_test_context(
+            self.backend,
+            activate_behaviors=False,
         )
-
-        ghost.click()
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].component_id, ghost.property("componentId"))
-        self.assertIsNotNone(events[0].action)
-        backend.key_down.assert_not_called()
-        backend.key_up.assert_not_called()
-
-    def test_service_emits_backend_key_state_changed_on_backend_update(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend, services={"keyboard"})
-        spec = KeySpec(label="A", row=0, column=0, io_key="A")
-        events: list[KeyboardKeyStateChangedArguments] = []
+        self.service = self.context.keyboard
+        self.events: list[KeyboardKeyStateChangedArguments] = []
 
         def record(event: KeyboardKeyStateChangedArguments) -> MessageResult:
-            events.append(event)
+            self.events.append(event)
             return []
 
-        context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
+        self.context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
 
-        context.keyboard.register_key_spec(LAYOUT_ID, spec)
-        backend.emit_key_state("A", True)
+    def test_start_initializes_backend_and_listener_once(self) -> None:
+        self.service.start(self.context)
+        self.service.bind_context(self.context)
 
-        self.assertEqual(events, [KeyboardKeyStateChangedArguments(layout_id=LAYOUT_ID, key_id="A", pressed=True, latched=False)])
+        self.assertEqual(self.backend.initialize_calls, 1)
+        self.assertEqual(len(self.backend.listeners), 1)
 
-    def test_service_writes_keyboard_key_state_namespace(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        spec = KeySpec(label="A", row=0, column=0, io_key="A")
+    def test_register_output_returns_canonical_name_and_state_tags(self) -> None:
+        source = _source("shift-left")
 
-        context.keyboard.register_key_spec(LAYOUT_ID, spec)
-        backend.emit_key_state("A", True)
-
-        self.assertEqual(
-            context.state.get(keyboard_key_states_namespace(LAYOUT_ID), "A"),
-            {"pressed": True, "latched": False},
+        metadata = self.service.register_output(
+            source,
+            KeyboardOutput("ShiftLeft", repeats=False),
         )
 
-    def test_widget_renders_from_snapshot_without_backend_press(self) -> None:
-        _app()
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        context.state.set(keyboard_key_states_namespace(LAYOUT_ID), "A", {"pressed": True, "latched": False})
+        self.assertEqual(metadata, ("shiftleft", frozenset({"shift"})))
 
-        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
-        self.addCleanup(widget.close)
+    def test_register_output_publishes_existing_backend_state(self) -> None:
+        source = _source("caps-lock")
+        self.backend.pressed.add("capslock")
 
-        button = self._button_for_io_key(widget, "A")
-        self.assertEqual(button.property("interactionState"), "pressed")
-        backend.key_down.assert_not_called()
-        backend.key_up.assert_not_called()
-        backend.sync_latched_key.assert_not_called()
-
-    def test_service_emits_key_latch_changed_on_latch_toggle(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        spec = KeySpec(label="Shift", row=0, column=0, key_id="shift", io_key="leftshift", latchable=True)
-        events: list[KeyboardLatchChangedArguments] = []
-
-        def record(event: KeyboardLatchChangedArguments) -> MessageResult:
-            events.append(event)
-            return []
-
-        context.dispatcher.add_event_handler(KEYBOARD_LATCH_CHANGED, record)
-        context.keyboard.register_key_spec(LAYOUT_ID, spec, component_id="key:shift")
-        context.dispatcher.dispatch_action(keyboard_sync_latched_key(LAYOUT_ID, "key:shift", True))
-
-        self.assertEqual(events, [KeyboardLatchChangedArguments(layout_id=LAYOUT_ID, key_id="shift", latched=True)])
-        self.assertTrue(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "shift"))
-
-    def test_non_held_latch_does_not_emit_backend_pressed_state(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        spec = KeySpec(label="Caps", row=0, column=0, key_id="caps", io_key="capslock", latchable=True)
-        events: list[KeyboardKeyStateChangedArguments] = []
-
-        def record(event: KeyboardKeyStateChangedArguments) -> MessageResult:
-            events.append(event)
-            return []
-
-        context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
-        context.keyboard.register_key_spec(LAYOUT_ID, spec, component_id="key:caps")
-        context.dispatcher.dispatch_action(keyboard_sync_latched_key(LAYOUT_ID, "key:caps", True))
-
-        self.assertEqual(events, [])
-        self.assertTrue(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "caps"))
-
-    def test_held_latch_uses_one_backend_press_until_unlatched(self) -> None:
-        _app()
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
-        self.addCleanup(widget.close)
-        button = self._button_for_key_id(widget, "shift")
-
-        button.pressed.emit()
-        button.released.emit()
-
-        backend.key_down.assert_called_once()
-        backend.key_up.assert_not_called()
-        backend.sync_latched_key.assert_not_called()
-        self.assertEqual(button.property("interactionState"), "latched")
-
-        button.pressed.emit()
-        button.released.emit()
-
-        backend.key_down.assert_called_once()
-        backend.key_up.assert_called_once_with(backend.key_down.return_value)
-        self.assertEqual(button.property("interactionState"), "idle")
-
-    def test_reset_state_releases_active_press_handles(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        spec = KeySpec(label="Shift", row=0, column=0, key_id="shift", io_key="leftshift", holds_when_latched=True)
-
-        context.keyboard.register_key_spec(LAYOUT_ID, spec, component_id="key:shift")
-        context.dispatcher.dispatch_action(keyboard_key_down(LAYOUT_ID, "key:shift"))
-        context.keyboard.reset_state()
-
-        backend.key_up.assert_called_once_with(backend.key_down.return_value)
-
-    def test_shared_latch_sibling_releases_original_backend_press(self) -> None:
-        _app()
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
-        self.addCleanup(widget.close)
-        left_shift = self._button_for_io_key(widget, "ShiftLeft")
-        right_shift = self._button_for_io_key(widget, "ShiftRight")
-
-        left_shift.pressed.emit()
-        left_shift.released.emit()
-        right_shift.pressed.emit()
-        right_shift.released.emit()
-
-        backend.key_down.assert_called_once()
-        backend.key_up.assert_called_once_with(backend.key_down.return_value)
-        self.assertEqual(left_shift.property("interactionState"), "idle")
-        self.assertEqual(right_shift.property("interactionState"), "idle")
-
-    def test_ctrl_shift_left_right_sequences_release_original_backend_presses(self) -> None:
-        _app()
-
-        for ctrl_name in ("CtrlLeft", "CtrlRight"):
-            for shift_name in ("ShiftLeft", "ShiftRight"):
-                with self.subTest(ctrl=ctrl_name, shift=shift_name):
-                    backend = FakeKeyboardBackend()
-                    handles: list[SimpleNamespace] = []
-                    presses: list[tuple[str | None, dict[str, bool]]] = []
-
-                    def key_down(spec: KeySpec, latched_keys: dict[str, bool]) -> SimpleNamespace:
-                        handle = SimpleNamespace(key_name=spec.io_key)
-                        handles.append(handle)
-                        presses.append((spec.io_key, dict(latched_keys)))
-                        return handle
-
-                    backend.key_down.side_effect = key_down
-                    context = make_test_context(backend)
-                    widget = KeyboardWidget(
-                        layout_config=build_us_iso_layout_config(),
-                        context=context,
-                    )
-                    shift = self._button_for_io_key(widget, shift_name)
-                    opposite_shift = self._button_for_io_key(
-                        widget,
-                        "ShiftRight" if shift_name == "ShiftLeft" else "ShiftLeft",
-                    )
-                    ctrl = self._button_for_io_key(widget, ctrl_name)
-                    shifted_letters = [
-                        self._button_for_io_key(widget, key_name)
-                        for key_name in ("B", "C", "D")
-                    ]
-                    final_letter = self._button_for_io_key(widget, "A")
-
-                    ctrl.click()
-                    shift.click()
-                    ctrl.click()
-                    for letter in shifted_letters:
-                        letter.click()
-
-                    opposite_shift.click()
-                    final_letter.click()
-
-                    self.assertEqual(
-                        [handle.key_name for handle in handles],
-                        [ctrl_name, shift_name, "B", "C", "D", "A"],
-                    )
-                    self.assertEqual(
-                        [call.args[0].key_name for call in backend.key_up.call_args_list],
-                        [ctrl_name, "B", "C", "D", shift_name, "A"],
-                    )
-                    for key_name, latched_keys in presses[2:5]:
-                        self.assertIn(key_name, {"B", "C", "D"})
-                        self.assertFalse(latched_keys["ctrl"])
-                        self.assertTrue(latched_keys["shift"])
-                    final_latched_keys = presses[-1][1]
-                    self.assertFalse(final_latched_keys["ctrl"])
-                    self.assertFalse(final_latched_keys["shift"])
-                    self.assertFalse(ctrl.property("latched"))
-                    self.assertFalse(shift.property("latched"))
-                    self.assertFalse(opposite_shift.property("latched"))
-                    widget.close()
-
-    def test_key_down_without_backend_press_does_not_emit_pressed_state(self) -> None:
-        backend = FakeKeyboardBackend()
-        backend.key_down.return_value = None
-        context = make_test_context(backend)
-        spec = KeySpec(label="Caps", row=0, column=0, key_id="caps", io_key="capslock", latchable=True)
-        events: list[KeyboardKeyStateChangedArguments] = []
-
-        def record(event: KeyboardKeyStateChangedArguments) -> MessageResult:
-            events.append(event)
-            return []
-
-        context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
-        context.keyboard.register_key_spec(LAYOUT_ID, spec, component_id="key:caps")
-        context.dispatcher.dispatch_action(keyboard_key_down(LAYOUT_ID, "key:caps"))
-
-        self.assertEqual(events, [])
-        self.assertEqual(
-            context.state.get(keyboard_key_states_namespace(LAYOUT_ID), "capslock"),
-            {"pressed": False, "latched": False},
-        )
-
-    def test_shared_latch_keys_keep_distinct_backend_pressed_state(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        left_shift = KeySpec(label="Shift", row=0, column=0, key_id="shift", io_key="leftshift", latchable=True)
-        right_shift = KeySpec(label="Shift", row=0, column=1, key_id="shift", io_key="rightshift", latchable=True)
-
-        context.keyboard.register_key_spec(LAYOUT_ID, left_shift)
-        context.keyboard.register_key_spec(LAYOUT_ID, right_shift)
-        backend.emit_key_state("rightshift", True)
+        self.service.register_output(source, KeyboardOutput("CapsLock"))
 
         self.assertEqual(
-            context.state.get(keyboard_key_states_namespace(LAYOUT_ID), "leftshift"),
-            {"pressed": False, "latched": False},
+            self.events,
+            [KeyboardKeyStateChangedArguments(source, True, frozenset({"caps"}))],
+        )
+
+    def test_backend_update_is_published_for_every_exact_registered_source(self) -> None:
+        first = _source("shift-left-first")
+        second = _source("shift-left-second")
+        output = KeyboardOutput("ShiftLeft")
+        self.service.register_output(first, output)
+        self.service.register_output(second, output)
+
+        self.backend.emit("shiftleft", True)
+
+        self.assertEqual(
+            self.events,
+            [
+                KeyboardKeyStateChangedArguments(first, True, frozenset({"shift"})),
+                KeyboardKeyStateChangedArguments(second, True, frozenset({"shift"})),
+            ],
+        )
+
+    def test_key_down_passes_runtime_state_tags_and_publishes_once(self) -> None:
+        source = _source("a")
+        output = KeyboardOutput("A")
+        self.service.register_output(source, output)
+
+        self.service.key_down(source, frozenset({"shift", "caps"}))
+
+        self.assertEqual(
+            self.backend.down_calls,
+            [(output, frozenset({"shift", "caps"}))],
         )
         self.assertEqual(
-            context.state.get(keyboard_key_states_namespace(LAYOUT_ID), "rightshift"),
-            {"pressed": True, "latched": False},
+            self.events,
+            [KeyboardKeyStateChangedArguments(source, True, frozenset())],
         )
 
-    def test_service_reset_state_clears_latches_for_registered_layout(self) -> None:
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        spec = KeySpec(label="Shift", row=0, column=0, key_id="shift", io_key="leftshift", latchable=True)
+    def test_key_up_releases_matching_handle_and_publishes_once(self) -> None:
+        source = _source("a")
+        self.service.register_output(source, KeyboardOutput("A"))
+        self.service.key_down(source, frozenset())
+        self.events.clear()
 
-        context.keyboard.register_key_spec(LAYOUT_ID, spec, component_id="key:shift")
-        context.dispatcher.dispatch_action(keyboard_sync_latched_key(LAYOUT_ID, "key:shift", True))
-        context.keyboard.reset_state()
+        self.service.key_up(source)
 
-        self.assertIsNone(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "shift"))
-        self.assertFalse(context.keyboard.is_latched(LAYOUT_ID, "shift"))
+        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
+        self.assertEqual(
+            self.events,
+            [KeyboardKeyStateChangedArguments(source, False, frozenset())],
+        )
 
-    def test_widget_renders_latched_style_from_snapshot(self) -> None:
-        _app()
-        backend = FakeKeyboardBackend()
-        context = make_test_context(backend)
-        context.state.set(keyboard_latches_namespace(LAYOUT_ID), "shift", True)
+    def test_unregistered_output_fails_before_backend_call(self) -> None:
+        with self.assertRaisesRegex(ValueError, "No keyboard output registered"):
+            self.service.key_down(_source("missing"), frozenset())
 
-        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
-        self.addCleanup(widget.close)
+        self.assertEqual(self.backend.down_calls, [])
 
-        button = self._button_for_key_id(widget, "shift")
-        self.assertTrue(button.property("latched"))
-        self.assertIn(button.property("interactionState"), {"latched", "latched_pressed"})
+    def test_reset_releases_active_handles_and_discards_outputs(self) -> None:
+        source = _source("a")
+        self.service.register_output(source, KeyboardOutput("A"))
+        self.service.key_down(source, frozenset())
 
-    def _button_for_io_key(self, widget: KeyboardWidget, io_key_name: str) -> QPushButton:
-        for button in widget.findChildren(QPushButton):
-            if button.property("ioKeyName") == io_key_name:
-                return button
-        raise AssertionError(f"button for {io_key_name!r} was not found")
+        self.service.reset_state()
 
-    def _button_for_key_id(self, widget: KeyboardWidget, key_id: str) -> QPushButton:
-        for button in widget.findChildren(QPushButton):
-            if button.property("keyId") == key_id:
-                return button
-        raise AssertionError(f"button for {key_id!r} was not found")
+        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
+        with self.assertRaisesRegex(ValueError, "No keyboard output registered"):
+            self.service.key_down(source, frozenset())
+
+    def test_shutdown_releases_active_handles_and_runs_once(self) -> None:
+        source = _source("a")
+        self.service.register_output(source, KeyboardOutput("A"))
+        self.service.key_down(source, frozenset())
+
+        self.service.shutdown()
+        self.service.shutdown()
+
+        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
+        self.assertEqual(self.backend.shutdown_calls, 1)
 
 
 if __name__ == "__main__":

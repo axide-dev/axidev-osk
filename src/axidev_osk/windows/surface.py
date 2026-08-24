@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from ..config.models import SurfaceConfig
 from ..runtime.context import Context
 from ..runtime.registries import SurfaceRegistry
+from ..runtime.source import SourcePath
 
 
 def register_surfaces(registry: SurfaceRegistry) -> None:
@@ -26,7 +27,11 @@ def register_surfaces(registry: SurfaceRegistry) -> None:
     registry.register("surface", build_surface)
 
 
-def build_surface(config: SurfaceConfig, context: Context) -> QWidget:
+def build_surface(
+    config: SurfaceConfig,
+    context: Context,
+    source_path: SourcePath,
+) -> QWidget:
     """Build a generic root surface from child component configs.
 
     Args:
@@ -50,6 +55,11 @@ def build_surface(config: SurfaceConfig, context: Context) -> QWidget:
     layout.setContentsMargins(*config.margins)
     layout.setSpacing(config.spacing)
     for component in config.components:
-        widget = context.components.build(component, context, host=central)
+        widget = context.components.build(
+            component,
+            context,
+            source_path=source_path.child("component", component.id),
+            host=central,
+        )
         layout.addWidget(widget)
     return central

@@ -14,9 +14,12 @@ from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.actions import (
+    WINDOW_TOGGLE_OPACITY,
     WINDOW_SHOW,
     WindowArguments,
+    WindowToggleOpacityArguments,
     decode_window,
+    decode_window_toggle_opacity,
     window_hide,
     window_show,
     window_toggle_opacity,
@@ -25,9 +28,11 @@ from axidev_osk.runtime.events import (
     HOT_CORNER_TRIGGERED,
     HotCornerTriggeredArguments,
     component_pressed,
+    component_released,
     decode_component_pressed,
     hot_corner_triggered,
 )
+from axidev_osk.runtime.config_paths import surface_source_path
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 
@@ -59,23 +64,27 @@ class FakeKeyboardBackend:
         del listener
         return lambda: None
 
-    def key_down(self, spec):
-        del spec
+    def key_down(self, output, active_state_tags):
+        del output, active_state_tags
         return SimpleNamespace(name="press")
 
     def key_up(self, handle) -> None:
         del handle
 
-    def sync_latched_key(self, spec, latched: bool):
-        del spec, latched
-        return None
-
     def is_key_down(self, key_name: str) -> bool:
         del key_name
         return False
 
-    def key_name_for_spec(self, spec) -> str | None:
-        return getattr(spec, "io_key", None)
+    def key_name_for_output(self, output) -> str:
+        return output.output_key
+
+    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
+        tags = {
+            "ShiftLeft": frozenset({"shift"}),
+            "ShiftRight": frozenset({"shift"}),
+            "CapsLock": frozenset({"caps"}),
+        }
+        return tags.get(output_key, frozenset())
 
 
 class HotCornerEventTests(unittest.TestCase):
@@ -242,22 +251,44 @@ class HotCornerEventTests(unittest.TestCase):
 
     def test_component_action_dispatches_configured_window_opacity_command(self) -> None:
         context = make_test_context(FakeKeyboardBackend())
+        window = context.config.windows[0]
+        keyboard = window.surface.components[0]
+        grid = keyboard.layout.grids[0]
         ghost = next(
             component
-            for component in context.config.windows[0].surface.components[0].layout.grids[0].components
-            if component.spec.label == "Ghost"
+            for component in grid.components
+            if component.visual.label == "Ghost"
         )
-        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
-        runtime._dispatcher = context.dispatcher
+        source = (
+            surface_source_path(context.config, window.id, window.surface.id)
+            .child("component", keyboard.id)
+            .child("layout", keyboard.layout.id)
+            .child("grid", grid.id)
+            .child("component", ghost.id)
+        )
+        actions: list[WindowToggleOpacityArguments] = []
 
-        event = component_pressed(ghost.id, ghost.spec.action)
-        arguments = decode_component_pressed(event.arguments)
-        actions = runtime._handle_component_pressed(arguments)
+        def record_action(arguments: WindowToggleOpacityArguments) -> MessageResult:
+            actions.append(arguments)
+            return []
+
+        context.dispatcher.register_action(
+            WINDOW_TOGGLE_OPACITY,
+            decode_window_toggle_opacity,
+            record_action,
+            override=True,
+        )
+        context.dispatcher.dispatch_event(component_pressed(source))
+        context.dispatcher.dispatch_event(component_released(source))
 
         self.assertEqual(
             actions,
             [
-                window_toggle_opacity("window:keyboard", ghost.id, 0.01)
+                WindowToggleOpacityArguments(
+                    window_id="window:keyboard",
+                    component_id=ghost.id,
+                    opacity=0.01,
+                )
             ],
         )
 

@@ -5,28 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..messages import DataMap, RuntimeAction, RuntimeEvent, runtime_action_to_data
-from .decoding import (
-    bool_value,
-    map_value,
-    optional_string_value,
-    require_keys,
-    runtime_action_from_data,
-    string_value,
-)
+from ..messages import DataMap, DataValue, RuntimeEvent
+from .decoding import bool_value, map_value, require_keys, string_set_value, string_value
+from .source import SourcePath, source_path_from_data, source_path_to_data
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
 
 ACTION_FAILED = "action.failed"
+BEHAVIOR_FAILED = "behavior.failed"
 COMPONENT_PRESSED = "component.pressed"
 COMPONENT_RELEASED = "component.released"
-COMPONENT_STATE_CHANGED = "component.state_changed"
 HOT_CORNER_TRIGGERED = "hot_corner.triggered"
-KEYBOARD_KEY_REGISTERED = "keyboard.key_registered"
 KEYBOARD_KEY_STATE_CHANGED = "keyboard.key_state_changed"
-KEYBOARD_LATCH_CHANGED = "keyboard.latch_changed"
+KEYBOARD_OUTPUT_REGISTERED = "keyboard.output_registered"
 PROMPT_RESOLVED = "prompt.resolved"
+STATE_CHANGED = "state.changed"
 WINDOW_CLOSE_REQUESTED = "window.close_requested"
 
 
@@ -40,21 +34,23 @@ class ActionFailedArguments:
 
 
 @dataclass(frozen=True, slots=True)
+class BehaviorFailedArguments:
+    source: SourcePath
+    kind: str
+    phase: str
+    stage: str
+    exception_type: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentPressedArguments:
-    component_id: str
-    action: RuntimeAction | None
+    source: SourcePath
 
 
 @dataclass(frozen=True, slots=True)
 class ComponentReleasedArguments:
-    component_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class ComponentStateChangedArguments:
-    component_id: str
-    key_id: str
-    latched: bool
+    source: SourcePath
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,25 +59,17 @@ class HotCornerTriggeredArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class KeyboardKeyRegisteredArguments:
-    layout_id: str
-    component_id: str
-    io_key_name: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class KeyboardKeyStateChangedArguments:
-    layout_id: str
-    key_id: str
+    source: SourcePath
     pressed: bool
-    latched: bool
+    state_tags: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
-class KeyboardLatchChangedArguments:
-    layout_id: str
-    key_id: str
-    latched: bool
+class KeyboardOutputRegisteredArguments:
+    source: SourcePath
+    output_key: str
+    state_tags: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,25 +79,42 @@ class PromptResolvedArguments:
 
 
 @dataclass(frozen=True, slots=True)
+class StateChangedArguments:
+    source: SourcePath
+    state: DataMap
+
+
+@dataclass(frozen=True, slots=True)
 class WindowCloseRequestedArguments:
     window_id: str
 
 
-def component_pressed(component_id: str, action: RuntimeAction | None = None) -> RuntimeEvent:
+def component_pressed(source: SourcePath) -> RuntimeEvent:
+    return RuntimeEvent(COMPONENT_PRESSED, {"source": source_path_to_data(source)})
+
+
+def component_released(source: SourcePath) -> RuntimeEvent:
+    return RuntimeEvent(COMPONENT_RELEASED, {"source": source_path_to_data(source)})
+
+
+def behavior_failed(
+    source: SourcePath,
+    kind: str,
+    phase: str,
+    stage: str,
+    exception_type: str,
+    message: str,
+) -> RuntimeEvent:
     return RuntimeEvent(
-        COMPONENT_PRESSED,
-        {"component_id": component_id, "action": runtime_action_to_data(action) if action is not None else None},
-    )
-
-
-def component_released(component_id: str) -> RuntimeEvent:
-    return RuntimeEvent(COMPONENT_RELEASED, {"component_id": component_id})
-
-
-def component_state_changed(component_id: str, key_id: str, latched: bool) -> RuntimeEvent:
-    return RuntimeEvent(
-        COMPONENT_STATE_CHANGED,
-        {"component_id": component_id, "key_id": key_id, "latched": latched},
+        BEHAVIOR_FAILED,
+        {
+            "source": source_path_to_data(source),
+            "kind": kind,
+            "phase": phase,
+            "stage": stage,
+            "exception_type": exception_type,
+            "message": message,
+        },
     )
 
 
@@ -117,29 +122,44 @@ def hot_corner_triggered(corner: str) -> RuntimeEvent:
     return RuntimeEvent(HOT_CORNER_TRIGGERED, {"corner": corner})
 
 
-def keyboard_key_registered(layout_id: str, component_id: str, io_key_name: str | None) -> RuntimeEvent:
-    return RuntimeEvent(
-        KEYBOARD_KEY_REGISTERED,
-        {"layout_id": layout_id, "component_id": component_id, "io_key_name": io_key_name},
-    )
-
-
-def keyboard_key_state_changed(layout_id: str, key_id: str, pressed: bool, latched: bool) -> RuntimeEvent:
+def keyboard_key_state_changed(
+    source: SourcePath,
+    pressed: bool,
+    state_tags: frozenset[str],
+) -> RuntimeEvent:
+    tags: list[DataValue] = list(sorted(state_tags))
     return RuntimeEvent(
         KEYBOARD_KEY_STATE_CHANGED,
-        {"layout_id": layout_id, "key_id": key_id, "pressed": pressed, "latched": latched},
+        {
+            "source": source_path_to_data(source),
+            "pressed": pressed,
+            "state_tags": tags,
+        },
     )
 
 
-def keyboard_latch_changed(layout_id: str, key_id: str, latched: bool) -> RuntimeEvent:
+def keyboard_output_registered(
+    source: SourcePath,
+    output_key: str,
+    state_tags: frozenset[str],
+) -> RuntimeEvent:
+    tags: list[DataValue] = list(sorted(state_tags))
     return RuntimeEvent(
-        KEYBOARD_LATCH_CHANGED,
-        {"layout_id": layout_id, "key_id": key_id, "latched": latched},
+        KEYBOARD_OUTPUT_REGISTERED,
+        {
+            "source": source_path_to_data(source),
+            "output_key": output_key,
+            "state_tags": tags,
+        },
     )
 
 
 def prompt_resolved(prompt_id: str, result: str) -> RuntimeEvent:
     return RuntimeEvent(PROMPT_RESOLVED, {"prompt_id": prompt_id, "result": result})
+
+
+def state_changed(source: SourcePath, state: DataMap) -> RuntimeEvent:
+    return RuntimeEvent(STATE_CHANGED, {"source": source_path_to_data(source), "state": state})
 
 
 def window_close_requested(window_id: str) -> RuntimeEvent:
@@ -157,29 +177,26 @@ def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
     )
 
 
-def decode_component_pressed(arguments: DataMap) -> ComponentPressedArguments:
-    require_keys(arguments, ("component_id", "action"))
-    action_value = arguments["action"]
-    if action_value is not None and not isinstance(action_value, dict):
-        raise TypeError("Argument 'action' must be a map or null")
-    return ComponentPressedArguments(
-        component_id=string_value(arguments, "component_id"),
-        action=runtime_action_from_data(action_value) if isinstance(action_value, dict) else None,
+def decode_behavior_failed(arguments: DataMap) -> BehaviorFailedArguments:
+    require_keys(arguments, ("source", "kind", "phase", "stage", "exception_type", "message"))
+    return BehaviorFailedArguments(
+        source=source_path_from_data(arguments["source"]),
+        kind=string_value(arguments, "kind"),
+        phase=string_value(arguments, "phase"),
+        stage=string_value(arguments, "stage"),
+        exception_type=string_value(arguments, "exception_type"),
+        message=string_value(arguments, "message"),
     )
+
+
+def decode_component_pressed(arguments: DataMap) -> ComponentPressedArguments:
+    require_keys(arguments, ("source",))
+    return ComponentPressedArguments(source=source_path_from_data(arguments["source"]))
 
 
 def decode_component_released(arguments: DataMap) -> ComponentReleasedArguments:
-    require_keys(arguments, ("component_id",))
-    return ComponentReleasedArguments(component_id=string_value(arguments, "component_id"))
-
-
-def decode_component_state_changed(arguments: DataMap) -> ComponentStateChangedArguments:
-    require_keys(arguments, ("component_id", "key_id", "latched"))
-    return ComponentStateChangedArguments(
-        component_id=string_value(arguments, "component_id"),
-        key_id=string_value(arguments, "key_id"),
-        latched=bool_value(arguments, "latched"),
-    )
+    require_keys(arguments, ("source",))
+    return ComponentReleasedArguments(source=source_path_from_data(arguments["source"]))
 
 
 def decode_hot_corner_triggered(arguments: DataMap) -> HotCornerTriggeredArguments:
@@ -187,31 +204,21 @@ def decode_hot_corner_triggered(arguments: DataMap) -> HotCornerTriggeredArgumen
     return HotCornerTriggeredArguments(corner=string_value(arguments, "corner"))
 
 
-def decode_keyboard_key_registered(arguments: DataMap) -> KeyboardKeyRegisteredArguments:
-    require_keys(arguments, ("layout_id", "component_id", "io_key_name"))
-    return KeyboardKeyRegisteredArguments(
-        layout_id=string_value(arguments, "layout_id"),
-        component_id=string_value(arguments, "component_id"),
-        io_key_name=optional_string_value(arguments, "io_key_name"),
-    )
-
-
 def decode_keyboard_key_state_changed(arguments: DataMap) -> KeyboardKeyStateChangedArguments:
-    require_keys(arguments, ("layout_id", "key_id", "pressed", "latched"))
+    require_keys(arguments, ("source", "pressed", "state_tags"))
     return KeyboardKeyStateChangedArguments(
-        layout_id=string_value(arguments, "layout_id"),
-        key_id=string_value(arguments, "key_id"),
+        source=source_path_from_data(arguments["source"]),
         pressed=bool_value(arguments, "pressed"),
-        latched=bool_value(arguments, "latched"),
+        state_tags=string_set_value(arguments, "state_tags"),
     )
 
 
-def decode_keyboard_latch_changed(arguments: DataMap) -> KeyboardLatchChangedArguments:
-    require_keys(arguments, ("layout_id", "key_id", "latched"))
-    return KeyboardLatchChangedArguments(
-        layout_id=string_value(arguments, "layout_id"),
-        key_id=string_value(arguments, "key_id"),
-        latched=bool_value(arguments, "latched"),
+def decode_keyboard_output_registered(arguments: DataMap) -> KeyboardOutputRegisteredArguments:
+    require_keys(arguments, ("source", "output_key", "state_tags"))
+    return KeyboardOutputRegisteredArguments(
+        source=source_path_from_data(arguments["source"]),
+        output_key=string_value(arguments, "output_key"),
+        state_tags=string_set_value(arguments, "state_tags"),
     )
 
 
@@ -223,21 +230,29 @@ def decode_prompt_resolved(arguments: DataMap) -> PromptResolvedArguments:
     )
 
 
+def decode_state_changed(arguments: DataMap) -> StateChangedArguments:
+    require_keys(arguments, ("source", "state"))
+    return StateChangedArguments(
+        source=source_path_from_data(arguments["source"]),
+        state=map_value(arguments, "state"),
+    )
+
+
 def decode_window_close_requested(arguments: DataMap) -> WindowCloseRequestedArguments:
     require_keys(arguments, ("window_id",))
     return WindowCloseRequestedArguments(window_id=string_value(arguments, "window_id"))
 
 
 def register_builtin_events(dispatcher: "Dispatcher") -> None:
-    """Register every built-in event decoder on a dispatcher-shaped object."""
+    """Register every built-in event decoder."""
 
     dispatcher.register_event(ACTION_FAILED, decode_action_failed)
+    dispatcher.register_event(BEHAVIOR_FAILED, decode_behavior_failed)
     dispatcher.register_event(COMPONENT_PRESSED, decode_component_pressed)
     dispatcher.register_event(COMPONENT_RELEASED, decode_component_released)
-    dispatcher.register_event(COMPONENT_STATE_CHANGED, decode_component_state_changed)
     dispatcher.register_event(HOT_CORNER_TRIGGERED, decode_hot_corner_triggered)
-    dispatcher.register_event(KEYBOARD_KEY_REGISTERED, decode_keyboard_key_registered)
     dispatcher.register_event(KEYBOARD_KEY_STATE_CHANGED, decode_keyboard_key_state_changed)
-    dispatcher.register_event(KEYBOARD_LATCH_CHANGED, decode_keyboard_latch_changed)
+    dispatcher.register_event(KEYBOARD_OUTPUT_REGISTERED, decode_keyboard_output_registered)
     dispatcher.register_event(PROMPT_RESOLVED, decode_prompt_resolved)
+    dispatcher.register_event(STATE_CHANGED, decode_state_changed)
     dispatcher.register_event(WINDOW_CLOSE_REQUESTED, decode_window_close_requested)

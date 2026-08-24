@@ -3,8 +3,15 @@ from __future__ import annotations
 import unittest
 
 from axidev_osk.config.models import GridConfig, KeyConfig, LayoutConfig
-from axidev_osk.models import KeySpec
-from axidev_osk.runtime.identity import key_component_id, prompt_button_id, stable_id, validate_unique_ids
+from axidev_osk.models import KeyVisual
+from axidev_osk.runtime.identity import prompt_button_id, stable_id, validate_unique_ids
+from axidev_osk.runtime.source import (
+    SourcePath,
+    SourcePathSegment,
+    source_path_from_data,
+    source_state_namespace,
+    source_path_to_data,
+)
 
 
 class RuntimeIdentityTests(unittest.TestCase):
@@ -25,41 +32,52 @@ class RuntimeIdentityTests(unittest.TestCase):
     def test_stable_id_override_returns_explicit_id(self) -> None:
         self.assertEqual(stable_id("parent", "component", "value", stable_override="component:explicit"), "component:explicit")
 
-    def test_key_component_id_collides_for_duplicate_grid_position(self) -> None:
-        first = key_component_id(
-            "grid:example",
-            "key",
-            row=1,
-            column=2,
-            width=1.0,
-            height=1,
-            key_id="a",
-            io_key="A",
-            label="A",
-        )
-        second = key_component_id(
-            "grid:example",
-            "key",
-            row=1,
-            column=2,
-            width=1.0,
-            height=1,
-            key_id="b",
-            io_key="B",
-            label="B",
+    def test_source_path_round_trips_through_native_data(self) -> None:
+        source = SourcePath(
+            (
+                SourcePathSegment("app", "axidev-osk"),
+                SourcePathSegment("profile", "default"),
+                SourcePathSegment("component", "key-a"),
+            )
         )
 
-        self.assertEqual(first, second)
+        self.assertEqual(source_path_from_data(source_path_to_data(source)), source)
+
+    def test_distinct_source_paths_have_distinct_state_namespaces(self) -> None:
+        first = SourcePath(
+            (
+                SourcePathSegment("a", "b\x1fc"),
+                SourcePathSegment("d", "e"),
+            )
+        )
+        second = SourcePath(
+            (
+                SourcePathSegment("a", "b"),
+                SourcePathSegment("c", "d\x1fe"),
+            )
+        )
+
+        self.assertNotEqual(source_state_namespace(first), source_state_namespace(second))
 
     def test_layout_rejects_component_ids_reused_across_grids(self) -> None:
         first = GridConfig(
             id="grid:first",
-            components=(KeyConfig(id="component:shared", spec=KeySpec("A", 0, 0)),),
+            components=(
+                KeyConfig(
+                    id="component:shared",
+                    visual=KeyVisual(label="A", row=0, column=0),
+                ),
+            ),
             nav_start_column=0,
         )
         second = GridConfig(
             id="grid:second",
-            components=(KeyConfig(id="component:shared", spec=KeySpec("B", 0, 0)),),
+            components=(
+                KeyConfig(
+                    id="component:shared",
+                    visual=KeyVisual(label="B", row=0, column=0),
+                ),
+            ),
             nav_start_column=0,
         )
 
