@@ -33,6 +33,7 @@ from ..runtime.events import HotCornerTriggered
 from ..platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
+    ANCHOR_RIGHT,
     ANCHOR_TOP,
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
@@ -120,6 +121,32 @@ class HotCornerOverlayController:
             return
 
         self._window.move(target)
+
+    def move_to_anchored(
+        self,
+        position: QPoint,
+        *,
+        anchors: int,
+        screen_geometry: QRect | None = None,
+    ) -> None:
+        """Move the helper relative to explicit layer-shell edges when available."""
+
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
+            self.move_to(position, screen_geometry=screen_geometry)
+            return
+
+        target = QPoint(position)
+        geometry = QRect(screen_geometry) if screen_geometry is not None else self._current_screen_geometry()
+        left_margin = target.x() - geometry.x() if anchors & ANCHOR_LEFT else 0
+        top_margin = target.y() - geometry.y() if anchors & ANCHOR_TOP else 0
+        right_margin = geometry.right() - target.x() - self._window.width() + 1 if anchors & ANCHOR_RIGHT else 0
+        bottom_margin = geometry.bottom() - target.y() - self._window.height() + 1 if anchors & ANCHOR_BOTTOM else 0
+
+        self._layer_shell_anchors = anchors
+        self._layer_shell_margins = QMargins(left_margin, top_margin, right_margin, bottom_margin)
+        self._layer_shell_position_initialized = True
+        self._window.move(target)
+        self._sync_wayland_layer_shell()
 
     def handle_show(self) -> bool:
         """Apply backend-specific show-time configuration."""
@@ -418,7 +445,9 @@ class HotCornerWindowToggleController(QObject):
         if screen is None:
             return None
 
-        geometry = screen.geometry()
+        geometry = screen.availableGeometry()
+        if not geometry.contains(cursor_pos):
+            return None
         corner_size = max(1, self._config.corner_size_px)
         x = cursor_pos.x()
         y = cursor_pos.y()
@@ -460,9 +489,10 @@ class HotCornerWindowToggleController(QObject):
         screen: QScreen,
         progress: float,
     ) -> None:
-        geometry = screen.geometry()
-        self._indicator_overlay.move_to(
+        geometry = self._usable_geometry(screen, self._indicator_overlay)
+        self._indicator_overlay.move_to_anchored(
             self._indicator_position(geometry, corner),
+            anchors=self._corner_anchors(corner),
             screen_geometry=geometry,
         )
         self._indicator.set_progress(progress)
@@ -492,6 +522,23 @@ class HotCornerWindowToggleController(QObject):
         if corner == ScreenCorner.BOTTOM_LEFT:
             return QPoint(geometry.left(), geometry.bottom() - size + 1)
         return QPoint(geometry.right() - size + 1, geometry.bottom() - size + 1)
+
+    @staticmethod
+    def _corner_anchors(corner: ScreenCorner) -> int:
+        if corner == ScreenCorner.TOP_LEFT:
+            return ANCHOR_LEFT | ANCHOR_TOP
+        if corner == ScreenCorner.TOP_RIGHT:
+            return ANCHOR_RIGHT | ANCHOR_TOP
+        if corner == ScreenCorner.BOTTOM_LEFT:
+            return ANCHOR_LEFT | ANCHOR_BOTTOM
+        return ANCHOR_RIGHT | ANCHOR_BOTTOM
+
+    @staticmethod
+    def _usable_geometry(screen: QScreen, overlay: object) -> QRect:
+        if overlay.backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            # Real edge anchors let the compositor apply other surfaces' exclusive zones.
+            return screen.geometry()
+        return screen.availableGeometry()
 
     def _create_sensor_handles(self) -> list[HotCornerSensorHandle]:
         handles: list[HotCornerSensorHandle] = []
@@ -526,9 +573,10 @@ class HotCornerWindowToggleController(QObject):
             handle.window.hide()
 
     def _position_sensor_window(self, handle: HotCornerSensorHandle) -> None:
-        geometry = handle.screen.geometry()
-        handle.overlay.move_to(
+        geometry = self._usable_geometry(handle.screen, handle.overlay)
+        handle.overlay.move_to_anchored(
             self._sensor_position(geometry, handle.corner),
+            anchors=self._corner_anchors(handle.corner),
             screen_geometry=geometry,
         )
 
