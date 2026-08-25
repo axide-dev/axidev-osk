@@ -10,6 +10,7 @@ from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested
 from .chrome import install_overlay_chrome
+from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 
 
@@ -45,31 +46,52 @@ class RuntimeWindow(QMainWindow):
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
-        self.setWindowOpacity(config.opacity)
         if config.overlay.always_on_top:
             self._overlay = configure_always_on_top_window(self, config=config.overlay.config)
         else:
             self._overlay = configure_plain_window(self)
-
-        central = context.surfaces.build(config.surface, context)
-        if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
-            central_layout = central.layout()
-            if isinstance(central_layout, QVBoxLayout):
-                install_overlay_chrome(
-                    central_layout,
-                    title=self.windowTitle(),
-                    parent=central,
-                    on_move=self._overlay.move_by,
-                    on_resize=self._overlay.resize_by,
-                )
-        self.setCentralWidget(central)
-        self.apply_startup_size(minimum_size=config.surface.minimum_size)
+        self.destroyed.connect(self._release_platform_resources_on_destroy)
+        try:
+            central = context.surfaces.build(config.surface, context)
+            if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
+                central_layout = central.layout()
+                if isinstance(central_layout, QVBoxLayout):
+                    install_overlay_chrome(
+                        central_layout,
+                        title=self.windowTitle(),
+                        parent=central,
+                        on_move=self._overlay.move_by,
+                        on_resize=self._overlay.resize_by,
+                    )
+            self.setCentralWidget(central)
+            self._opacity = WindowOpacityController(self)
+            self.set_visual_opacity(config.opacity)
+            self.apply_startup_size(minimum_size=config.surface.minimum_size)
+        except Exception:
+            self.release_platform_resources()
+            raise
 
     @property
     def window_id(self) -> str:
         """Return this window's deterministic runtime ID."""
 
         return self._config.id
+
+    def set_visual_opacity(self, opacity: float) -> None:
+        """Set opacity through the platform-supported window implementation."""
+
+        self._opacity.set_opacity(opacity)
+
+    def release_platform_resources(self) -> None:
+        """Release native resources before Qt destroys this window."""
+
+        release = getattr(self._overlay, "release_resources", None)
+        if release is not None:
+            release()
+
+    def _release_platform_resources_on_destroy(self, *args: object) -> None:
+        del args
+        self.release_platform_resources()
 
     def set_quit_controller_managed(self, managed: bool) -> None:
         """Set whether close events should request managed app quit.

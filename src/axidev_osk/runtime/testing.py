@@ -65,6 +65,11 @@ class _TestRuntime:
         if isinstance(event, WindowCloseRequested):
             self._dispatcher.dispatch_command(AppQuit())
 
+    def _handle_screen_lock_state_changed(self, event: object) -> None:
+        """Ignore platform lock-state events in the generic test runtime."""
+
+        del event
+
     def _handle_hot_corner_triggered(self, event: object) -> None:
         """Route hot-corner visibility commands through production helper."""
 

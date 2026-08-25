@@ -109,7 +109,7 @@ The status commands verify managed integration configuration and, where applicab
 
 `setup-greeter` shows an arrow-key menu of installed supported managers. Scripts can select one directly with `--manager plasma-login`, `--manager greetd`, or `--manager lightdm`. Setup checks the selected manager and its current configuration before writing files. It does not restart the display manager, so reboot or restart it after setup.
 
-Plasma Login Manager and LightDM use their own greeter startup hooks. The greetd adapter saves and wraps the existing default-session command. It starts that command before Axidev OSK, keeps the greeter authoritative, and restores the exact command during removal.
+Plasma Login Manager configures Axidev OSK as KWin's input method for the login manager and session lock screen. Plasma 6.7 setup also adds an exact marked block to Plasma's lock-screen QML so the password interface remains visible while using the keyboard. This integration is limited to Plasma versions from 6.7.0 up to, but not including, 7.0.0. LightDM uses its greeter startup hook. The greetd adapter saves and wraps the existing default-session command, starts that command before Axidev OSK, and restores the exact command during removal.
 
 The keyboard retries with exponential backoff while the greeter remains active. A keyboard or display-detection failure never stops the greeter. Failures appear in the system journal under `axidev-osk-greeter`.
 

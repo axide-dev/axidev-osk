@@ -100,6 +100,7 @@ class KeyboardService:
         """
 
         initialized = self._backend.initialize()
+        self._shutdown = False
         self._ensure_backend_listener()
         return initialized
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget
@@ -11,7 +11,10 @@ from axidev_osk.app import _set_application_icon
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import WindowConfig
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.events import PromptResolved
+from axidev_osk.runtime.events import PromptResolved, ScreenLockStateChanged
+from axidev_osk.runtime.registries import ServiceRegistry
+from axidev_osk.services.keyboard import KeyboardService
+from axidev_osk.services.kwin_lock import KWinLockService
 
 
 def _app() -> QApplication:
@@ -103,6 +106,100 @@ class ApplicationRuntimePromptTests(unittest.TestCase):
             runtime._linux_permissions.show_prompt()
 
         self.assertEqual(created[0].title, sentinel)
+
+
+class SecureInputPanelLifecycleTests(unittest.TestCase):
+    def test_repeated_lock_cycles_rebuild_window_and_restart_keyboard(self) -> None:
+        backend = Mock()
+        backend.initialize.return_value = True
+        backend.add_key_state_listener.return_value = lambda: None
+        keyboard = KeyboardService(backend)
+        kwin_lock = KWinLockService()
+        kwin_lock.activate = Mock()
+        services = ServiceRegistry()
+        services.register("keyboard", keyboard, autostart=False)
+        services.register("kwin_lock", kwin_lock, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+
+        with (
+            patch.object(runtime._window_manager, "show") as show,
+            patch.object(runtime._window_manager, "destroy") as destroy,
+        ):
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=False))
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+
+        self.assertEqual(backend.initialize.call_count, 2)
+        backend.shutdown.assert_called_once_with()
+        self.assertEqual(show.call_count, 2)
+        destroy.assert_called_once_with(runtime._config.keyboard_window_id)
+        self.assertEqual(kwin_lock.activate.call_count, 2)
+
+    def test_failed_lock_window_creation_rolls_back_and_remains_retryable(self) -> None:
+        backend = Mock()
+        backend.initialize.return_value = True
+        backend.add_key_state_listener.return_value = lambda: None
+        keyboard = KeyboardService(backend)
+        kwin_lock = KWinLockService()
+        kwin_lock.activate = Mock()
+        services = ServiceRegistry()
+        services.register("keyboard", keyboard, autostart=False)
+        services.register("kwin_lock", kwin_lock, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+
+        with (
+            patch.object(
+                runtime._window_manager,
+                "show",
+                side_effect=(RuntimeError("window failed"), Mock()),
+            ) as show,
+            patch.object(runtime._window_manager, "destroy") as destroy,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "window failed"):
+                runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            self.assertIsNone(runtime._screen_locked)
+
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+
+        self.assertEqual(show.call_count, 2)
+        destroy.assert_called_once_with(runtime._config.keyboard_window_id)
+        self.assertEqual(backend.initialize.call_count, 2)
+        backend.shutdown.assert_called_once_with()
+        kwin_lock.activate.assert_called_once_with()
+        self.assertTrue(runtime._screen_locked)
+
+    def test_failed_lock_startup_preserves_error_when_cleanup_also_fails(self) -> None:
+        backend = Mock()
+        backend.initialize.return_value = True
+        backend.add_key_state_listener.return_value = lambda: None
+        keyboard = KeyboardService(backend)
+        kwin_lock = KWinLockService()
+        services = ServiceRegistry()
+        services.register("keyboard", keyboard, autostart=False)
+        services.register("kwin_lock", kwin_lock, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+
+        with (
+            patch.object(
+                runtime._window_manager,
+                "show",
+                side_effect=RuntimeError("window failed"),
+            ),
+            patch.object(
+                runtime._window_manager,
+                "destroy",
+                side_effect=RuntimeError("cleanup failed"),
+            ),
+            patch("axidev_osk.runtime.application._logger") as logger,
+            self.assertRaisesRegex(RuntimeError, "window failed"),
+        ):
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+
+        backend.shutdown.assert_called_once_with()
+        logger.exception.assert_called_once_with(
+            "Failed to destroy a partially started lock window"
+        )
+        self.assertIsNone(runtime._screen_locked)
 
 
 if __name__ == "__main__":

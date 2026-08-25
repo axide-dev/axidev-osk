@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
@@ -91,6 +91,31 @@ def _build_keyboard_window(backend: FakeKeyboardBackend):
 
 class RuntimeWindowLayoutTests(unittest.TestCase):
     """Tests covering the default keyboard window built via ``build_window``."""
+
+    def test_failed_content_build_releases_platform_resources(self) -> None:
+        _app()
+        config = build_default_app_config()
+        surfaces = SurfaceRegistry()
+        surfaces.build = Mock(side_effect=RuntimeError("surface failed"))
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=config,
+            components=ComponentRegistry(),
+            surfaces=surfaces,
+        )
+        overlay = Mock()
+
+        with (
+            patch(
+                "axidev_osk.windows.builder.configure_always_on_top_window",
+                return_value=overlay,
+            ),
+            self.assertRaisesRegex(RuntimeError, "surface failed"),
+        ):
+            build_window(config.windows[0], context)
+
+        overlay.release_resources.assert_called_once_with()
+
     def test_custom_chrome_puts_resize_handle_in_title_bar(self) -> None:
         _app()
         overlay = FakeOverlayController()

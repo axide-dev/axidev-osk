@@ -15,6 +15,7 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
+from ..services.kwin_lock import KWinLockService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
@@ -25,7 +26,7 @@ from .event_handlers import (
     route_component_pressed,
     route_hot_corner_triggered,
 )
-from .events import WindowCloseRequested
+from .events import ScreenLockStateChanged, WindowCloseRequested
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -44,6 +45,8 @@ class ApplicationRuntime:
         config: AppConfig | None = None,
         services: ServiceRegistry | None = None,
         event_handlers: EventHandlerRegistry | None = None,
+        confirm_quit: bool = True,
+        show_startup_windows: bool = True,
     ) -> None:
         """Create the main runtime.
 
@@ -52,6 +55,8 @@ class ApplicationRuntime:
             config: Optional declarative app config.
             services: Optional pre-populated service registry for tests.
             event_handlers: Optional pre-populated handler registry for tests.
+            confirm_quit: Whether shutdown requests require confirmation.
+            show_startup_windows: Whether to create configured startup windows immediately.
 
         Returns:
             None.
@@ -61,6 +66,8 @@ class ApplicationRuntime:
         """
 
         self._app = app
+        self._show_startup_windows = show_startup_windows
+        self._screen_locked: bool | None = None
         self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
         self._services = services or ServiceRegistry()
@@ -91,7 +98,7 @@ class ApplicationRuntime:
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
             app,
-            prompt=self._show_quit_prompt,
+            prompt=self._show_quit_prompt if confirm_quit else lambda _parent: True,
             parent=app,
         )
         self._linux_permissions = LinuxPermissionController(
@@ -116,11 +123,12 @@ class ApplicationRuntime:
         """
 
         apply_theme(self._app)
-        for service in self._services.services():
+        for service in self._services.autostart_services():
             service.start(self.context)
-        for window_id in self._config.startup_window_ids:
-            window = self._window_manager.show(window_id)
-            self._quit_controller.register_window(window)
+        if self._show_startup_windows:
+            for window_id in self._config.startup_window_ids:
+                window = self._window_manager.show(window_id)
+                self._quit_controller.register_window(window)
         for service in self._services.services():
             self._quit_controller.register_quit_callback(service.stop)
         self._quit_controller.install_signal_handlers()
@@ -143,6 +151,38 @@ class ApplicationRuntime:
 
         if isinstance(event, WindowCloseRequested):
             self._quit_controller.request_quit()
+
+    def _handle_screen_lock_state_changed(self, event: object) -> None:
+        """Create or destroy secure runtime resources as KDE locks and unlocks."""
+
+        if not isinstance(event, ScreenLockStateChanged):
+            return
+        if event.locked == self._screen_locked:
+            if event.locked:
+                self._services.get("kwin_lock", KWinLockService).activate()
+            return
+        window_id = self._config.keyboard_window_id
+        if event.locked:
+            try:
+                self._keyboard.start(self.context)
+                self._window_manager.show(window_id)
+                self._services.get("kwin_lock", KWinLockService).activate()
+            except Exception:
+                try:
+                    self._window_manager.destroy(window_id)
+                except Exception:
+                    _logger.exception("Failed to destroy a partially started lock window")
+                try:
+                    self._keyboard.shutdown()
+                except Exception:
+                    _logger.exception("Failed to shut down keyboard output after lock startup failed")
+                raise
+        else:
+            try:
+                self._window_manager.destroy(window_id)
+            finally:
+                self._keyboard.shutdown()
+        self._screen_locked = event.locked
 
     def _handle_hot_corner_triggered(self, event: object) -> None:
         """Map hot-corner events to managed window visibility commands."""
