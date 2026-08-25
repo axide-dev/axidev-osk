@@ -322,6 +322,20 @@ class NativeAdapterTests(unittest.TestCase):
             self.assertFalse(service.exists())
             self.assertFalse(wants.exists())
 
+    def test_removable_symlink_accepts_an_equivalent_target_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            actual = root / "actual"
+            alias = root / "alias"
+            actual.mkdir()
+            alias.symlink_to(actual, target_is_directory=True)
+            target = alias / "service"
+            target.write_text("service", encoding="utf-8")
+            link = root / "wants"
+            link.symlink_to(target)
+
+            linux_greeter._require_removable_symlink(link, target)
+
     def test_lightdm_uses_native_greeter_wrapper(self) -> None:
         wrapper = linux_greeter._lightdm_wrapper_text(Path("/opt/axidev-osk/bin/axidev-osk"))
 

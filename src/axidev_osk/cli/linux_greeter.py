@@ -530,7 +530,10 @@ def _check_plasma(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool
     )
     if _is_legacy_plasma_state(state):
         service_ok = linux._read_text(PLASMA_SERVICE_PATH) == _plasma_service_text()
-        link_ok = PLASMA_WANTS_PATH.is_symlink() and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH
+        link_ok = (
+            PLASMA_WANTS_PATH.is_symlink()
+            and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH.resolve()
+        )
         return [
             version_check,
             (
@@ -1099,14 +1102,14 @@ def _require_writable_regular_file(path: Path) -> None:
 def _require_compatible_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to replace conflicting link: {path}")
 
 
 def _remove_owned_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to remove conflicting link: {path}")
     path.unlink()
 
@@ -1120,7 +1123,7 @@ def _require_removable_file(path: Path, expected: str) -> None:
 def _require_removable_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to remove conflicting link: {path}")
 
 
