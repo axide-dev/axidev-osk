@@ -25,6 +25,10 @@ class FakeOverlayController:
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         del position, screen_geometry
 
+    def move_to_anchored(self, position: QPoint, *, anchors: int, screen_geometry: QRect | None = None) -> None:
+        del anchors
+        self.move_to(position, screen_geometry=screen_geometry)
+
     def handle_show(self) -> bool:
         return True
 
