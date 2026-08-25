@@ -38,7 +38,7 @@ class KWinLockService(QObject):
             self._connection,
         )
         connected_about = self._connection.connect(
-            "",
+            "org.kde.screensaver",
             "/ScreenSaver",
             "org.kde.screensaver",
             "AboutToLock",
@@ -46,7 +46,7 @@ class KWinLockService(QObject):
             SLOT("aboutToLock()"),
         )
         connected_active = self._connection.connect(
-            "",
+            "org.freedesktop.ScreenSaver",
             "/ScreenSaver",
             "org.freedesktop.ScreenSaver",
             "ActiveChanged",
@@ -73,10 +73,15 @@ class KWinLockService(QObject):
         """Disconnect lock-state signals."""
 
         self._connection.disconnect(
-            "", "/ScreenSaver", "org.kde.screensaver", "AboutToLock", self, SLOT("aboutToLock()")
+            "org.kde.screensaver",
+            "/ScreenSaver",
+            "org.kde.screensaver",
+            "AboutToLock",
+            self,
+            SLOT("aboutToLock()"),
         )
         self._connection.disconnect(
-            "",
+            "org.freedesktop.ScreenSaver",
             "/ScreenSaver",
             "org.freedesktop.ScreenSaver",
             "ActiveChanged",
