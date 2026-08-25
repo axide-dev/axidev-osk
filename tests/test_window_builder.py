@@ -232,6 +232,27 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.addCleanup(window.close)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
 
+    def test_runtime_window_can_hide_and_restore_custom_close_control(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        close_button = window.findChild(QPushButton, "layerShellCloseButton")
+        self.assertIsNotNone(close_button)
+        self.assertFalse(close_button.isHidden())
+
+        window.set_close_enabled(False)
+        self.assertTrue(close_button.isHidden())
+
+        window.set_close_enabled(True)
+        self.assertFalse(close_button.isHidden())
+
     def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
         _app()
         overlay = FakeOverlayController()

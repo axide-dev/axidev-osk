@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested
-from .chrome import install_overlay_chrome
+from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 
@@ -43,6 +43,7 @@ class RuntimeWindow(QMainWindow):
         self._config = config
         self._context = context
         self._quit_controller_managed = False
+        self._chrome_widgets: OverlayChromeWidgets | None = None
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
@@ -56,7 +57,7 @@ class RuntimeWindow(QMainWindow):
             if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
                 if isinstance(central_layout, QVBoxLayout):
-                    install_overlay_chrome(
+                    self._chrome_widgets = install_overlay_chrome(
                         central_layout,
                         title=self.windowTitle(),
                         parent=central,
@@ -81,6 +82,12 @@ class RuntimeWindow(QMainWindow):
         """Set opacity through the platform-supported window implementation."""
 
         self._opacity.set_opacity(opacity)
+
+    def set_close_enabled(self, enabled: bool) -> None:
+        """Set whether installed custom chrome exposes its close control."""
+
+        if self._chrome_widgets is not None:
+            self._chrome_widgets.title_bar.set_close_enabled(enabled)
 
     def release_platform_resources(self) -> None:
         """Release native resources before Qt destroys this window."""

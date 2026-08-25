@@ -14,7 +14,6 @@ from PySide6.QtWidgets import QApplication
 
 from .runtime.application import ApplicationRuntime
 from .runtime.registries import ServiceRegistry
-from .services import register_services
 from .services.keyboard import KeyboardService
 from .services.kwin_lock import KWinLockService
 from .services.single_instance import ExistingInstanceActivated

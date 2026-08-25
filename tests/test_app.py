@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from PySide6.QtCore import QObject
 
@@ -13,15 +13,13 @@ class InputPanelRuntimeTests(unittest.TestCase):
     def test_input_panel_starts_only_keyboard_service(self) -> None:
         app = QObject()
 
-        with patch("axidev_osk.app.register_services") as register_services:
-            services = _input_panel_services(
-                app,
-                OverlayBackend.WAYLAND_INPUT_PANEL,
-                lock_lifecycle=True,
-            )
+        services = _input_panel_services(
+            app,
+            OverlayBackend.WAYLAND_INPUT_PANEL,
+            lock_lifecycle=True,
+        )
 
         self.assertIsNotNone(services)
-        register_services.assert_not_called()
         self.assertEqual(len(tuple(services.services())), 2)
         self.assertEqual(len(tuple(services.autostart_services())), 1)
 
@@ -37,12 +35,10 @@ class InputPanelRuntimeTests(unittest.TestCase):
         self.assertEqual(tuple(services.autostart_services()), tuple(services.services()))
 
     def test_ordinary_overlay_uses_default_services(self) -> None:
-        with patch("axidev_osk.app.register_services") as register_services:
-            services = _input_panel_services(
-                Mock(),
-                OverlayBackend.WAYLAND_LAYER_SHELL,
-                lock_lifecycle=False,
-            )
+        services = _input_panel_services(
+            Mock(),
+            OverlayBackend.WAYLAND_LAYER_SHELL,
+            lock_lifecycle=False,
+        )
 
         self.assertIsNone(services)
-        register_services.assert_not_called()

@@ -328,6 +328,18 @@ class KeyboardServiceTests(unittest.TestCase):
         self.assertIsNone(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "shift"))
         self.assertFalse(context.keyboard.is_latched(LAYOUT_ID, "shift"))
 
+    def test_service_shutdown_clears_latches_for_next_start(self) -> None:
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        spec = KeySpec(label="Shift", row=0, column=0, key_id="shift", io_key="leftshift", latchable=True)
+
+        context.keyboard.register_key_spec(LAYOUT_ID, spec)
+        context.dispatcher.dispatch_command(KeyboardSyncLatchedKey(LAYOUT_ID, spec, True))
+        context.keyboard.shutdown()
+
+        self.assertIsNone(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "shift"))
+        self.assertFalse(context.keyboard.is_latched(LAYOUT_ID, "shift"))
+
     def test_widget_renders_latched_style_from_snapshot(self) -> None:
         _app()
         backend = FakeKeyboardBackend()

@@ -120,9 +120,10 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         services.register("keyboard", keyboard, autostart=False)
         services.register("kwin_lock", kwin_lock, autostart=False)
         runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+        lock_window = Mock()
 
         with (
-            patch.object(runtime._window_manager, "show") as show,
+            patch.object(runtime._window_manager, "show", return_value=lock_window) as show,
             patch.object(runtime._window_manager, "destroy") as destroy,
         ):
             runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
@@ -132,6 +133,10 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         self.assertEqual(backend.initialize.call_count, 2)
         backend.shutdown.assert_called_once_with()
         self.assertEqual(show.call_count, 2)
+        self.assertEqual(
+            lock_window.set_close_enabled.call_args_list,
+            [unittest.mock.call(False), unittest.mock.call(False)],
+        )
         destroy.assert_called_once_with(runtime._config.keyboard_window_id)
         self.assertEqual(kwin_lock.activate.call_count, 2)
 

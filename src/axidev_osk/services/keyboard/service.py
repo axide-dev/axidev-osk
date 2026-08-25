@@ -123,7 +123,7 @@ class KeyboardService:
         self._shutdown = True
         started_at = time.perf_counter()
         _logger.info("Shutting down keyboard backend")
-        self._release_press_handles()
+        self.reset_state()
         self._backend.shutdown()
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
 

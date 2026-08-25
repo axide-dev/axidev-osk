@@ -165,7 +165,8 @@ class ApplicationRuntime:
         if event.locked:
             try:
                 self._keyboard.start(self.context)
-                self._window_manager.show(window_id)
+                window = self._window_manager.show(window_id)
+                window.set_close_enabled(False)
                 self._services.get("kwin_lock", KWinLockService).activate()
             except Exception:
                 try:
