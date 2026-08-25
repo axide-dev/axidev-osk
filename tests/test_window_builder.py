@@ -4,17 +4,18 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+from PySide6.QtWidgets import QApplication, QGraphicsOpacityEffect, QLabel, QPushButton
 
 from axidev_osk.components import register_components
 from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.platform.overlay import OverlayBackend
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.builder import build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
-from axidev_osk.windows.surface import register_surfaces
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
+from axidev_osk.windows.surface import register_surfaces
 
 
 class FakeKeyboardBackend:
@@ -49,7 +50,13 @@ class FakeKeyboardBackend:
 
 
 class FakeOverlayController:
-    def __init__(self, *, uses_custom_chrome: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        backend: OverlayBackend = OverlayBackend.WINDOWS_NATIVE,
+        uses_custom_chrome: bool = True,
+    ) -> None:
+        self.backend = backend
         self.uses_custom_chrome = uses_custom_chrome
 
     def prepare_show(self) -> bool:
@@ -206,6 +213,27 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         self.addCleanup(window.close)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+
+    def test_layer_shell_window_renders_configured_opacity_in_content(self) -> None:
+        _app()
+        overlay = FakeOverlayController(backend=OverlayBackend.WAYLAND_LAYER_SHELL)
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        effect = window.centralWidget().graphicsEffect()
+        self.assertIsInstance(effect, QGraphicsOpacityEffect)
+        self.assertAlmostEqual(window.windowOpacity(), 1.0, delta=0.005)
+        self.assertAlmostEqual(effect.opacity(), 0.85, delta=0.005)
+
+        window.setWindowOpacity(0.01)
+
+        self.assertAlmostEqual(window.windowOpacity(), 1.0, delta=0.005)
+        self.assertAlmostEqual(effect.opacity(), 0.01, delta=0.005)
 
     def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
         _app()

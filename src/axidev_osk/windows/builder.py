@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QCloseEvent, QShowEvent
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
+from ..platform.overlay import OverlayBackend
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested
 from .chrome import install_overlay_chrome
@@ -42,10 +43,10 @@ class RuntimeWindow(QMainWindow):
         self._config = config
         self._context = context
         self._quit_controller_managed = False
+        self._layer_shell_opacity_effect: QGraphicsOpacityEffect | None = None
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
-        self.setWindowOpacity(config.opacity)
         if config.overlay.always_on_top:
             self._overlay = configure_always_on_top_window(self, config=config.overlay.config)
         else:
@@ -63,7 +64,20 @@ class RuntimeWindow(QMainWindow):
                     on_resize=self._overlay.resize_by,
                 )
         self.setCentralWidget(central)
+        if self._overlay.backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self._layer_shell_opacity_effect = QGraphicsOpacityEffect(central)
+            central.setGraphicsEffect(self._layer_shell_opacity_effect)
+        self.setWindowOpacity(config.opacity)
         self.apply_startup_size(minimum_size=config.surface.minimum_size)
+
+    def setWindowOpacity(self, opacity: float) -> None:  # noqa: N802
+        """Apply opacity through rendered pixels when layer-shell cannot do it."""
+
+        if self._layer_shell_opacity_effect is None:
+            super().setWindowOpacity(opacity)
+            return
+        super().setWindowOpacity(1.0)
+        self._layer_shell_opacity_effect.setOpacity(opacity)
 
     @property
     def window_id(self) -> str:
