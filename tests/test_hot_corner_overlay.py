@@ -4,7 +4,7 @@ import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication
@@ -41,6 +41,7 @@ class FakeWindow:
         self._opacity = 1.0
         self._window_flags = Qt.WindowType.Widget
         self._attributes_enabled: set[Qt.WidgetAttribute] = set()
+        self.lifecycle: list[str] = []
 
     def setFocusPolicy(self, policy: Qt.FocusPolicy) -> None:
         self.focus_policies.append(policy)
@@ -53,6 +54,7 @@ class FakeWindow:
         self._attributes_enabled.discard(attribute)
 
     def setWindowFlag(self, flag: Qt.WindowType, enabled: bool = True) -> None:
+        self.lifecycle.append(f"flag:{flag.name}")
         self.flags.append((flag, enabled))
         if enabled:
             self._window_flags |= flag
@@ -121,6 +123,7 @@ class FakeWindow:
         return attribute in self._attributes_enabled
 
     def winId(self) -> int:
+        self.lifecycle.append("win-id")
         return 1
 
 
@@ -151,11 +154,15 @@ class FakeOverlayController:
 
 
 class FakeScreen:
-    def __init__(self, geometry: QRect) -> None:
+    def __init__(self, geometry: QRect, name: str = "Virtual-1") -> None:
         self._geometry = QRect(geometry)
+        self._name = name
 
     def geometry(self) -> QRect:
         return QRect(self._geometry)
+
+    def name(self) -> str:
+        return self._name
 
 
 class OverlayWindowControllerTests(unittest.TestCase):
@@ -427,6 +434,52 @@ class LayerShellPluginDiscoveryTests(unittest.TestCase):
 
 
 class OverlayBackendSelectionTests(unittest.TestCase):
+    def test_kwin_input_method_connection_selects_input_panel(self) -> None:
+        with patch(
+            "axidev_osk.windows.overlay.always_on_top.sys.platform",
+            "linux",
+        ), patch.dict(
+            "os.environ",
+            {"WAYLAND_SOCKET": "12"},
+            clear=True,
+        ):
+            backend = prepare_always_on_top_window_environment()
+            selected_backend = os.environ["AXIDEV_OSK_OVERLAY_BACKEND"]
+            qt_platform = os.environ["QT_QPA_PLATFORM"]
+            bypass_hint = os.environ["QT_WAYLAND_USE_BYPASSWINDOWMANAGERHINT"]
+
+        self.assertEqual(backend, OverlayBackend.WAYLAND_INPUT_PANEL)
+        self.assertEqual(selected_backend, "wayland-input-panel")
+        self.assertEqual(qt_platform, "wayland")
+        self.assertEqual(bypass_hint, "1")
+
+    def test_input_panel_controller_assigns_role_before_show(self) -> None:
+        window = FakeWindow()
+        window.screen = lambda: FakeScreen(QRect(0, 0, 1920, 1080))
+        attachment = Mock()
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_INPUT_PANEL,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.attach_kwin_input_panel",
+            side_effect=lambda *_args, **_kwargs: (
+                window.lifecycle.append("attach") or attachment
+            ),
+        ) as attach_input_panel:
+            controller = AlwaysOnTopWindowController(window)
+            controller.configure_window()
+
+        self.assertIn((Qt.WindowType.BypassWindowManagerHint, True), window.flags)
+        attach_input_panel.assert_called_once_with(1, output_name="Virtual-1")
+        self.assertLess(
+            window.lifecycle.index("flag:FramelessWindowHint"),
+            window.lifecycle.index("win-id"),
+        )
+        self.assertLess(window.lifecycle.index("win-id"), window.lifecycle.index("attach"))
+        controller.release_resources()
+        attachment.close.assert_called_once_with()
+
     def test_wayland_without_layer_shell_falls_back_to_x11_bridge_with_warning(self) -> None:
         with patch(
             "axidev_osk.windows.overlay.always_on_top.sys.platform",

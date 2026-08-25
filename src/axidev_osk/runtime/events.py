@@ -105,6 +105,13 @@ class HotCornerTriggered:
 
 
 @dataclass(frozen=True, slots=True)
+class ScreenLockStateChanged:
+    """The desktop session entered or left its locked state."""
+
+    locked: bool
+
+
+@dataclass(frozen=True, slots=True)
 class WindowCloseRequested:
     """A managed window requested application shutdown confirmation.
 
@@ -136,6 +143,7 @@ RuntimeEvent = (
     | BackendKeyStateChanged
     | KeyLatchChanged
     | HotCornerTriggered
+    | ScreenLockStateChanged
     | WindowCloseRequested
     | PromptResolved
 )

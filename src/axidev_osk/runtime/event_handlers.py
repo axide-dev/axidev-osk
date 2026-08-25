@@ -94,6 +94,7 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         lambda runtime: lambda command: runtime._app.exit(command.exit_code),
     )
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
+    registry.register_event_handler(lambda runtime: runtime._handle_screen_lock_state_changed)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
     registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
 

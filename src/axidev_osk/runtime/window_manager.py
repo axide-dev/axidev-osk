@@ -174,7 +174,7 @@ class WindowManager:
         blocker = _WindowInputBlocker(window, component_id)
         app.installEventFilter(blocker)
         self._input_blockers[window_id] = blocker
-        window.setWindowOpacity(opacity)
+        window.set_visual_opacity(opacity)
 
     def _restore_interaction(self, window_id: str, window: QWidget) -> None:
         """Restore configured opacity and remove any temporary input blocker."""
@@ -183,7 +183,7 @@ class WindowManager:
         app = QApplication.instance()
         if blocker is not None and app is not None:
             app.removeEventFilter(blocker)
-        window.setWindowOpacity(self._configs[window_id].opacity)
+        window.set_visual_opacity(self._configs[window_id].opacity)
 
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""
@@ -193,6 +193,17 @@ class WindowManager:
             _logger.info("Closing runtime window %s", window_id)
             self._restore_interaction(window_id, window)
             window.close()
+
+    def destroy(self, window_id: str) -> None:
+        """Hide and delete a managed window without treating it as an app quit request."""
+
+        window = self._windows.pop(window_id, None)
+        if window is not None:
+            _logger.info("Destroying runtime window %s", window_id)
+            self._restore_interaction(window_id, window)
+            window.release_platform_resources()
+            window.hide()
+            window.deleteLater()
 
     def all_windows(self) -> list[RuntimeWindow]:
         """Return all live managed windows."""

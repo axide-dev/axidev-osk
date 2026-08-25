@@ -69,6 +69,11 @@ class OverlayTitleBar(QFrame):
 
         self._layout.insertWidget(self._layout.indexOf(self._close_button), widget)
 
+    def set_close_enabled(self, enabled: bool) -> None:
+        """Set whether the title bar exposes its close control."""
+
+        self._close_button.setVisible(enabled)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Begin a title-bar drag on left mouse press."""
 

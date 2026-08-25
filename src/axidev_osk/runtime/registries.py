@@ -178,11 +178,16 @@ class ServiceRegistry:
         """Create an empty service registry."""
 
         self._services: dict[str, RuntimeService] = {}
+        self._deferred: set[str] = set()
 
-    def register(self, name: str, service: RuntimeService) -> None:
+    def register(self, name: str, service: RuntimeService, *, autostart: bool = True) -> None:
         """Register a runtime service under a stable name."""
 
         self._services[name] = service
+        if autostart:
+            self._deferred.discard(name)
+        else:
+            self._deferred.add(name)
 
     def get(self, name: str, service_type: type[RuntimeT]) -> RuntimeT:
         """Return a named service, validating its concrete type."""
@@ -198,6 +203,11 @@ class ServiceRegistry:
         """Yield services in registration order."""
 
         return tuple(self._services.values())
+
+    def autostart_services(self) -> Iterable[RuntimeService]:
+        """Yield services that should start with the application runtime."""
+
+        return tuple(service for name, service in self._services.items() if name not in self._deferred)
 
 
 class EventHandlerRegistry:

@@ -43,6 +43,7 @@ from ...platform.layer_shell import (
     is_wayland_session,
     prepend_plugin_root,
 )
+from ...platform.kwin_input_panel import attach_kwin_input_panel
 
 
 TWindow = TypeVar("TWindow", bound=QWidget)
@@ -102,6 +103,11 @@ def prepare_always_on_top_window_environment(
 
     if forced_platforms and "wayland" not in forced_platforms:
         return _set_overlay_backend(OverlayBackend.NATIVE)
+
+    if os.environ.get("WAYLAND_SOCKET"):
+        os.environ["QT_QPA_PLATFORM"] = "wayland"
+        os.environ["QT_WAYLAND_USE_BYPASSWINDOWMANAGERHINT"] = "1"
+        return _set_overlay_backend(OverlayBackend.WAYLAND_INPUT_PANEL)
 
     if not is_wayland_session():
         if os.environ.get("DISPLAY"):
@@ -178,6 +184,7 @@ class AlwaysOnTopWindowController:
         self._floating_position_initialized = False
         self._show_adjustments_applied = False
         self._layer_shell_startup_refresh_applied = False
+        self._input_panel_attachment = None
 
     @property
     def backend(self) -> OverlayBackend:
@@ -190,6 +197,7 @@ class AlwaysOnTopWindowController:
         """Whether this backend requires app-provided frameless chrome."""
 
         return self._backend in {
+            OverlayBackend.WAYLAND_INPUT_PANEL,
             OverlayBackend.WAYLAND_LAYER_SHELL,
             OverlayBackend.X11_UTILITY,
             OverlayBackend.X11_UTILITY_BRIDGE,
@@ -205,6 +213,9 @@ class AlwaysOnTopWindowController:
         self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
 
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            self._window.setWindowFlag(Qt.WindowType.BypassWindowManagerHint, True)
+
         if self.uses_custom_chrome:
             self._window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
@@ -215,6 +226,14 @@ class AlwaysOnTopWindowController:
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             _set_windows_taskbar_style(int(self._window.winId()))
 
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            screen = self._window.screen()
+            output_name = screen.name() if screen is not None else ""
+            self._input_panel_attachment = attach_kwin_input_panel(
+                int(self._window.winId()),
+                output_name=output_name,
+            )
+
         self._debug_log(
             "configure-window",
             backend=self._backend.value,
@@ -222,6 +241,13 @@ class AlwaysOnTopWindowController:
             placement=self._config.placement.value,
             screen_margin=self._config.screen_margin,
         )
+
+    def release_resources(self) -> None:
+        """Release native resources owned by this overlay controller."""
+
+        if self._input_panel_attachment is not None:
+            self._input_panel_attachment.close()
+            self._input_panel_attachment = None
 
     def handle_show(self) -> bool:
         """Apply backend-specific adjustments after the window is shown."""
@@ -235,6 +261,9 @@ class AlwaysOnTopWindowController:
             applied = self._apply_wayland_layer_shell_if_needed()
             self._refresh_wayland_layer_shell_surface_after_startup()
             return applied
+
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            return True
 
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
             self._position_floating_window_if_needed()
@@ -256,6 +285,8 @@ class AlwaysOnTopWindowController:
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             return self._sync_wayland_layer_shell()
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            return True
         if self._backend in {OverlayBackend.WINDOWS_NATIVE, OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
             self._position_floating_window_if_needed()
             return True
@@ -371,10 +402,13 @@ class AlwaysOnTopWindowController:
         platform = self._qt_platform()
         if platform == "wayland":
             selected = _read_selected_backend()
-            if selected == OverlayBackend.WAYLAND_LAYER_SHELL:
+            if selected in {
+                OverlayBackend.WAYLAND_INPUT_PANEL,
+                OverlayBackend.WAYLAND_LAYER_SHELL,
+            }:
                 return selected
             raise RuntimeError(
-                "Wayland overlay backend was initialized without layer-shell support."
+                "Wayland overlay backend was initialized without input-panel or layer-shell support."
             )
 
         if platform == "xcb":

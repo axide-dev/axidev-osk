@@ -17,6 +17,7 @@ class OverlayBackend(str, Enum):
 
     NATIVE = "native"
     WINDOWS_NATIVE = "windows-native"
+    WAYLAND_INPUT_PANEL = "wayland-input-panel"
     WAYLAND_LAYER_SHELL = "wayland-layer-shell"
     X11_UTILITY = "x11-utility"
     X11_UTILITY_BRIDGE = "x11-utility-bridge"
