@@ -127,6 +127,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             patch.object(runtime._window_manager, "destroy") as destroy,
         ):
             runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
             runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=False))
             runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
 
@@ -138,7 +139,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             [unittest.mock.call(False), unittest.mock.call(False)],
         )
         destroy.assert_called_once_with(runtime._config.keyboard_window_id)
-        self.assertEqual(kwin_lock.activate.call_count, 2)
+        self.assertEqual(kwin_lock.activate.call_count, 3)
 
     def test_failed_lock_window_creation_rolls_back_and_remains_retryable(self) -> None:
         backend = Mock()

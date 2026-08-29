@@ -176,14 +176,68 @@ class NativeAdapterTests(unittest.TestCase):
             "        id: lockScreenRoot\n\n"
             "        property bool uiVisible: false\n"
             "    }\n"
+            "    RowLayout {\n"
+            "            PlasmaComponents3.ToolButton {\n"
+            "                id: virtualKeyboardButton\n"
+            "            }\n"
+            "    }\n"
             "}\n"
         )
 
         managed = linux_greeter._plasma_lock_screen_ui_text(original)
 
-        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_PATCH, managed)
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH, managed)
+        self.assertLess(managed.index("id: axidevOskButton"), managed.index("id: virtualKeyboardButton"))
+        self.assertEqual(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH.count("inputPanel.showHide()"), 2)
+        self.assertIn("if (inputPanel.keyboardActive)", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn("Qt.callLater", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(managed), managed)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(managed), original)
+
+        previous = managed.replace(
+            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH,
+        )
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(previous), managed)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(previous), original)
+
+    def test_plasma_lock_screen_patch_migrates_previous_managed_block(self) -> None:
+        original = (
+            "Item {\n"
+            "    MouseArea {\n"
+            "        id: lockScreenRoot\n"
+            "    }\n"
+            "    RowLayout {\n"
+            "            PlasmaComponents3.ToolButton {\n"
+            "                id: virtualKeyboardButton\n"
+            "            }\n"
+            "    }\n"
+            "}\n"
+        )
+        for previous_patch in (
+            linux_greeter.PLASMA_LOCK_SCREEN_LEGACY_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_PREVIOUS_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_AUTO_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH,
+            linux_greeter.PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH,
+        ):
+            with self.subTest(previous_patch=previous_patch):
+                legacy = original.replace(
+                    "        id: lockScreenRoot\n",
+                    "        id: lockScreenRoot\n\n" + previous_patch,
+                )
+
+                managed = linux_greeter._plasma_lock_screen_ui_text(legacy)
+
+                self.assertNotIn(previous_patch, managed)
+                self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
+                self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH, managed)
+                self.assertEqual(
+                    linux_greeter._plasma_lock_screen_ui_without_patch(legacy),
+                    original,
+                )
 
     def test_plasma_lock_screen_patch_rejects_changed_markers(self) -> None:
         changed = (
@@ -242,6 +296,11 @@ class NativeAdapterTests(unittest.TestCase):
                 "        id: lockScreenRoot\n\n"
                 "        property bool uiVisible: false\n"
                 "    }\n"
+                "    RowLayout {\n"
+                "            PlasmaComponents3.ToolButton {\n"
+                "                id: virtualKeyboardButton\n"
+                "            }\n"
+                "    }\n"
                 "}\n"
             )
             kwinrc.write_text(original, encoding="utf-8")
@@ -273,7 +332,11 @@ class NativeAdapterTests(unittest.TestCase):
                 self.assertTrue(input_method.is_file())
                 self.assertTrue(kwin_dropin.is_file())
                 self.assertIn(
-                    linux_greeter.PLASMA_LOCK_SCREEN_PATCH,
+                    linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH,
+                    lock_screen_ui.read_text(encoding="utf-8"),
+                )
+                self.assertIn(
+                    linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
                     lock_screen_ui.read_text(encoding="utf-8"),
                 )
 
@@ -282,7 +345,11 @@ class NativeAdapterTests(unittest.TestCase):
                 with patch.object(linux_greeter, "_runtime_launcher", return_value=launcher):
                     self.assertTrue(linux_greeter._repair_plasma_lock_screen_patch(state))
                 self.assertIn(
-                    linux_greeter.PLASMA_LOCK_SCREEN_PATCH,
+                    linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH,
+                    lock_screen_ui.read_text(encoding="utf-8"),
+                )
+                self.assertIn(
+                    linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
                     lock_screen_ui.read_text(encoding="utf-8"),
                 )
 
