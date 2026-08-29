@@ -64,9 +64,13 @@ POLL_SECONDS = 0.1
 
 PLASMA_LOCK_SCREEN_PATCH_START = "// BEGIN AXIDEV OSK MANAGED"
 PLASMA_LOCK_SCREEN_PATCH_END = "// END AXIDEV OSK MANAGED"
+PLASMA_LOCK_SCREEN_ROOT_PATCH_START = "// BEGIN AXIDEV OSK ROOT MANAGED"
+PLASMA_LOCK_SCREEN_ROOT_PATCH_END = "// END AXIDEV OSK ROOT MANAGED"
+PLASMA_LOCK_SCREEN_BUTTON_PATCH_START = "// BEGIN AXIDEV OSK BUTTON MANAGED"
+PLASMA_LOCK_SCREEN_BUTTON_PATCH_END = "// END AXIDEV OSK BUTTON MANAGED"
 PLASMA_LOCK_SCREEN_MIN_VERSION = (6, 7, 0)
 PLASMA_LOCK_SCREEN_MAX_VERSION = (7, 0, 0)
-PLASMA_LOCK_SCREEN_PATCH = (
+PLASMA_LOCK_SCREEN_LEGACY_PATCH = (
     "        // BEGIN AXIDEV OSK MANAGED\n"
     "        Connections {\n"
     "            target: lockScreenRoot\n"
@@ -78,6 +82,150 @@ PLASMA_LOCK_SCREEN_PATCH = (
     "            }\n"
     "        }\n"
     "        // END AXIDEV OSK MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_PREVIOUS_PATCH = (
+    "        // BEGIN AXIDEV OSK MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: Qt.callLater(function() {\n"
+    "                lockScreenRoot.uiVisible = true;\n"
+    "            })\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_AUTO_PATCH = (
+    "        // BEGIN AXIDEV OSK MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: Qt.callLater(function() {\n"
+    "                lockScreenRoot.uiVisible = true;\n"
+    "                if (inputPanel.status === Loader.Ready && !inputPanel.keyboardActive) {\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    inputPanel.showHide();\n"
+    "                }\n"
+    "            })\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n\n"
+    "        Connections {\n"
+    "            target: inputPanel\n\n"
+    "            function onStatusChanged() {\n"
+    "                if (inputPanel.status === Loader.Ready && !inputPanel.keyboardActive) {\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    inputPanel.showHide();\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH = (
+    "        // BEGIN AXIDEV OSK MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: Qt.callLater(function() {\n"
+    "                lockScreenRoot.uiVisible = true;\n"
+    "            })\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n\n"
+    "        PlasmaComponents3.ToolButton {\n"
+    "            id: axidevOskButton\n"
+    "            parent: footer\n"
+    "            Component.onCompleted: axidevOskButton.stackBefore(virtualKeyboardButton)\n"
+    "            focusPolicy: Qt.TabFocus\n"
+    "            text: \"Axidev OSK\"\n"
+    "            icon.name: \"input-keyboard-virtual-on\"\n"
+    "            visible: inputPanel.status === Loader.Ready\n"
+    "            Layout.fillHeight: true\n\n"
+    "            onClicked: {\n"
+    "                mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                if (inputPanel.keyboardActive) {\n"
+    "                    inputPanel.showHide();\n"
+    "                }\n"
+    "                Qt.callLater(function() {\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    if (!inputPanel.keyboardActive) {\n"
+    "                        inputPanel.showHide();\n"
+    "                    }\n"
+    "                })\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH = PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH.replace(
+    "            Component.onCompleted: axidevOskButton.stackBefore(virtualKeyboardButton)\n",
+    "            Component.onCompleted: stackBefore(virtualKeyboardButton)\n",
+    1,
+)
+PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH = PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH.replace(
+    "            id: axidevOskButton\n"
+    "            parent: footer\n"
+    "            Component.onCompleted: axidevOskButton.stackBefore(virtualKeyboardButton)\n",
+    "            parent: footer\n",
+    1,
+)
+PLASMA_LOCK_SCREEN_ROOT_PATCH = (
+    "        // BEGIN AXIDEV OSK ROOT MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: Qt.callLater(function() {\n"
+    "                lockScreenRoot.uiVisible = true;\n"
+    "            })\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK ROOT MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_BUTTON_PATCH = (
+    "            // BEGIN AXIDEV OSK BUTTON MANAGED\n"
+    "            PlasmaComponents3.ToolButton {\n"
+    "                id: axidevOskButton\n\n"
+    "                focusPolicy: Qt.TabFocus\n"
+    "                text: \"Axidev OSK\"\n"
+    "                icon.name: \"input-keyboard-virtual-on\"\n"
+    "                visible: inputPanel.status === Loader.Ready\n"
+    "                Layout.fillHeight: true\n\n"
+    "                onClicked: {\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    if (inputPanel.keyboardActive) {\n"
+    "                        inputPanel.showHide();\n"
+    "                    }\n"
+    "                    Qt.callLater(function() {\n"
+    "                        mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                        if (!inputPanel.keyboardActive) {\n"
+    "                            inputPanel.showHide();\n"
+    "                        }\n"
+    "                    })\n"
+    "                }\n"
+    "            }\n"
+    "            // END AXIDEV OSK BUTTON MANAGED\n\n"
+)
+PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH = PLASMA_LOCK_SCREEN_BUTTON_PATCH.replace(
+    "                    if (inputPanel.keyboardActive) {\n"
+    "                        inputPanel.showHide();\n"
+    "                    }\n"
+    "                    Qt.callLater(function() {\n"
+    "                        mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                        if (!inputPanel.keyboardActive) {\n"
+    "                            inputPanel.showHide();\n"
+    "                        }\n"
+    "                    })\n",
+    "                    inputPanel.showHide();\n",
+    1,
 )
 
 @dataclass(frozen=True)
@@ -816,13 +964,51 @@ def _plasma_kwin_config_text(original: str | None) -> str:
 
 
 def _plasma_lock_screen_patch_is_current(text: str | None) -> bool:
-    """Return whether QML contains exactly one unmodified managed block."""
+    """Return whether QML contains both unmodified managed blocks."""
 
     return bool(
         text is not None
-        and text.count(PLASMA_LOCK_SCREEN_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_END) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_END) == 1
+    )
+
+
+def _plasma_lock_screen_patch_is_legacy(text: str | None) -> bool:
+    """Return whether QML contains the previous exact managed block."""
+
+    return bool(
+        text is not None
+        and any(
+            text.count(patch) == 1
+            for patch in (
+                PLASMA_LOCK_SCREEN_LEGACY_PATCH,
+                PLASMA_LOCK_SCREEN_PREVIOUS_PATCH,
+                PLASMA_LOCK_SCREEN_AUTO_PATCH,
+                PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH,
+            )
+        )
         and text.count(PLASMA_LOCK_SCREEN_PATCH_START) == 1
         and text.count(PLASMA_LOCK_SCREEN_PATCH_END) == 1
+    )
+
+
+def _plasma_lock_screen_patch_is_previous_split(text: str | None) -> bool:
+    """Return whether QML contains the previous structural button block."""
+
+    return bool(
+        text is not None
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_END) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_END) == 1
     )
 
 
@@ -897,22 +1083,86 @@ def _plasma_lock_screen_ui_text(original: str) -> str:
 
     if _plasma_lock_screen_patch_is_current(original):
         return original
-    if PLASMA_LOCK_SCREEN_PATCH_START in original or PLASMA_LOCK_SCREEN_PATCH_END in original:
+    if _plasma_lock_screen_patch_is_previous_split(original):
+        return original.replace(
+            PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH,
+            PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+            1,
+        )
+    if _plasma_lock_screen_patch_is_legacy(original):
+        legacy_patch = next(
+            patch
+            for patch in (
+                PLASMA_LOCK_SCREEN_LEGACY_PATCH,
+                PLASMA_LOCK_SCREEN_PREVIOUS_PATCH,
+                PLASMA_LOCK_SCREEN_AUTO_PATCH,
+                PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH,
+            )
+            if patch in original
+        )
+        original = original.replace("\n" + legacy_patch, "", 1)
+    markers = (
+        PLASMA_LOCK_SCREEN_PATCH_START,
+        PLASMA_LOCK_SCREEN_PATCH_END,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_START,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_END,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+    )
+    if any(marker in original for marker in markers):
         raise linux.LinuxSetupError("refusing to replace a changed Axidev lock-screen QML block")
-    anchor = "    MouseArea {\n        id: lockScreenRoot\n"
-    if original.count(anchor) != 1:
+    root_anchor = "    MouseArea {\n        id: lockScreenRoot\n"
+    button_anchor = "            PlasmaComponents3.ToolButton {\n                id: virtualKeyboardButton\n"
+    if original.count(root_anchor) != 1:
         raise linux.LinuxSetupError(
             "Plasma lock-screen QML does not contain the supported lockScreenRoot structure"
         )
-    return original.replace(anchor, anchor + "\n" + PLASMA_LOCK_SCREEN_PATCH, 1)
+    if original.count(button_anchor) != 1:
+        raise linux.LinuxSetupError(
+            "Plasma lock-screen QML does not contain the supported virtualKeyboardButton structure"
+        )
+    managed = original.replace(
+        root_anchor,
+        root_anchor + "\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH,
+        1,
+    )
+    return managed.replace(button_anchor, PLASMA_LOCK_SCREEN_BUTTON_PATCH + button_anchor, 1)
 
 
 def _plasma_lock_screen_ui_without_patch(managed: str) -> str:
     """Remove only the exact managed block from Plasma QML."""
 
     if _plasma_lock_screen_patch_is_current(managed):
-        return managed.replace("\n" + PLASMA_LOCK_SCREEN_PATCH, "", 1)
-    if PLASMA_LOCK_SCREEN_PATCH_START in managed or PLASMA_LOCK_SCREEN_PATCH_END in managed:
+        unmanaged = managed.replace("\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH, "", 1)
+        return unmanaged.replace(PLASMA_LOCK_SCREEN_BUTTON_PATCH, "", 1)
+    if _plasma_lock_screen_patch_is_previous_split(managed):
+        unmanaged = managed.replace("\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH, "", 1)
+        return unmanaged.replace(PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH, "", 1)
+    if _plasma_lock_screen_patch_is_legacy(managed):
+        legacy_patch = next(
+            patch
+            for patch in (
+                PLASMA_LOCK_SCREEN_LEGACY_PATCH,
+                PLASMA_LOCK_SCREEN_PREVIOUS_PATCH,
+                PLASMA_LOCK_SCREEN_AUTO_PATCH,
+                PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH,
+                PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH,
+            )
+            if patch in managed
+        )
+        return managed.replace("\n" + legacy_patch, "", 1)
+    markers = (
+        PLASMA_LOCK_SCREEN_PATCH_START,
+        PLASMA_LOCK_SCREEN_PATCH_END,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_START,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_END,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+    )
+    if any(marker in managed for marker in markers):
         raise linux.LinuxSetupError("refusing to remove a changed Axidev lock-screen QML block")
     return managed
 
