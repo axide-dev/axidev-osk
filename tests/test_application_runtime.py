@@ -11,10 +11,10 @@ from axidev_osk.app import _set_application_icon
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import WindowConfig
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.events import PromptResolved, ScreenLockStateChanged
+from axidev_osk.runtime.commands import SecureInputPanelPrepare, SecureInputPanelRelease
+from axidev_osk.runtime.events import PromptResolved
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
-from axidev_osk.services.kwin_lock import KWinLockService
 
 
 def _app() -> QApplication:
@@ -109,16 +109,13 @@ class ApplicationRuntimePromptTests(unittest.TestCase):
 
 
 class SecureInputPanelLifecycleTests(unittest.TestCase):
-    def test_repeated_lock_cycles_rebuild_window_and_restart_keyboard(self) -> None:
+    def test_repeated_prepare_release_cycles_rebuild_window_and_restart_keyboard(self) -> None:
         backend = Mock()
         backend.initialize.return_value = True
         backend.add_key_state_listener.return_value = lambda: None
         keyboard = KeyboardService(backend)
-        kwin_lock = KWinLockService()
-        kwin_lock.activate = Mock()
         services = ServiceRegistry()
         services.register("keyboard", keyboard, autostart=False)
-        services.register("kwin_lock", kwin_lock, autostart=False)
         runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
         lock_window = Mock()
 
@@ -126,10 +123,10 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             patch.object(runtime._window_manager, "show", return_value=lock_window) as show,
             patch.object(runtime._window_manager, "destroy") as destroy,
         ):
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=False))
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelRelease())
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
 
         self.assertEqual(backend.initialize.call_count, 2)
         backend.shutdown.assert_called_once_with()
@@ -139,18 +136,14 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             [unittest.mock.call(False), unittest.mock.call(False)],
         )
         destroy.assert_called_once_with(runtime._config.keyboard_window_id)
-        self.assertEqual(kwin_lock.activate.call_count, 3)
 
-    def test_failed_lock_window_creation_rolls_back_and_remains_retryable(self) -> None:
+    def test_failed_panel_creation_rolls_back_and_remains_retryable(self) -> None:
         backend = Mock()
         backend.initialize.return_value = True
         backend.add_key_state_listener.return_value = lambda: None
         keyboard = KeyboardService(backend)
-        kwin_lock = KWinLockService()
-        kwin_lock.activate = Mock()
         services = ServiceRegistry()
         services.register("keyboard", keyboard, autostart=False)
-        services.register("kwin_lock", kwin_lock, autostart=False)
         runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
 
         with (
@@ -162,27 +155,24 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             patch.object(runtime._window_manager, "destroy") as destroy,
         ):
             with self.assertRaisesRegex(RuntimeError, "window failed"):
-                runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
-            self.assertIsNone(runtime._screen_locked)
+                runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
+            self.assertFalse(runtime._secure_input_panel_prepared)
 
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
 
         self.assertEqual(show.call_count, 2)
         destroy.assert_called_once_with(runtime._config.keyboard_window_id)
         self.assertEqual(backend.initialize.call_count, 2)
         backend.shutdown.assert_called_once_with()
-        kwin_lock.activate.assert_called_once_with()
-        self.assertTrue(runtime._screen_locked)
+        self.assertTrue(runtime._secure_input_panel_prepared)
 
-    def test_failed_lock_startup_preserves_error_when_cleanup_also_fails(self) -> None:
+    def test_failed_panel_prepare_preserves_error_when_cleanup_also_fails(self) -> None:
         backend = Mock()
         backend.initialize.return_value = True
         backend.add_key_state_listener.return_value = lambda: None
         keyboard = KeyboardService(backend)
-        kwin_lock = KWinLockService()
         services = ServiceRegistry()
         services.register("keyboard", keyboard, autostart=False)
-        services.register("kwin_lock", kwin_lock, autostart=False)
         runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
 
         with (
@@ -199,13 +189,13 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             patch("axidev_osk.runtime.application._logger") as logger,
             self.assertRaisesRegex(RuntimeError, "window failed"),
         ):
-            runtime.context.dispatcher.dispatch_event(ScreenLockStateChanged(locked=True))
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
 
         backend.shutdown.assert_called_once_with()
         logger.exception.assert_called_once_with(
-            "Failed to destroy a partially started lock window"
+            "Failed to destroy a partially prepared secure input panel"
         )
-        self.assertIsNone(runtime._screen_locked)
+        self.assertFalse(runtime._secure_input_panel_prepared)
 
 
 if __name__ == "__main__":

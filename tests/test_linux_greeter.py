@@ -176,6 +176,8 @@ class NativeAdapterTests(unittest.TestCase):
             "        id: lockScreenRoot\n\n"
             "        property bool uiVisible: false\n"
             "    }\n"
+            "    Item {\n"
+            "    }\n"
             "    RowLayout {\n"
             "            PlasmaComponents3.ToolButton {\n"
             "                id: virtualKeyboardButton\n"
@@ -186,74 +188,63 @@ class NativeAdapterTests(unittest.TestCase):
 
         managed = linux_greeter._plasma_lock_screen_ui_text(original)
 
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_IMPORT_PATCH, managed)
         self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
         self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH, managed)
         self.assertLess(managed.index("id: axidevOskButton"), managed.index("id: virtualKeyboardButton"))
-        self.assertEqual(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH.count("inputPanel.showHide()"), 2)
-        self.assertIn("if (inputPanel.keyboardActive)", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
-        self.assertIn("Qt.callLater", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertEqual(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH.count("inputPanel.showHide()"), 1)
+        self.assertIn("DBus.SessionBus.asyncCall", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn('member: "prepare"', linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn('member: "release"', linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn("target: mainBlock", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn("function onPasswordResult(password)", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn(
+            "Keyboards.KWinVirtualKeyboard.mode = 2",
+            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+        )
+        self.assertIn("onVisibleChanged", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn(
+            "previousVirtualKeyboardMode",
+            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+        )
+        self.assertIn(
+            "inputPanel.keyboardActive || previousVirtualKeyboardMode >= 0",
+            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+        )
+        self.assertIn("target: authenticator", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn("function onSucceeded()", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertNotIn("target: root", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertNotIn("Component.onDestruction", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(managed), managed)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(managed), original)
 
-        previous = managed.replace(
-            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_PREVIOUS_BUTTON_PATCH,
+        changed = managed.replace(
+            "import org.kde.plasma.workspace.dbus as DBus\n",
+            "changed import\n",
+        ).replace(
+            "            target: lockScreenRoot\n",
+            "            changed root\n",
+        ).replace(
+            "                text: \"Axidev OSK\"\n",
+            "                changed button\n",
         )
-        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(previous), managed)
-        self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(previous), original)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(changed), managed)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(changed), original)
 
-    def test_plasma_lock_screen_patch_migrates_previous_managed_block(self) -> None:
-        original = (
-            "Item {\n"
-            "    MouseArea {\n"
-            "        id: lockScreenRoot\n"
-            "    }\n"
-            "    RowLayout {\n"
-            "            PlasmaComponents3.ToolButton {\n"
-            "                id: virtualKeyboardButton\n"
-            "            }\n"
-            "    }\n"
-            "}\n"
-        )
-        for previous_patch in (
-            linux_greeter.PLASMA_LOCK_SCREEN_LEGACY_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_PREVIOUS_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_AUTO_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_STACKED_BUTTON_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_UNQUALIFIED_BUTTON_PATCH,
-            linux_greeter.PLASMA_LOCK_SCREEN_UNORDERED_BUTTON_PATCH,
-        ):
-            with self.subTest(previous_patch=previous_patch):
-                legacy = original.replace(
-                    "        id: lockScreenRoot\n",
-                    "        id: lockScreenRoot\n\n" + previous_patch,
-                )
-
-                managed = linux_greeter._plasma_lock_screen_ui_text(legacy)
-
-                self.assertNotIn(previous_patch, managed)
-                self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
-                self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH, managed)
-                self.assertEqual(
-                    linux_greeter._plasma_lock_screen_ui_without_patch(legacy),
-                    original,
-                )
-
-    def test_plasma_lock_screen_patch_rejects_changed_markers(self) -> None:
+    def test_plasma_lock_screen_patch_rejects_incomplete_markers(self) -> None:
         changed = (
             "Item {\n"
             "    MouseArea {\n"
             "        id: lockScreenRoot\n"
-            "        // BEGIN AXIDEV OSK MANAGED\n"
+            "        // BEGIN AXIDEV OSK ROOT MANAGED\n"
             "        changed content\n"
-            "        // END AXIDEV OSK MANAGED\n"
             "    }\n"
             "}\n"
         )
 
-        with self.assertRaisesRegex(linux.LinuxSetupError, "changed Axidev"):
+        with self.assertRaisesRegex(linux.LinuxSetupError, "marker pair"):
             linux_greeter._plasma_lock_screen_ui_text(changed)
-        with self.assertRaisesRegex(linux.LinuxSetupError, "changed Axidev"):
+        with self.assertRaisesRegex(linux.LinuxSetupError, "marker pair"):
             linux_greeter._plasma_lock_screen_ui_without_patch(changed)
 
     def test_plasma_version_is_read_from_owning_rpm(self) -> None:
@@ -364,44 +355,6 @@ class NativeAdapterTests(unittest.TestCase):
             self.assertFalse(input_method.exists())
             self.assertFalse(kwin_dropin.exists())
             self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), original_lock_screen_ui)
-
-    def test_legacy_plasma_remove_keeps_working(self) -> None:
-        launcher = Path("/opt/axidev-osk/bin/axidev-osk")
-        legacy_state = {"schema": 1, "manager": "plasma-login", "account": "plasmalogin"}
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            supervisor = root / "supervisor"
-            service = root / "service"
-            wants = root / "wants"
-            with (
-                patch.object(linux_greeter, "NATIVE_SUPERVISOR_PATH", supervisor),
-                patch.object(linux_greeter, "PLASMA_SERVICE_PATH", service),
-                patch.object(linux_greeter, "PLASMA_WANTS_PATH", wants),
-            ):
-                supervisor.write_text(
-                    linux_greeter._native_supervisor_text(launcher), encoding="utf-8"
-                )
-                service.write_text(linux_greeter._plasma_service_text(), encoding="utf-8")
-                wants.symlink_to(service)
-                linux_greeter._remove_plasma(launcher, legacy_state)
-
-            self.assertFalse(supervisor.exists())
-            self.assertFalse(service.exists())
-            self.assertFalse(wants.exists())
-
-    def test_removable_symlink_accepts_an_equivalent_target_path(self) -> None:
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            actual = root / "actual"
-            alias = root / "alias"
-            actual.mkdir()
-            alias.symlink_to(actual, target_is_directory=True)
-            target = alias / "service"
-            target.write_text("service", encoding="utf-8")
-            link = root / "wants"
-            link.symlink_to(target)
-
-            linux_greeter._require_removable_symlink(link, target)
 
     def test_lightdm_uses_native_greeter_wrapper(self) -> None:
         wrapper = linux_greeter._lightdm_wrapper_text(Path("/opt/axidev-osk/bin/axidev-osk"))

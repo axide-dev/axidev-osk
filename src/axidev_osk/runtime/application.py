@@ -15,7 +15,6 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
-from ..services.kwin_lock import KWinLockService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
@@ -26,7 +25,7 @@ from .event_handlers import (
     route_component_pressed,
     route_hot_corner_triggered,
 )
-from .events import ScreenLockStateChanged, WindowCloseRequested
+from .events import WindowCloseRequested
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
@@ -67,7 +66,7 @@ class ApplicationRuntime:
 
         self._app = app
         self._show_startup_windows = show_startup_windows
-        self._screen_locked: bool | None = None
+        self._secure_input_panel_prepared = False
         self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
         self._services = services or ServiceRegistry()
@@ -152,38 +151,40 @@ class ApplicationRuntime:
         if isinstance(event, WindowCloseRequested):
             self._quit_controller.request_quit()
 
-    def _handle_screen_lock_state_changed(self, event: object) -> None:
-        """Create or destroy secure runtime resources as KDE locks and unlocks."""
+    def _prepare_secure_input_panel(self) -> None:
+        """Create the keyboard window and backend requested by the lock-screen button."""
 
-        if not isinstance(event, ScreenLockStateChanged):
-            return
-        if event.locked == self._screen_locked:
-            if event.locked:
-                self._services.get("kwin_lock", KWinLockService).activate()
+        if self._secure_input_panel_prepared:
             return
         window_id = self._config.keyboard_window_id
-        if event.locked:
-            try:
-                self._keyboard.start(self.context)
-                window = self._window_manager.show(window_id)
-                window.set_close_enabled(False)
-                self._services.get("kwin_lock", KWinLockService).activate()
-            except Exception:
-                try:
-                    self._window_manager.destroy(window_id)
-                except Exception:
-                    _logger.exception("Failed to destroy a partially started lock window")
-                try:
-                    self._keyboard.shutdown()
-                except Exception:
-                    _logger.exception("Failed to shut down keyboard output after lock startup failed")
-                raise
-        else:
+        try:
+            self._keyboard.start(self.context)
+            window = self._window_manager.show(window_id)
+            window.set_close_enabled(False)
+        except Exception:
             try:
                 self._window_manager.destroy(window_id)
-            finally:
+            except Exception:
+                _logger.exception("Failed to destroy a partially prepared secure input panel")
+            try:
                 self._keyboard.shutdown()
-        self._screen_locked = event.locked
+            except Exception:
+                _logger.exception("Failed to shut down keyboard output after panel preparation failed")
+            raise
+        self._secure_input_panel_prepared = True
+
+    def _release_secure_input_panel(self) -> None:
+        """Destroy runtime resources released by the lock-screen QML."""
+
+        if not self._secure_input_panel_prepared:
+            return
+        try:
+            self._window_manager.destroy(self._config.keyboard_window_id)
+        finally:
+            try:
+                self._keyboard.shutdown()
+            finally:
+                self._secure_input_panel_prepared = False
 
     def _handle_hot_corner_triggered(self, event: object) -> None:
         """Map hot-corner events to managed window visibility commands."""

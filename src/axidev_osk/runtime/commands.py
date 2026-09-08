@@ -82,6 +82,16 @@ class StateSet:
 
 
 @dataclass(frozen=True, slots=True)
+class SecureInputPanelPrepare:
+    """Command requesting creation of secure input-panel runtime resources."""
+
+
+@dataclass(frozen=True, slots=True)
+class SecureInputPanelRelease:
+    """Command requesting cleanup of secure input-panel runtime resources."""
+
+
+@dataclass(frozen=True, slots=True)
 class WindowShow:
     """Command requesting a managed window to be shown.
 
@@ -134,4 +144,4 @@ class AppQuit:
     exit_code: int = 0
 
 
-RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | WindowShow | WindowHide | WindowToggleOpacity | WindowClose | AppQuit
+RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | SecureInputPanelPrepare | SecureInputPanelRelease | WindowShow | WindowHide | WindowToggleOpacity | WindowClose | AppQuit
