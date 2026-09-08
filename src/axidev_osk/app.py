@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication
 from .runtime.application import ApplicationRuntime
 from .runtime.registries import ServiceRegistry
 from .services.keyboard import KeyboardService
-from .services.kwin_lock import KWinLockService
+from .services.secure_input_panel import SecureInputPanelService
 from .services.single_instance import ExistingInstanceActivated
 from .windows.overlay import OverlayBackend, prepare_always_on_top_window_environment
 
@@ -63,7 +63,7 @@ def _input_panel_services(
     services = ServiceRegistry()
     services.register("keyboard", KeyboardService(), autostart=not lock_lifecycle)
     if lock_lifecycle:
-        services.register("kwin_lock", KWinLockService(parent=app))
+        services.register("secure_input_panel", SecureInputPanelService(parent=app))
     return services
 
 
