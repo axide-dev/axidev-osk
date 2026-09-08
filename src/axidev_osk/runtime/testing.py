@@ -29,7 +29,13 @@ from .event_handlers import (
     route_hot_corner_triggered,
 )
 from .events import WindowCloseRequested
-from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
+from .registries import (
+    ComponentRegistry,
+    EventHandlerRegistry,
+    ServiceRegistry,
+    SurfaceDecorationRegistry,
+    SurfaceRegistry,
+)
 from .state_store import StateStore
 from .window_manager import WindowManager
 
@@ -86,6 +92,7 @@ def make_test_context(
     config: AppConfig | None = None,
     components: ComponentRegistry | None = None,
     surfaces: SurfaceRegistry | None = None,
+    surface_decorations: SurfaceDecorationRegistry | None = None,
     services: set[str] | None = None,
     event_handlers: bool = False,
 ) -> Context:
@@ -109,6 +116,8 @@ def make_test_context(
             component builders are registered into it.
         surfaces: Optional pre-populated surface registry. Defaults to
             an empty registry.
+        surface_decorations: Optional pre-populated surface-decoration registry.
+            Defaults to the bundled decoration builders.
         services: Optional explicit service names to register and start.
             When omitted, only the supplied keyboard backend is bound.
         event_handlers: Whether to install bundled application-level event
@@ -130,6 +139,11 @@ def make_test_context(
 
         components = ComponentRegistry()
         register_components(components)
+    if surface_decorations is None:
+        from ..windows.pointer_locator import register_surface_decorations
+
+        surface_decorations = SurfaceDecorationRegistry()
+        register_surface_decorations(surface_decorations)
     context = Context(
         config=config or build_default_app_config(),
         dispatcher=dispatcher,
@@ -137,6 +151,7 @@ def make_test_context(
         state=StateStore(),
         components=components,
         surfaces=surfaces or SurfaceRegistry(),
+        surface_decorations=surface_decorations,
     )
     dispatcher.bind_context(context)
     context_handlers = EventHandlerRegistry()

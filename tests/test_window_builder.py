@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import inspect
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import Qt
@@ -11,10 +13,11 @@ from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
 from axidev_osk.runtime.testing import make_test_context
-from axidev_osk.windows.builder import build_window
+from axidev_osk.windows.builder import RuntimeWindow, build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.surface import register_surfaces
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
+from axidev_osk.windows.pointer_locator import PointerLocator
 
 
 class FakeKeyboardBackend:
@@ -201,6 +204,52 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertEqual(window.minimumSize(), window.minimumSizeHint().expandedTo(window.minimumSize()))
         self.assertLessEqual(window.minimumWidth(), window.width())
         self.assertLessEqual(window.minimumHeight(), window.height())
+
+    def test_default_keyboard_window_installs_configured_pointer_locator(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        locator = window.findChild(PointerLocator, "pointerLocator")
+        self.assertIsNotNone(locator)
+        self.assertIs(locator.parentWidget(), window.centralWidget())
+        self.assertTrue(window.centralWidget().property("pointerLocatorEnabled"))
+
+    def test_window_omits_pointer_locator_when_config_is_none(self) -> None:
+        _app()
+        app_config = build_default_app_config()
+        window_config = replace(app_config.windows[0], decorations=())
+        components = ComponentRegistry()
+        surfaces = SurfaceRegistry()
+        register_components(components)
+        register_surfaces(surfaces)
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=app_config,
+            components=components,
+            surfaces=surfaces,
+        )
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=FakeOverlayController(),
+        ):
+            window = build_window(window_config, context)
+
+        self.addCleanup(window.close)
+        self.assertIsNone(window.findChild(PointerLocator, "pointerLocator"))
+
+    def test_runtime_window_has_no_pointer_locator_branch(self) -> None:
+        source = inspect.getsource(RuntimeWindow.__init__)
+
+        self.assertNotIn("PointerLocator", source)
+        self.assertNotIn("pointerLocatorEnabled", source)
 
     def test_keyboard_window_uses_center_overlay_placement(self) -> None:
         _app()

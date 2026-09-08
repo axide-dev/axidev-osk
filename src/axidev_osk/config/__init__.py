@@ -11,8 +11,10 @@ from .models import (
     KeyConfig,
     LayoutConfig,
     OverlayConfig,
+    PointerLocatorConfig,
     PromptConfig,
     SpacerConfig,
+    SurfaceDecorationConfig,
     SurfaceConfig,
     WindowConfig,
 )
@@ -28,8 +30,10 @@ __all__ = [
     "KeyConfig",
     "LayoutConfig",
     "OverlayConfig",
+    "PointerLocatorConfig",
     "PromptConfig",
     "SpacerConfig",
+    "SurfaceDecorationConfig",
     "SurfaceConfig",
     "WindowConfig",
 ]

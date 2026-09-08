@@ -17,6 +17,7 @@ from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..services.kwin_lock import KWinLockService
 from ..styles.theme import apply_theme
+from ..windows.pointer_locator import register_surface_decorations
 from ..windows.surface import register_surfaces
 from .context import Context
 from .dispatcher import Dispatcher
@@ -28,7 +29,13 @@ from .event_handlers import (
 )
 from .events import ScreenLockStateChanged, WindowCloseRequested
 from .prompt import PromptResolutionWaiter
-from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
+from .registries import (
+    ComponentRegistry,
+    EventHandlerRegistry,
+    ServiceRegistry,
+    SurfaceDecorationRegistry,
+    SurfaceRegistry,
+)
 from .state_store import StateStore
 from .window_manager import WindowManager
 
@@ -77,11 +84,13 @@ class ApplicationRuntime:
         self._state = StateStore()
         self._components = ComponentRegistry()
         self._surfaces = SurfaceRegistry()
+        self._surface_decorations = SurfaceDecorationRegistry()
         self._event_handlers = event_handlers or EventHandlerRegistry()
         if event_handlers is None:
             register_event_handlers(self._event_handlers)
         register_components(self._components)
         register_surfaces(self._surfaces)
+        register_surface_decorations(self._surface_decorations)
         self.context = Context(
             config=self._config,
             dispatcher=self._dispatcher,
@@ -89,6 +98,7 @@ class ApplicationRuntime:
             state=self._state,
             components=self._components,
             surfaces=self._surfaces,
+            surface_decorations=self._surface_decorations,
         )
         self._dispatcher.bind_context(self.context)
         context_handlers = EventHandlerRegistry()

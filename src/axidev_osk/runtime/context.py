@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..config.models import AppConfig
-from .registries import ComponentRegistry, SurfaceRegistry
+from .registries import ComponentRegistry, SurfaceDecorationRegistry, SurfaceRegistry
 from .state_store import StateStore
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ class Context:
         state: Central state store.
         components: Component builder registry.
         surfaces: Surface builder registry.
+        surface_decorations: Surface-decoration attachment registry.
     """
 
     config: AppConfig
@@ -33,3 +34,4 @@ class Context:
     state: StateStore
     components: ComponentRegistry
     surfaces: SurfaceRegistry
+    surface_decorations: SurfaceDecorationRegistry
