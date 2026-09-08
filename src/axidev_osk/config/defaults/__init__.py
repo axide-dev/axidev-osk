@@ -41,9 +41,9 @@ def build_default_app_config() -> AppConfig:
     keyboard_status_id = stable_id(keyboard_surface_id, "component", "keyboard-status", stable_override="component:keyboard-status")
     pointer_locator_id = stable_id(
         keyboard_surface_id,
-        "decoration",
+        "component",
         "pointer-locator",
-        stable_override="decoration:pointer-locator",
+        stable_override="component:pointer-locator",
     )
     keyboard_window = WindowConfig(
         id=keyboard_window_id,
@@ -60,6 +60,16 @@ def build_default_app_config() -> AppConfig:
                 ),
                 KeyboardStatusConfig(id=keyboard_status_id),
             ),
+            background_components=(
+                PointerLocatorConfig(
+                    id=pointer_locator_id,
+                    rows=4,
+                    columns=4,
+                    radius_percent=30,
+                    maximum_opacity_percent=60,
+                    radius_standard_deviations=3,
+                ),
+            ),
             margins=(10, 10, 10, 10),
             spacing=8,
         ),
@@ -71,16 +81,6 @@ def build_default_app_config() -> AppConfig:
             ),
         ),
         chrome=ChromeConfig(enabled=True),
-        decorations=(
-            PointerLocatorConfig(
-                id=pointer_locator_id,
-                rows=4,
-                columns=4,
-                radius_percent=30,
-                maximum_opacity_percent=60,
-                radius_standard_deviations=3,
-            ),
-        ),
         opacity=0.85,
     )
 

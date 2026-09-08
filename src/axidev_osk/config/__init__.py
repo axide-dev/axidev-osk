@@ -14,7 +14,6 @@ from .models import (
     PointerLocatorConfig,
     PromptConfig,
     SpacerConfig,
-    SurfaceDecorationConfig,
     SurfaceConfig,
     WindowConfig,
 )
@@ -33,7 +32,6 @@ __all__ = [
     "PointerLocatorConfig",
     "PromptConfig",
     "SpacerConfig",
-    "SurfaceDecorationConfig",
     "SurfaceConfig",
     "WindowConfig",
 ]
