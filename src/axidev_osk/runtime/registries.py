@@ -13,9 +13,10 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
+from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QWidget
 
-from ..config.models import ComponentConfig, SurfaceConfig
+from ..config.models import ComponentConfig, SurfaceConfig, SurfaceDecorationConfig
 from .commands import RuntimeCommand
 from .events import RuntimeEvent
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 
 ComponentBuilder = Callable[..., QWidget]
 SurfaceBuilder = Callable[[SurfaceConfig, "Context"], QWidget]
+SurfaceDecorationBuilder = Callable[[SurfaceDecorationConfig, QWidget, "Context"], QObject | None]
 RuntimeT = TypeVar("RuntimeT")
 
 
@@ -169,6 +171,46 @@ class SurfaceRegistry:
         if builder is None:
             raise ValueError(f"No surface registered for kind {config.kind!r}")
         return builder(config, context)
+
+
+class SurfaceDecorationRegistry:
+    """Maps surface-decoration kinds to attachment functions."""
+
+    def __init__(self) -> None:
+        self._builders: dict[str, SurfaceDecorationBuilder] = {}
+
+    def register(self, kind: str, builder: SurfaceDecorationBuilder) -> None:
+        """Register one surface-decoration attachment function."""
+
+        self._builders[kind] = builder
+
+    def attach(
+        self,
+        config: SurfaceDecorationConfig,
+        surface: QWidget,
+        context: "Context",
+    ) -> QObject | None:
+        """Attach one configured decoration to a built surface."""
+
+        builder = self._builders.get(config.kind)
+        if builder is None:
+            raise ValueError(f"No surface decoration registered for kind {config.kind!r}")
+        return builder(config, surface, context)
+
+    def attach_all(
+        self,
+        configs: Iterable[SurfaceDecorationConfig],
+        surface: QWidget,
+        context: "Context",
+    ) -> tuple[QObject, ...]:
+        """Attach configured decorations in declaration order."""
+
+        attached: list[QObject] = []
+        for config in configs:
+            decoration = self.attach(config, surface, context)
+            if decoration is not None:
+                attached.append(decoration)
+        return tuple(attached)
 
 
 class ServiceRegistry:

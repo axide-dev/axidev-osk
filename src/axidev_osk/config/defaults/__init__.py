@@ -13,6 +13,7 @@ from ..models import (
     KeyboardGridConfig,
     KeyboardStatusConfig,
     OverlayConfig,
+    PointerLocatorConfig,
     PromptConfig,
     SurfaceConfig,
     WindowConfig,
@@ -38,6 +39,12 @@ def build_default_app_config() -> AppConfig:
     keyboard_surface_id = stable_id(keyboard_window_id, "surface", "keyboard", stable_override="surface:keyboard")
     keyboard_grid_id = stable_id(keyboard_surface_id, "component", "keyboard-grid", stable_override="component:keyboard-grid")
     keyboard_status_id = stable_id(keyboard_surface_id, "component", "keyboard-status", stable_override="component:keyboard-status")
+    pointer_locator_id = stable_id(
+        keyboard_surface_id,
+        "decoration",
+        "pointer-locator",
+        stable_override="decoration:pointer-locator",
+    )
     keyboard_window = WindowConfig(
         id=keyboard_window_id,
         title="axidev OSK",
@@ -64,6 +71,16 @@ def build_default_app_config() -> AppConfig:
             ),
         ),
         chrome=ChromeConfig(enabled=True),
+        decorations=(
+            PointerLocatorConfig(
+                id=pointer_locator_id,
+                rows=4,
+                columns=4,
+                radius_percent=30,
+                maximum_opacity_percent=60,
+                radius_standard_deviations=3,
+            ),
+        ),
         opacity=0.85,
     )
 

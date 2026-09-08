@@ -142,6 +142,12 @@ def build_stylesheet() -> str:
     disabled_text = palette.disabled_text.name()
     disabled_fill = palette.disabled_fill.name()
     disabled_edge = palette.disabled_edge.name()
+    locator_shell_bar = _rgba(palette.shell_bar, 153)
+    locator_key_fill = _rgba(palette.key_fill, 153)
+    locator_key_hover = _rgba(palette.key_hover, 153)
+    locator_key_pressed = _rgba(palette.key_pressed, 153)
+    locator_active_fill = _rgba(palette.active_fill, 153)
+    locator_disabled_fill = _rgba(palette.disabled_fill, 153)
 
     return f"""
         QMainWindow {{
@@ -308,6 +314,44 @@ def build_stylesheet() -> str:
             color: {disabled_text};
             background-color: {disabled_fill};
             border-color: {disabled_edge};
+        }}
+        QWidget[pointerLocatorEnabled="true"] QPushButton {{
+            background-color: qlineargradient(
+                x1: 0,
+                y1: 0,
+                x2: 1,
+                y2: 1,
+                stop: 0 {locator_shell_bar},
+                stop: 1 {locator_key_fill}
+            );
+        }}
+        QWidget[pointerLocatorEnabled="true"] QPushButton:hover {{
+            background-color: qlineargradient(
+                x1: 0,
+                y1: 0,
+                x2: 1,
+                y2: 1,
+                stop: 0 {locator_key_hover},
+                stop: 1 {locator_active_fill}
+            );
+        }}
+        QWidget[pointerLocatorEnabled="true"] QPushButton:pressed,
+        QWidget[pointerLocatorEnabled="true"] QPushButton[interactionState="pressed"],
+        QWidget[pointerLocatorEnabled="true"] QPushButton[interactionState="latched_pressed"] {{
+            background-color: {locator_key_pressed};
+        }}
+        QWidget[pointerLocatorEnabled="true"] QPushButton[latched="true"] {{
+            background-color: qlineargradient(
+                x1: 0,
+                y1: 0,
+                x2: 1,
+                y2: 1,
+                stop: 0 {locator_active_fill},
+                stop: 1 {locator_key_hover}
+            );
+        }}
+        QWidget[pointerLocatorEnabled="true"] QPushButton:disabled {{
+            background-color: {locator_disabled_fill};
         }}
         QMessageBox QLabel#qt_msgbox_label {{
             color: {text};

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -55,6 +56,43 @@ class ChromeConfig:
     """
 
     enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PointerLocatorConfig:
+    """Color-grid pointer feedback configured for one window.
+
+    Attributes:
+        id: Deterministic decoration ID.
+        rows: Number of color regions along the vertical axis.
+        columns: Number of color regions along the horizontal axis.
+        radius_percent: Glow radius as a percentage of the surface's shorter side.
+        maximum_opacity_percent: Glow opacity at the pointer position.
+        radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
+    """
+
+    id: str
+    rows: int
+    columns: int
+    radius_percent: float
+    maximum_opacity_percent: float
+    radius_standard_deviations: float
+    kind: Literal["pointer-locator"] = "pointer-locator"
+
+    def __post_init__(self) -> None:
+        """Reject grids that cannot define a visible color region."""
+
+        if self.rows <= 0 or self.columns <= 0:
+            raise ValueError("Pointer locator rows and columns must be positive")
+        if not 0.0 < self.radius_percent <= 100.0:
+            raise ValueError("Pointer locator radius percent must be greater than 0 and at most 100")
+        if not 0.0 < self.maximum_opacity_percent <= 100.0:
+            raise ValueError("Pointer locator maximum opacity percent must be greater than 0 and at most 100")
+        if not math.isfinite(self.radius_standard_deviations) or self.radius_standard_deviations < 0.1:
+            raise ValueError("Pointer locator radius standard deviations must be finite and at least 0.1")
+
+
+SurfaceDecorationConfig = PointerLocatorConfig
 
 
 
@@ -299,6 +337,7 @@ class WindowConfig:
         surface: Root surface content declaration.
         overlay: Overlay behavior for this window.
         chrome: Optional custom chrome policy.
+        decorations: Optional surface decorations attached through the runtime registry.
         opacity: Normal window opacity from zero through one.
     """
 
@@ -307,6 +346,7 @@ class WindowConfig:
     surface: SurfaceConfig
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     chrome: ChromeConfig = field(default_factory=ChromeConfig)
+    decorations: tuple[SurfaceDecorationConfig, ...] = ()
     opacity: float = 1.0
 
     def __post_init__(self) -> None:
@@ -314,6 +354,7 @@ class WindowConfig:
 
         if not 0.0 <= self.opacity <= 1.0:
             raise ValueError("Window opacity must be between 0.0 and 1.0")
+        validate_unique_ids((decoration.id for decoration in self.decorations), scope=f"window {self.id!r} decorations")
 
 
 @dataclass(frozen=True, slots=True)
