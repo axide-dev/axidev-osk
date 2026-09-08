@@ -2,56 +2,41 @@
 
 from __future__ import annotations
 
-import logging
 import math
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from ..config.models import PointerLocatorConfig, SurfaceDecorationConfig
-from .surface import SurfaceDecorationHost
-
-if TYPE_CHECKING:
-    from ..runtime.context import Context
-    from ..runtime.registries import SurfaceDecorationRegistry
-
-_logger = logging.getLogger(__name__)
+from ..config.models import ComponentConfig, PointerLocatorConfig
+from ..runtime.context import Context
+from ..runtime.registries import ComponentRegistry
 
 _GRADIENT_SEGMENTS = 32
 
 
-def register_surface_decorations(registry: "SurfaceDecorationRegistry") -> None:
-    """Register the pointer field as a reusable surface decoration."""
+def register(registry: ComponentRegistry) -> None:
+    """Register the pointer locator as a reusable background component."""
 
-    registry.register("pointer-locator", attach_pointer_locator)
+    registry.register("pointer-locator", build_pointer_locator_component)
 
 
-def attach_pointer_locator(
-    config: SurfaceDecorationConfig,
-    surface: QWidget,
-    context: "Context",
-) -> QObject | None:
-    """Attach pointer feedback to a compatible surface or warn and skip it."""
+def build_pointer_locator_component(
+    config: ComponentConfig,
+    context: Context,
+    *,
+    host: QWidget | None = None,
+) -> QWidget:
+    """Build pointer feedback for a root surface background."""
 
     del context
     if not isinstance(config, PointerLocatorConfig):
         raise TypeError(f"Expected PointerLocatorConfig, got {type(config).__name__}")
-    if not isinstance(surface, SurfaceDecorationHost):
-        surface_id = surface.property("componentId") or surface.objectName() or type(surface).__name__
-        _logger.warning(
-            "Surface decoration %s (%s) was skipped because surface %s does not support background decorations",
-            config.id,
-            config.kind,
-            surface_id,
-        )
-        return None
+    if host is None:
+        raise RuntimeError("Pointer locator components require a root surface host")
 
-    surface.setProperty("pointerLocatorEnabled", True)
-    locator = PointerLocator(config, surface)
-    surface.install_background_decoration(locator)
-    return locator
+    host.setProperty("pointerLocatorEnabled", True)
+    return PointerLocator(config, host)
 
 
 def _circular_distance(first: int, second: int, count: int) -> int:
@@ -176,15 +161,15 @@ class PointerLocator(QWidget):
         self._color = QColor(self._palette[0])
         self._cursor_position = QPoint()
         self._pointer_inside = False
-        self._window = parent.window()
 
         self.setObjectName("pointerLocator")
         self.setProperty("componentType", "pointer-locator")
+        self.setProperty("componentId", config.id)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setGeometry(parent.rect())
         self.hide()
-        self._window.installEventFilter(self)
+        self._host.installEventFilter(self)
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -212,8 +197,8 @@ class PointerLocator(QWidget):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Use real window boundary events instead of stale Wayland coordinates."""
 
-        window = getattr(self, "_window", None)
-        if watched is window:
+        host = getattr(self, "_host", None)
+        if watched is host:
             if event.type() == QEvent.Type.Enter:
                 self._pointer_inside = True
                 self._poll_cursor()

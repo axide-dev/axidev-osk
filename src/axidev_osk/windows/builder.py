@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QSize
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -44,7 +44,6 @@ class RuntimeWindow(QMainWindow):
         self._context = context
         self._quit_controller_managed = False
         self._chrome_widgets: OverlayChromeWidgets | None = None
-        self._surface_decorations: tuple[QObject, ...] = ()
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
@@ -66,11 +65,6 @@ class RuntimeWindow(QMainWindow):
                         on_resize=self._overlay.resize_by,
                     )
             self.setCentralWidget(central)
-            self._surface_decorations = context.surface_decorations.attach_all(
-                config.decorations,
-                central,
-                context,
-            )
             self._opacity = WindowOpacityController(self)
             self.set_visual_opacity(config.opacity)
             self.apply_startup_size(minimum_size=config.surface.minimum_size)

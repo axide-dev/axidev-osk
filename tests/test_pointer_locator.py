@@ -7,14 +7,14 @@ from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
-from axidev_osk.config.defaults import build_default_app_config
-from axidev_osk.config.models import PointerLocatorConfig
-from axidev_osk.windows.pointer_locator import (
+from axidev_osk.components.pointer_locator import (
     PointerLocator,
     build_pointer_palette,
     gaussian_opacity,
     interpolate_pointer_color,
 )
+from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.config.models import PointerLocatorConfig
 
 
 def _app() -> QApplication:
@@ -26,7 +26,7 @@ def _app() -> QApplication:
 
 def _locator_config(**overrides: object) -> PointerLocatorConfig:
     values = {
-        "id": "decoration:test-pointer-locator",
+        "id": "component:test-pointer-locator",
         "rows": 4,
         "columns": 4,
         "radius_percent": 30,
@@ -39,10 +39,10 @@ def _locator_config(**overrides: object) -> PointerLocatorConfig:
 
 class PointerLocatorPaletteTests(unittest.TestCase):
     def test_default_keyboard_uses_four_by_four_locator(self) -> None:
-        decorations = build_default_app_config().windows[0].decorations
+        background_components = build_default_app_config().windows[0].surface.background_components
 
-        self.assertEqual(len(decorations), 1)
-        config = decorations[0]
+        self.assertEqual(len(background_components), 1)
+        config = background_components[0]
         self.assertIsInstance(config, PointerLocatorConfig)
         self.assertEqual(config.rows, 4)
         self.assertEqual(config.columns, 4)
@@ -236,7 +236,7 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         self.assertTrue(locator.isVisible())
 
         app.sendEvent(host, QEvent(QEvent.Type.Leave))
-        with patch("axidev_osk.windows.pointer_locator.QCursor.pos", return_value=inside):
+        with patch("axidev_osk.components.pointer_locator.QCursor.pos", return_value=inside):
             locator._poll_cursor()
             self.assertFalse(locator.isVisible())
             app.sendEvent(host, QEvent(QEvent.Type.Enter))
