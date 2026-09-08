@@ -10,6 +10,8 @@ from .commands import (
     KeyboardRegisterKeySpec,
     KeyboardKeyUp,
     KeyboardSyncLatchedKey,
+    SecureInputPanelPrepare,
+    SecureInputPanelRelease,
     StateSet,
     WindowClose,
     WindowHide,
@@ -70,6 +72,14 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     """Register application-level runtime handlers in deterministic order."""
 
     registry.register_command_handler(
+        SecureInputPanelPrepare,
+        lambda runtime: lambda command: runtime._prepare_secure_input_panel(),
+    )
+    registry.register_command_handler(
+        SecureInputPanelRelease,
+        lambda runtime: lambda command: runtime._release_secure_input_panel(),
+    )
+    registry.register_command_handler(
         WindowShow,
         lambda runtime: lambda command: runtime._window_manager.show(command.window_id),
     )
@@ -94,7 +104,6 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         lambda runtime: lambda command: runtime._app.exit(command.exit_code),
     )
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
-    registry.register_event_handler(lambda runtime: runtime._handle_screen_lock_state_changed)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
     registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
 
