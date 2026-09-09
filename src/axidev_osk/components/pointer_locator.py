@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import statistics
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
@@ -13,6 +14,7 @@ from ..runtime.context import Context
 from ..runtime.registries import ComponentRegistry
 
 _GRADIENT_SEGMENTS = 32
+_GAP_COLOR = QColor("#242424")
 
 
 def register(registry: ComponentRegistry) -> None:
@@ -39,100 +41,112 @@ def build_pointer_locator_component(
     return PointerLocator(config, host)
 
 
-def _circular_distance(first: int, second: int, count: int) -> int:
-    distance = abs(first - second) % count
-    return min(distance, count - distance)
+def _rectangle_distance_squared(first: QRect, second: QRect) -> int:
+    horizontal = max(first.left() - second.right(), second.left() - first.right(), 0)
+    vertical = max(first.top() - second.bottom(), second.top() - first.bottom(), 0)
+    return horizontal**2 + vertical**2
 
 
-def _palette_stride(rows: int, columns: int) -> int:
-    """Choose a wheel traversal that separates both grid axes."""
+def _build_proximity_graph(rectangles: tuple[QRect, ...]) -> tuple[frozenset[int], ...]:
+    if not rectangles:
+        return ()
 
-    count = rows * columns
-    if count == 1:
-        return 1
-
-    best_stride = 1
-    best_score = (-1, -1)
-    for stride in range(1, count):
-        if math.gcd(stride, count) != 1:
-            continue
-        distances: list[int] = []
-        weighted_distance = 0
-        if columns > 1:
-            horizontal = _circular_distance(0, stride, count)
-            distances.append(horizontal)
-            weighted_distance += horizontal * rows * (columns - 1)
-        if rows > 1:
-            vertical = _circular_distance(0, columns * stride, count)
-            distances.append(vertical)
-            weighted_distance += vertical * columns * (rows - 1)
-        score = (min(distances), weighted_distance)
-        if score > best_score:
-            best_stride = stride
-            best_score = score
-    return best_stride
+    typical_size = statistics.median(min(rect.width(), rect.height()) for rect in rectangles)
+    nearby_distance_squared = (typical_size * 2.25) ** 2
+    neighbors = [set() for _ in rectangles]
+    for index, rectangle in enumerate(rectangles):
+        for other_index, other in enumerate(rectangles[:index]):
+            if _rectangle_distance_squared(rectangle, other) <= nearby_distance_squared:
+                neighbors[index].add(other_index)
+                neighbors[other_index].add(index)
+    return tuple(frozenset(items) for items in neighbors)
 
 
-def build_pointer_palette(rows: int, columns: int) -> tuple[QColor, ...]:
-    """Build a deterministic saturated hue wheel arranged for a 2D grid."""
+def _greedy_dsatur_coloring(graph: tuple[frozenset[int], ...]) -> tuple[int, ...]:
+    colors = [-1] * len(graph)
+    while -1 in colors:
+        vertex = max(
+            (index for index, color in enumerate(colors) if color < 0),
+            key=lambda index: (
+                len({colors[neighbor] for neighbor in graph[index] if colors[neighbor] >= 0}),
+                len(graph[index]),
+                -index,
+            ),
+        )
+        forbidden = {colors[neighbor] for neighbor in graph[vertex] if colors[neighbor] >= 0}
+        colors[vertex] = next(color for color in range(len(graph)) if color not in forbidden)
+    return tuple(colors)
 
-    if rows <= 0 or columns <= 0:
-        raise ValueError("Pointer palette rows and columns must be positive")
-    count = rows * columns
-    stride = _palette_stride(rows, columns)
+
+def _temperature_palette(*, warm: bool, color_count: int) -> tuple[QColor, ...]:
+    """Build deterministic vivid colors from one side of the hue wheel."""
+
+    if color_count <= 0:
+        return ()
+    start = 330.0 if warm else 150.0
+    span = 90.0 if warm else 120.0
     return tuple(
-        QColor.fromHsvF(((position * stride) % count) / count, 1.0, 1.0)
-        for position in range(count)
+        QColor.fromHsvF(
+            ((start + span * index / color_count) % 360.0) / 360.0,
+            1.0,
+            1.0 if index % 2 == 0 else 0.7,
+        )
+        for index in range(color_count)
     )
 
 
-def interpolate_pointer_color(
-    palette: tuple[QColor, ...],
-    *,
-    rows: int,
-    columns: int,
-    x: float,
-    y: float,
-    width: float,
-    height: float,
-) -> QColor:
-    """Interpolate the four nearest color-region centers at one position."""
+def _checkerboard_parities(rectangles: tuple[QRect, ...]) -> tuple[int, ...]:
+    typical_size = statistics.median(min(rect.width(), rect.height()) for rect in rectangles)
+    rows: list[list[int]] = []
+    for index in sorted(
+        range(len(rectangles)),
+        key=lambda item: (rectangles[item].center().y(), rectangles[item].center().x()),
+    ):
+        if not rows or abs(rectangles[index].center().y() - rectangles[rows[-1][0]].center().y()) > typical_size / 2:
+            rows.append([index])
+        else:
+            rows[-1].append(index)
 
-    if len(palette) != rows * columns:
-        raise ValueError("Pointer palette size must match rows and columns")
-    if width <= 0 or height <= 0:
-        return QColor(palette[0])
-
-    grid_x = min(columns - 1.0, max(0.0, x * columns / width - 0.5))
-    grid_y = min(rows - 1.0, max(0.0, y * rows / height - 0.5))
-    left = int(math.floor(grid_x))
-    top = int(math.floor(grid_y))
-    right = min(columns - 1, left + 1)
-    bottom = min(rows - 1, top + 1)
-    x_weight = grid_x - left
-    y_weight = grid_y - top
-
-    top_color = _mix_color(palette[top * columns + left], palette[top * columns + right], x_weight)
-    bottom_color = _mix_color(
-        palette[bottom * columns + left],
-        palette[bottom * columns + right],
-        x_weight,
-    )
-    return _mix_color(top_color, bottom_color, y_weight)
+    parities = [0] * len(rectangles)
+    for row_index, row in enumerate(rows):
+        row.sort(key=lambda index: rectangles[index].center().x())
+        for column_index, index in enumerate(row):
+            parities[index] = (row_index + column_index) % 2
+    return tuple(parities)
 
 
-def _mix_color(first: QColor, second: QColor, weight: float) -> QColor:
-    if weight <= 0.0:
-        return QColor(first)
-    if weight >= 1.0:
-        return QColor(second)
-    inverse = 1.0 - weight
-    return QColor.fromRgbF(
-        first.redF() * inverse + second.redF() * weight,
-        first.greenF() * inverse + second.greenF() * weight,
-        first.blueF() * inverse + second.blueF() * weight,
-        first.alphaF() * inverse + second.alphaF() * weight,
-    )
+def build_component_palette(rectangles: tuple[QRect, ...]) -> tuple[QColor, ...]:
+    """Assign deterministic warm/cold checkerboard colors to components."""
+
+    if not rectangles:
+        return ()
+
+    graph = _build_proximity_graph(rectangles)
+    parities = _checkerboard_parities(rectangles)
+    colors = [QColor() for _ in rectangles]
+    partition_colorings: list[tuple[list[int], tuple[int, ...]]] = []
+    for parity in (0, 1):
+        vertices = [index for index, value in enumerate(parities) if value == parity]
+        if not vertices:
+            partition_colorings.append((vertices, ()))
+            continue
+        lookup = {vertex: index for index, vertex in enumerate(vertices)}
+        subgraph = tuple(
+            frozenset(lookup[neighbor] for neighbor in graph[vertex] if neighbor in lookup)
+            for vertex in vertices
+        )
+        coloring = _greedy_dsatur_coloring(subgraph)
+        partition_colorings.append((vertices, coloring))
+
+    warm_count = max(partition_colorings[0][1], default=-1) + 1
+    cold_count = max(partition_colorings[1][1], default=-1) + 1
+    warm_palette = _temperature_palette(warm=True, color_count=warm_count)
+    cold_palette = _temperature_palette(warm=False, color_count=cold_count)
+    for parity, (vertices, coloring) in enumerate(partition_colorings):
+        palette = warm_palette if parity == 0 else cold_palette
+        for vertex, color in zip(vertices, coloring, strict=True):
+            colors[vertex] = QColor(palette[color])
+    return tuple(colors)
 
 
 def gaussian_opacity(
@@ -157,10 +171,11 @@ class PointerLocator(QWidget):
         super().__init__(parent)
         self._host = parent
         self._config = config
-        self._palette = build_pointer_palette(config.rows, config.columns)
-        self._color = QColor(self._palette[0])
+        self._color = QColor.fromHsvF(0.0, 1.0, 1.0)
         self._cursor_position = QPoint()
         self._pointer_inside = False
+        self._color_targets: tuple[tuple[QWidget, QRect, QColor], ...] = ()
+        self._color_target_signature: tuple[tuple[int, int, int, int, int], ...] = ()
 
         self.setObjectName("pointerLocator")
         self.setProperty("componentType", "pointer-locator")
@@ -169,12 +184,11 @@ class PointerLocator(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setGeometry(parent.rect())
         self.hide()
-        self._host.installEventFilter(self)
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._poll_cursor)
-        self._timer.start()
+        self._host.installEventFilter(self)
 
     @property
     def current_color(self) -> QColor:
@@ -190,6 +204,7 @@ class PointerLocator(QWidget):
 
     def _poll_cursor(self) -> None:
         if not self._pointer_inside:
+            self._timer.stop()
             self.hide()
             return
         self.update_from_global_position(QCursor.pos())
@@ -201,9 +216,11 @@ class PointerLocator(QWidget):
         if watched is host:
             if event.type() == QEvent.Type.Enter:
                 self._pointer_inside = True
+                self._timer.start()
                 self._poll_cursor()
             elif event.type() in {QEvent.Type.Leave, QEvent.Type.Hide}:
                 self._pointer_inside = False
+                self._timer.stop()
                 self.hide()
         return super().eventFilter(watched, event)
 
@@ -211,6 +228,7 @@ class PointerLocator(QWidget):
         """Update ring visibility, position, and color from a screen point."""
 
         if not self._host.isVisible():
+            self._timer.stop()
             self.hide()
             return
 
@@ -219,20 +237,41 @@ class PointerLocator(QWidget):
             self.hide()
             return
 
-        self._color = interpolate_pointer_color(
-            self._palette,
-            rows=self._config.rows,
-            columns=self._config.columns,
-            x=local_position.x(),
-            y=local_position.y(),
-            width=self._host.width(),
-            height=self._host.height(),
+        self._refresh_color_targets()
+        target = next(
+            (target for target in self._color_targets if target[1].contains(local_position)),
+            None,
         )
+        self._color = QColor(target[2] if target is not None else _GAP_COLOR)
         self._cursor_position = local_position
         if self.geometry() != self._host.rect():
             self.setGeometry(self._host.rect())
         self.update()
         self.show()
+
+    def _refresh_color_targets(self) -> None:
+        widgets = [
+            widget
+            for widget in self._host.findChildren(QWidget)
+            if widget.property("componentType") in {"button", "key"} and widget.isVisibleTo(self._host)
+        ]
+        positioned = [
+            (
+                widget,
+                QRect(widget.mapTo(self._host, QPoint()), widget.size()),
+            )
+            for widget in widgets
+            if widget.width() > 0 and widget.height() > 0
+        ]
+        positioned.sort(key=lambda item: (item[1].center().y(), item[1].center().x()))
+        signature = tuple((id(widget), *rect.getRect()) for widget, rect in positioned)
+        if signature == self._color_target_signature:
+            return
+        colors = build_component_palette(tuple(rect for _, rect in positioned))
+        self._color_targets = tuple(
+            (widget, rect, color) for (widget, rect), color in zip(positioned, colors, strict=True)
+        )
+        self._color_target_signature = signature
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
         """Paint the configured Gaussian glow behind surface controls."""

@@ -60,30 +60,24 @@ class ChromeConfig:
 
 @dataclass(frozen=True, slots=True)
 class PointerLocatorConfig:
-    """Color-grid pointer feedback configured as a surface component.
+    """Component-aware pointer feedback configured as a surface component.
 
     Attributes:
         id: Deterministic component ID.
-        rows: Number of color regions along the vertical axis.
-        columns: Number of color regions along the horizontal axis.
         radius_percent: Glow radius as a percentage of the surface's shorter side.
         maximum_opacity_percent: Glow opacity at the pointer position.
         radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
     """
 
     id: str
-    rows: int
-    columns: int
     radius_percent: float
     maximum_opacity_percent: float
     radius_standard_deviations: float
     kind: Literal["pointer-locator"] = "pointer-locator"
 
     def __post_init__(self) -> None:
-        """Reject grids that cannot define a visible color region."""
+        """Reject values that cannot define a visible glow."""
 
-        if self.rows <= 0 or self.columns <= 0:
-            raise ValueError("Pointer locator rows and columns must be positive")
         if not 0.0 < self.radius_percent <= 100.0:
             raise ValueError("Pointer locator radius percent must be greater than 0 and at most 100")
         if not 0.0 < self.maximum_opacity_percent <= 100.0:
