@@ -231,6 +231,32 @@ class NativeAdapterTests(unittest.TestCase):
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(changed), managed)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(changed), original)
 
+    def test_plasma_lock_screen_patch_migrates_v0173_block(self) -> None:
+        original = (
+            "Item {\n"
+            "    MouseArea {\n"
+            "        id: lockScreenRoot\n"
+            "    }\n"
+            "    RowLayout {\n"
+            "            PlasmaComponents3.ToolButton {\n"
+            "                id: virtualKeyboardButton\n"
+            "            }\n"
+            "    }\n"
+            "}\n"
+        )
+        v0173 = original.replace(
+            "        id: lockScreenRoot\n",
+            "        id: lockScreenRoot\n\n" + linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH,
+        )
+
+        managed = linux_greeter._plasma_lock_screen_ui_text(v0173)
+
+        self.assertNotIn(linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH, managed)
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_IMPORT_PATCH, managed)
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
+        self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH, managed)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(v0173), original)
+
     def test_plasma_lock_screen_patch_rejects_incomplete_markers(self) -> None:
         changed = (
             "Item {\n"
@@ -355,6 +381,116 @@ class NativeAdapterTests(unittest.TestCase):
             self.assertFalse(input_method.exists())
             self.assertFalse(kwin_dropin.exists())
             self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), original_lock_screen_ui)
+
+    def test_v0173_plasma_remove_keeps_working(self) -> None:
+        launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+        state = {"schema": 1, "manager": "plasma-login", "account": "plasmalogin"}
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            supervisor = root / "supervisor"
+            service = root / "service"
+            wants = root / "wants"
+            lock_screen_ui = root / "LockScreenUi.qml"
+            original_lock_screen_ui = "Item {\n    id: lockScreenRoot\n}\n"
+            with (
+                patch.object(linux_greeter, "NATIVE_SUPERVISOR_PATH", supervisor),
+                patch.object(linux_greeter, "PLASMA_SERVICE_PATH", service),
+                patch.object(linux_greeter, "PLASMA_WANTS_PATH", wants),
+                patch.object(linux_greeter, "PLASMA_LOCK_SCREEN_UI_PATH", lock_screen_ui),
+            ):
+                supervisor.write_text(
+                    linux_greeter._native_supervisor_text(launcher), encoding="utf-8"
+                )
+                service.write_text(linux_greeter._plasma_service_text(), encoding="utf-8")
+                wants.symlink_to(service)
+                lock_screen_ui.write_text(
+                    original_lock_screen_ui.replace(
+                        "    id: lockScreenRoot\n",
+                        "    id: lockScreenRoot\n\n"
+                        + linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH,
+                    ),
+                    encoding="utf-8",
+                )
+
+                linux_greeter._remove_plasma(launcher, state)
+
+            self.assertFalse(supervisor.exists())
+            self.assertFalse(service.exists())
+            self.assertFalse(wants.exists())
+            self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), original_lock_screen_ui)
+
+    def test_v0173_plasma_install_migrates_owned_files_and_qml(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            supervisor = root / "supervisor"
+            service = root / "service"
+            wants = root / "wants"
+            input_method = root / "axidev-osk-input-panel.desktop"
+            kwin_dropin = root / "50-axidev-osk.conf"
+            kwin_unit = root / "plasma-login-kwin_wayland.service"
+            kwinrc = root / "kwinrc"
+            lock_screen_ui = root / "LockScreenUi.qml"
+            state_path = root / "greeter.json"
+            launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+            account = linux.Account("plasmalogin", 981, 981, root)
+            original_lock_screen_ui = (
+                "Item {\n"
+                "    MouseArea {\n"
+                "        id: lockScreenRoot\n"
+                "    }\n"
+                "    RowLayout {\n"
+                "            PlasmaComponents3.ToolButton {\n"
+                "                id: virtualKeyboardButton\n"
+                "            }\n"
+                "    }\n"
+                "}\n"
+            )
+            v0173_lock_screen_ui = original_lock_screen_ui.replace(
+                "        id: lockScreenRoot\n",
+                "        id: lockScreenRoot\n\n"
+                + linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH,
+            )
+            kwin_unit.write_text(self.PLASMA_KWIN_UNIT, encoding="utf-8")
+            lock_screen_ui.write_text(v0173_lock_screen_ui, encoding="utf-8")
+
+            with (
+                patch.object(linux_greeter, "NATIVE_SUPERVISOR_PATH", supervisor),
+                patch.object(linux_greeter, "PLASMA_SERVICE_PATH", service),
+                patch.object(linux_greeter, "PLASMA_WANTS_PATH", wants),
+                patch.object(linux_greeter, "PLASMA_INPUT_METHOD_PATH", input_method),
+                patch.object(linux_greeter, "PLASMA_KWIN_DROPIN_PATH", kwin_dropin),
+                patch.object(linux_greeter, "PLASMA_KWIN_UNIT_PATHS", (kwin_unit,)),
+                patch.object(linux_greeter, "KWIN_CONFIG_PATH", kwinrc),
+                patch.object(linux_greeter, "PLASMA_LOCK_SCREEN_UI_PATH", lock_screen_ui),
+                patch.object(linux_greeter, "STATE_PATH", state_path),
+                patch.object(linux_greeter, "_plasma_version", return_value=(6, 7, 4)),
+                patch.object(linux, "_resolve_account", return_value=account),
+            ):
+                supervisor.write_text(
+                    linux_greeter._native_supervisor_text(launcher), encoding="utf-8"
+                )
+                service.write_text(linux_greeter._plasma_service_text(), encoding="utf-8")
+                wants.symlink_to(service)
+                prepared_account, details = linux_greeter._prepare_plasma(launcher)
+                details["v0173_plasma"] = True
+                linux_greeter._install_manager(
+                    "plasma-login",
+                    linux_greeter._manager_adapter("plasma-login"),
+                    prepared_account,
+                    launcher,
+                    details,
+                )
+
+            managed_lock_screen_ui = lock_screen_ui.read_text(encoding="utf-8")
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertFalse(supervisor.exists())
+            self.assertFalse(service.exists())
+            self.assertFalse(wants.exists())
+            self.assertTrue(input_method.is_file())
+            self.assertTrue(kwin_dropin.is_file())
+            self.assertNotIn(linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH, managed_lock_screen_ui)
+            self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed_lock_screen_ui)
+            self.assertIn("original_kwinrc", state)
 
     def test_lightdm_uses_native_greeter_wrapper(self) -> None:
         wrapper = linux_greeter._lightdm_wrapper_text(Path("/opt/axidev-osk/bin/axidev-osk"))
