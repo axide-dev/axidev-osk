@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -12,12 +13,13 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.hot_corner.controller import (
     _configure_hot_corner_window,
     HotCornerConfig,
+    HotCornerOverlayController,
     HotCornerWindowToggleController,
     ScreenCorner,
 )
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.windows.overlay import layer_shell
-from axidev_osk.windows.overlay.layer_shell import ANCHOR_LEFT, ANCHOR_TOP
+from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
 from axidev_osk.windows.overlay.always_on_top import (
     AlwaysOnTopWindowConfig,
     AlwaysOnTopWindowController,
@@ -153,13 +155,36 @@ class FakeOverlayController:
         return True
 
 
+class FakeSignal:
+    def __init__(self) -> None:
+        self.callbacks: list[Callable[[QRect], None]] = []
+
+    def connect(self, callback: Callable[[QRect], None]) -> None:
+        self.callbacks.append(callback)
+
+    def emit(self, geometry: QRect) -> None:
+        for callback in self.callbacks:
+            callback(geometry)
+
+
 class FakeScreen:
-    def __init__(self, geometry: QRect, name: str = "Virtual-1") -> None:
+    def __init__(
+        self,
+        geometry: QRect,
+        name: str = "Virtual-1",
+        available_geometry: QRect | None = None,
+    ) -> None:
         self._geometry = QRect(geometry)
+        self._available_geometry = QRect(available_geometry or geometry)
         self._name = name
+        self.geometryChanged = FakeSignal()
+        self.availableGeometryChanged = FakeSignal()
 
     def geometry(self) -> QRect:
         return QRect(self._geometry)
+
+    def availableGeometry(self) -> QRect:
+        return QRect(self._available_geometry)
 
     def name(self) -> str:
         return self._name
@@ -587,6 +612,27 @@ class HotCornerControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dispatcher = Dispatcher()
 
+    def test_wayland_helper_uses_explicit_corner_anchors(self) -> None:
+        window = FakeWindow()
+        with patch.object(
+            HotCornerOverlayController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch(
+            "axidev_osk.hot_corner.controller.apply_wayland_layer_shell",
+            return_value=True,
+        ) as apply_layer_shell:
+            overlay = HotCornerOverlayController(window)
+            overlay.move_to_anchored(
+                QPoint(800, 200),
+                anchors=ANCHOR_RIGHT | ANCHOR_TOP,
+                screen_geometry=QRect(100, 200, 800, 600),
+            )
+
+        self.assertEqual(window.moves[-1], (800, 200))
+        self.assertEqual(apply_layer_shell.call_args.kwargs["anchors"], ANCHOR_RIGHT | ANCHOR_TOP)
+        self.assertEqual(apply_layer_shell.call_args.kwargs["margins"], QMargins(0, 0, 0, 0))
+
     def test_show_indicator_uses_overlay_controller_for_manual_position(self) -> None:
         overlay = FakeOverlayController()
         with patch(
@@ -596,7 +642,10 @@ class HotCornerControllerTests(unittest.TestCase):
             controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
-            screen = FakeScreen(QRect(100, 200, 800, 600))
+            screen = FakeScreen(
+                QRect(100, 200, 800, 600),
+                available_geometry=QRect(100, 240, 800, 560),
+            )
             move_count = len(overlay.moves)
             with patch.object(
                 controller._indicator,
@@ -610,8 +659,9 @@ class HotCornerControllerTests(unittest.TestCase):
 
             self.assertEqual(len(overlay.moves), move_count + 1)
             position, geometry = overlay.moves[-1]
-            self.assertEqual(position, QPoint(834, 214))
-            self.assertEqual(geometry, QRect(100, 200, 800, 600))
+            self.assertEqual(position, QPoint(834, 254))
+            self.assertEqual(geometry, QRect(100, 240, 800, 560))
+            self.assertEqual(overlay.anchored_moves[-1][1], ANCHOR_RIGHT | ANCHOR_TOP)
             self.assertEqual(overlay.prepare_show_calls, 0)
             self.assertEqual(overlay.handle_show_calls, 1)
             show_indicator.assert_called_once()
@@ -640,6 +690,32 @@ class HotCornerControllerTests(unittest.TestCase):
                 controller._sensor_position(geometry, ScreenCorner.BOTTOM_LEFT),
                 QPoint(100, 776),
             )
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
+    def test_cursor_polling_uses_available_screen_corners(self) -> None:
+        overlay = FakeOverlayController()
+        with patch(
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
+            return_value=overlay,
+        ):
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
+
+        try:
+            screen = FakeScreen(
+                QRect(100, 200, 800, 600),
+                available_geometry=QRect(100, 240, 800, 560),
+            )
+            with patch(
+                "axidev_osk.hot_corner.controller.QGuiApplication.screenAt",
+                return_value=screen,
+            ):
+                self.assertIsNone(controller._detect_corner(QPoint(899, 200)))
+                self.assertEqual(
+                    controller._detect_corner(QPoint(899, 240)),
+                    ScreenCorner.TOP_RIGHT,
+                )
         finally:
             controller.stop()
             controller._indicator.close()
@@ -686,11 +762,52 @@ class HotCornerControllerTests(unittest.TestCase):
             controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
 
         try:
-            self.assertEqual(overlay.anchored_moves, [])
+            self.assertEqual(len(overlay.anchored_moves), len(self.app.screens()) * len(ScreenCorner))
             self.assertEqual(len(overlay.moves), len(self.app.screens()) * len(ScreenCorner))
             self.assertTrue(controller._sensor_handles)
+            self.assertEqual(
+                {anchors for _position, anchors, _geometry in overlay.anchored_moves},
+                {
+                    ANCHOR_LEFT | ANCHOR_TOP,
+                    ANCHOR_RIGHT | ANCHOR_TOP,
+                    ANCHOR_LEFT | ANCHOR_BOTTOM,
+                    ANCHOR_RIGHT | ANCHOR_BOTTOM,
+                },
+            )
             for handle in controller._sensor_handles:
                 self.assertIs(handle.overlay, overlay)
+        finally:
+            controller.stop()
+            controller._indicator.close()
+
+    def test_available_geometry_change_repositions_x11_bridge_sensors(self) -> None:
+        overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
+        screen = FakeScreen(
+            QRect(100, 200, 800, 600),
+            available_geometry=QRect(100, 240, 800, 560),
+        )
+        app = Mock()
+        app.screens.return_value = [screen]
+        with patch(
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
+            return_value=overlay,
+        ), patch(
+            "axidev_osk.hot_corner.controller.QGuiApplication.instance",
+            return_value=app,
+        ):
+            controller = HotCornerWindowToggleController(self.dispatcher, config=HotCornerConfig())
+
+        try:
+            self.assertEqual(len(overlay.anchored_moves), len(ScreenCorner))
+            screen._available_geometry = QRect(120, 260, 760, 520)
+
+            screen.availableGeometryChanged.emit(screen.availableGeometry())
+
+            changed_moves = overlay.anchored_moves[-len(ScreenCorner) :]
+            self.assertEqual(
+                {geometry for _position, _anchors, geometry in changed_moves},
+                {QRect(120, 260, 760, 520)},
+            )
         finally:
             controller.stop()
             controller._indicator.close()
