@@ -23,8 +23,6 @@ def _app() -> QApplication:
 def _config() -> PointerLocatorConfig:
     return PointerLocatorConfig(
         id="component:test-pointer-locator",
-        rows=4,
-        columns=4,
         radius_percent=30,
         maximum_opacity_percent=60,
         radius_standard_deviations=3,

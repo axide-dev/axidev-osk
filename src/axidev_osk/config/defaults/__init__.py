@@ -63,8 +63,6 @@ def build_default_app_config() -> AppConfig:
             background_components=(
                 PointerLocatorConfig(
                     id=pointer_locator_id,
-                    rows=4,
-                    columns=4,
                     radius_percent=30,
                     maximum_opacity_percent=60,
                     radius_standard_deviations=3,
