@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
@@ -33,13 +33,22 @@ class OverlayChromeWidgets:
 
 
 class OverlayTitleBar(QFrame):
-    """Frameless title bar that emits drag deltas for window movement."""
+    """Frameless title bar supporting Qt and raw-pointer drag sources."""
 
     dragDelta = Signal(int, int)
+    dragStarted = Signal()
+    dragEnded = Signal()
 
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        parent: QWidget | None = None,
+        *,
+        use_runtime_drag_motion: bool = False,
+    ) -> None:
         super().__init__(parent)
         self._drag_last_global: QPoint | None = None
+        self._use_runtime_drag_motion = use_runtime_drag_motion
 
         self.setObjectName("layerShellTitleBar")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -79,6 +88,7 @@ class OverlayTitleBar(QFrame):
 
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_last_global = event.globalPosition().toPoint()
+            self.dragStarted.emit()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -87,7 +97,13 @@ class OverlayTitleBar(QFrame):
         """Emit movement deltas while dragging the title bar."""
 
         if self._drag_last_global is None or not (event.buttons() & Qt.MouseButton.LeftButton):
+            if self._drag_last_global is not None:
+                self.cancel_drag()
             super().mouseMoveEvent(event)
+            return
+
+        if self._use_runtime_drag_motion:
+            event.accept()
             return
 
         current = event.globalPosition().toPoint()
@@ -100,10 +116,25 @@ class OverlayTitleBar(QFrame):
         """End an active title-bar drag."""
 
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_last_global = None
+            self.cancel_drag()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        """Cancel an active drag when Qt withdraws the mouse grab or hides the title bar."""
+
+        if event.type() in {QEvent.Type.UngrabMouse, QEvent.Type.Hide}:
+            self.cancel_drag()
+        return super().event(event)
+
+    def cancel_drag(self) -> None:
+        """End the drag once if its normal release event was interrupted."""
+
+        if self._drag_last_global is None:
+            return
+        self._drag_last_global = None
+        self.dragEnded.emit()
 
     def _close_window(self) -> None:
         window = self.window()
@@ -164,6 +195,9 @@ def install_overlay_chrome(
     parent: QWidget,
     on_move: MoveResizeHandler,
     on_resize: MoveResizeHandler,
+    use_runtime_drag_motion: bool = False,
+    on_drag_started: Callable[[], None] | None = None,
+    on_drag_ended: Callable[[], None] | None = None,
 ) -> OverlayChromeWidgets:
     """Install title bar + resize handle into a vertical layout.
 
@@ -190,8 +224,12 @@ def install_overlay_chrome(
         signals to the supplied handlers.
     """
 
-    title_bar = OverlayTitleBar(title, parent)
+    title_bar = OverlayTitleBar(title, parent, use_runtime_drag_motion=use_runtime_drag_motion)
     title_bar.dragDelta.connect(on_move)
+    if on_drag_started is not None:
+        title_bar.dragStarted.connect(on_drag_started)
+    if on_drag_ended is not None:
+        title_bar.dragEnded.connect(on_drag_ended)
     layout.insertWidget(0, title_bar)
 
     resize_handle = OverlayResizeHandle(title_bar)

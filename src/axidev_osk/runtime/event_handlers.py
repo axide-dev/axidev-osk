@@ -15,10 +15,11 @@ from .commands import (
     StateSet,
     WindowClose,
     WindowHide,
+    WindowMoveBy,
     WindowShow,
     WindowToggleOpacity,
 )
-from .events import ComponentPressed, HotCornerTriggered
+from .events import ComponentPressed, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
 from .registries import EventHandlerRegistry
 
 
@@ -92,6 +93,10 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         lambda runtime: lambda command: runtime._window_manager.close(command.window_id),
     )
     registry.register_command_handler(
+        WindowMoveBy,
+        lambda runtime: lambda command: runtime._window_manager.move_by(command.window_id, command.dx, command.dy),
+    )
+    registry.register_command_handler(
         WindowToggleOpacity,
         lambda runtime: lambda command: runtime._window_manager.toggle_opacity(
             command.window_id,
@@ -106,6 +111,7 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
     registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
+    registry.register_event_handler(lambda runtime: runtime._handle_pointer_drag_event)
 
 
 def route_hot_corner_triggered(event: object, runtime: object) -> None:
@@ -143,3 +149,45 @@ def route_component_pressed(event: object, runtime: object) -> None:
                 opacity=action.opacity,
             )
         )
+
+
+def route_pointer_drag_event(event: object, runtime: object) -> None:
+    """Route raw pointer motion to the active layer-shell window drag."""
+
+    if isinstance(event, WindowDragStarted):
+        if runtime._active_pointer_drag_window_id is not None:  # noqa: SLF001
+            runtime._set_pointer_drag_active(False)  # noqa: SLF001
+        runtime._active_pointer_drag_window_id = event.window_id  # noqa: SLF001
+        runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
+        runtime._set_pointer_drag_active(True)  # noqa: SLF001
+        return
+    if isinstance(event, WindowDragEnded):
+        if runtime._active_pointer_drag_window_id == event.window_id:  # noqa: SLF001
+            runtime._set_pointer_drag_active(False)  # noqa: SLF001
+            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
+            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
+        return
+    if not isinstance(event, PointerMotionObserved):
+        return
+
+    window_id = runtime._active_pointer_drag_window_id  # noqa: SLF001
+    if window_id is None:
+        return
+    remainder_x, remainder_y = runtime._pointer_drag_remainder  # noqa: SLF001
+    total_x = remainder_x + event.dx
+    total_y = remainder_y + event.dy
+    dx = int(total_x)
+    dy = int(total_y)
+    runtime._pointer_drag_remainder = (total_x - dx, total_y - dy)  # noqa: SLF001
+    if dx or dy:
+        try:
+            moved = runtime._move_pointer_drag_window(window_id, dx, dy)  # noqa: SLF001
+        except Exception:
+            runtime._set_pointer_drag_active(False)  # noqa: SLF001
+            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
+            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
+            raise
+        if not moved:
+            runtime._set_pointer_drag_active(False)  # noqa: SLF001
+            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
+            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001

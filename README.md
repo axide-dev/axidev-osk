@@ -126,6 +126,8 @@ The overlay works best on compositors that support the layer-shell protocol:
 - `Hyprland`
 - other wlroots-based compositors
 
+Moving a layer-shell overlay by its title bar requires the compositor to expose the `zwp_relative_pointer_manager_v1` protocol. Without it, the overlay can still run, but interactive title-bar dragging is unavailable.
+
 On GNOME and Mutter, the app does not request layer-shell behavior. It uses the regular Qt window path instead.
 
 The Linux payload uses the host's Qt Wayland and LayerShellQt components. Its launcher checks the Python, PySide6, Qt, platform plugin, and LayerShellQt versions before startup. PySide6 and Qt must have matching major and minor versions.

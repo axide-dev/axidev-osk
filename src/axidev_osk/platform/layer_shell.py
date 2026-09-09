@@ -109,6 +109,21 @@ def apply_wayland_layer_shell(
     return True
 
 
+def update_wayland_layer_shell_margins(window: QWidget, margins: QMargins) -> bool:
+    """Update only the margins of an existing layer-shell surface."""
+
+    if not is_wayland_session():
+        return False
+    handle = window.windowHandle()
+    if handle is None:
+        return False
+    layer_shell_window = _find_layer_shell_window(handle)
+    if layer_shell_window is None:
+        return False
+    layer_shell_window.setProperty("margins", margins)
+    return True
+
+
 def is_wayland_session() -> bool:
     """Return whether the current Linux session appears to be Wayland."""
 

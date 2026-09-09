@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
-from ..runtime.events import WindowCloseRequested
+from ..runtime.events import WindowCloseRequested, WindowDragEnded, WindowDragStarted
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
@@ -57,12 +57,24 @@ class RuntimeWindow(QMainWindow):
             if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
                 if isinstance(central_layout, QVBoxLayout):
+                    use_runtime_drag_motion = getattr(self._overlay, "uses_runtime_pointer_drag", False)
                     self._chrome_widgets = install_overlay_chrome(
                         central_layout,
                         title=self.windowTitle(),
                         parent=central,
                         on_move=self._overlay.move_by,
                         on_resize=self._overlay.resize_by,
+                        use_runtime_drag_motion=use_runtime_drag_motion,
+                        on_drag_started=(
+                            lambda: context.dispatcher.dispatch_event(WindowDragStarted(config.id))
+                        )
+                        if use_runtime_drag_motion
+                        else None,
+                        on_drag_ended=(
+                            lambda: context.dispatcher.dispatch_event(WindowDragEnded(config.id))
+                        )
+                        if use_runtime_drag_motion
+                        else None,
                     )
             self.setCentralWidget(central)
             self._opacity = WindowOpacityController(self)
@@ -82,6 +94,11 @@ class RuntimeWindow(QMainWindow):
         """Set opacity through the platform-supported window implementation."""
 
         self._opacity.set_opacity(opacity)
+
+    def move_by(self, dx: int, dy: int) -> None:
+        """Move this window through its selected overlay backend."""
+
+        self._overlay.move_by(dx, dy)
 
     def set_close_enabled(self, enabled: bool) -> None:
         """Set whether installed custom chrome exposes its close control."""

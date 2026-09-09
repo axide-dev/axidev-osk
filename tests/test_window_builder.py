@@ -5,7 +5,8 @@ import unittest
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.components import register_components
@@ -52,8 +53,9 @@ class FakeKeyboardBackend:
 
 
 class FakeOverlayController:
-    def __init__(self, *, uses_custom_chrome: bool = True) -> None:
+    def __init__(self, *, uses_custom_chrome: bool = True, uses_runtime_pointer_drag: bool = False) -> None:
         self.uses_custom_chrome = uses_custom_chrome
+        self.uses_runtime_pointer_drag = uses_runtime_pointer_drag
 
     def prepare_show(self) -> bool:
         return True
@@ -149,6 +151,100 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         status_label = window.findChild(QLabel, "statusLabel")
         self.assertIsNotNone(status_label)
         self.assertFalse(status_label.isVisible())
+
+    def test_runtime_title_bar_drag_suppresses_qt_motion_deltas(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test", use_runtime_drag_motion=True)
+        deltas: list[tuple[int, int]] = []
+        lifecycle: list[str] = []
+        title_bar.dragDelta.connect(lambda dx, dy: deltas.append((dx, dy)))
+        title_bar.dragStarted.connect(lambda: lifecycle.append("started"))
+        title_bar.dragEnded.connect(lambda: lifecycle.append("ended"))
+
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, 10),
+            QPointF(500, 500),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        title_bar.mousePressEvent(press)
+
+        for local, global_position in ((QPointF(-20, 30), QPointF(0, 0)), (QPointF(40, -5), QPointF(2000, 1000))):
+            move = QMouseEvent(
+                QEvent.Type.MouseMove,
+                local,
+                global_position,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            title_bar.mouseMoveEvent(move)
+
+        release = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(40, -5),
+            QPointF(2000, 1000),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        title_bar.mouseReleaseEvent(release)
+
+        self.assertEqual(deltas, [])
+        self.assertEqual(lifecycle, ["started", "ended"])
+
+    def test_non_raw_title_bar_drag_uses_incremental_global_positions(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test")
+        deltas: list[tuple[int, int]] = []
+        title_bar.dragDelta.connect(lambda dx, dy: deltas.append((dx, dy)))
+
+        title_bar.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(10, 10),
+                QPointF(100, 100),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        title_bar.mouseMoveEvent(
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                QPointF(12, 13),
+                QPointF(105, 107),
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+
+        self.assertEqual(deltas, [(5, 7)])
+
+    def test_runtime_title_bar_ends_drag_when_mouse_grab_is_lost(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test", use_runtime_drag_motion=True)
+        lifecycle: list[str] = []
+        title_bar.dragStarted.connect(lambda: lifecycle.append("started"))
+        title_bar.dragEnded.connect(lambda: lifecycle.append("ended"))
+        title_bar.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(10, 10),
+                QPointF(100, 100),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+
+        title_bar.event(QEvent(QEvent.Type.UngrabMouse))
+        title_bar.event(QEvent(QEvent.Type.UngrabMouse))
+
+        self.assertEqual(lifecycle, ["started", "ended"])
 
     def test_status_footer_is_only_visible_when_backend_is_unavailable(self) -> None:
         _app()

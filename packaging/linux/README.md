@@ -8,6 +8,8 @@ The payload targets x86_64 Linux with glibc 2.34 or newer. It requires `/usr/bin
 
 The host supplies PySide6, Qt, Qt's X11 and Wayland platform plugins, LayerShellQt, libinput, libudev, libxkbcommon, and normal desktop libraries. PySide6 and Qt must use matching major and minor versions from 6.7 up to, but not including, 7.0.
 
+The layer-shell drag path loads the host's `libwayland-client.so.0` and requires the compositor to expose the `zwp_relative_pointer_manager_v1` protocol. The library comes from the normal system Wayland runtime and is not bundled. Without the protocol, the overlay can still run, but interactive title-bar dragging is unavailable.
+
 Use these runtime packages on Fedora:
 
 ```bash

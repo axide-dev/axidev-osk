@@ -19,7 +19,7 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
-from .commands import AppQuit
+from .commands import AppQuit, WindowMoveBy
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import (
@@ -27,6 +27,7 @@ from .event_handlers import (
     register_event_handlers,
     route_component_pressed,
     route_hot_corner_triggered,
+    route_pointer_drag_event,
 )
 from .events import WindowCloseRequested
 from .registries import (
@@ -63,6 +64,8 @@ class _TestRuntime:
         self._dispatcher = context.dispatcher
         self._window_manager = WindowManager(context)
         self._app = _TestApplication()
+        self._active_pointer_drag_window_id: str | None = None
+        self._pointer_drag_remainder = (0.0, 0.0)
 
     def _handle_window_close_requested(self, event: object) -> None:
         """Map close requests to a direct test quit command."""
@@ -79,6 +82,26 @@ class _TestRuntime:
         """Route configured component actions through production helper."""
 
         route_component_pressed(event, self)
+
+    def _handle_pointer_drag_event(self, event: object) -> None:
+        """Route raw pointer drag events through the production helper."""
+
+        route_pointer_drag_event(event, self)
+
+    def _set_pointer_drag_active(self, enabled: bool) -> None:
+        """Accept drag lifecycle changes without starting platform services."""
+
+        del enabled
+
+    def _move_pointer_drag_window(self, window_id: str, dx: int, dy: int) -> bool:
+        """Move a live test window through the production command path."""
+
+        window = self._window_manager.get(window_id)
+        if window is None or not window.isVisible():
+            return False
+        self._dispatcher.dispatch_command(WindowMoveBy(window_id, dx, dy))
+        return True
+
 
 def make_test_context(
     keyboard_backend: Any,

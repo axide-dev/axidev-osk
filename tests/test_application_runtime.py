@@ -12,7 +12,7 @@ from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import WindowConfig
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.commands import SecureInputPanelPrepare, SecureInputPanelRelease
-from axidev_osk.runtime.events import PromptResolved
+from axidev_osk.runtime.events import PointerMotionObserved, PromptResolved, WindowDragEnded, WindowDragStarted
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
 
@@ -22,6 +22,12 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+def _runtime_without_platform_services() -> ApplicationRuntime:
+    services = ServiceRegistry()
+    services.register("keyboard", KeyboardService(Mock()), autostart=False)
+    return ApplicationRuntime(_app(), services=services, show_startup_windows=False)
 
 
 class FakePromptWindow(QWidget):
@@ -42,6 +48,124 @@ class FakePromptWindow(QWidget):
 
 
 class ApplicationRuntimePromptTests(unittest.TestCase):
+    def test_compositor_pointer_motion_moves_only_active_drag(self) -> None:
+        runtime = _runtime_without_platform_services()
+        window_id = runtime.context.config.keyboard_window_id
+        window = Mock()
+        window.isVisible.return_value = True
+        window.winId.return_value = 123
+
+        with (
+            patch.object(runtime._window_manager, "get", return_value=window),
+            patch.object(runtime._window_manager, "move_by") as move_by,
+        ):
+            runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4.25, -5.5))
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(5.75, 7.5))
+            runtime.context.dispatcher.dispatch_event(WindowDragEnded(window_id))
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(10, 10))
+
+        self.assertEqual(move_by.call_args_list, [unittest.mock.call(window_id, 4, -5), unittest.mock.call(window_id, 6, 7)])
+
+    def test_pointer_motion_moves_before_committing_current_surface(self) -> None:
+        service = Mock()
+        services = ServiceRegistry()
+        services.register("keyboard", KeyboardService(Mock()), autostart=False)
+        services.register("relative-pointer", service, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+        window_id = runtime.context.config.keyboard_window_id
+        window = Mock()
+        window.isVisible.return_value = True
+        window.winId.return_value = 123
+        calls: list[object] = []
+        runtime._window_manager.get = Mock(return_value=window)
+        runtime._window_manager.move_by = Mock(side_effect=lambda *args: calls.append(("move", args)))
+        service.commit_surface.side_effect = lambda surface: calls.append(("commit", surface))
+
+        runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+        runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        self.assertEqual(calls, [("move", (window_id, 4, 5)), ("commit", 123)])
+
+    def test_pointer_motion_cancels_drag_when_window_is_no_longer_live(self) -> None:
+        service = Mock()
+        services = ServiceRegistry()
+        services.register("keyboard", KeyboardService(Mock()), autostart=False)
+        services.register("relative-pointer", service, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+        window_id = runtime.context.config.keyboard_window_id
+        runtime._window_manager.get = Mock(return_value=None)
+
+        runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+        runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        self.assertIsNone(runtime._active_pointer_drag_window_id)
+        service.end_drag.assert_called_once_with()
+        service.commit_surface.assert_not_called()
+
+    def test_pointer_motion_cancels_drag_when_move_fails(self) -> None:
+        runtime, service, window_id, window = self._runtime_with_pointer_service()
+        runtime._window_manager.get = Mock(return_value=window)
+        runtime._window_manager.move_by = Mock(side_effect=RuntimeError("move failed"))
+
+        runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+        with self.assertRaisesRegex(RuntimeError, "move failed"):
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        self.assertIsNone(runtime._active_pointer_drag_window_id)
+        service.end_drag.assert_called_once_with()
+        service.commit_surface.assert_not_called()
+
+    def test_pointer_motion_cancels_drag_when_surface_lookup_fails(self) -> None:
+        runtime, service, window_id, window = self._runtime_with_pointer_service()
+        runtime._window_manager.get = Mock(return_value=window)
+        window.winId.side_effect = RuntimeError("surface failed")
+
+        runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+        with self.assertRaisesRegex(RuntimeError, "surface failed"):
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        self.assertIsNone(runtime._active_pointer_drag_window_id)
+        service.end_drag.assert_called_once_with()
+        service.commit_surface.assert_not_called()
+
+    def test_pointer_motion_cancels_drag_when_commit_fails(self) -> None:
+        runtime, service, window_id, window = self._runtime_with_pointer_service()
+        runtime._window_manager.get = Mock(return_value=window)
+        service.commit_surface.side_effect = RuntimeError("commit failed")
+
+        runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+        with self.assertRaisesRegex(RuntimeError, "commit failed"):
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        self.assertIsNone(runtime._active_pointer_drag_window_id)
+        service.end_drag.assert_called_once_with()
+
+    def _runtime_with_pointer_service(
+        self,
+    ) -> tuple[ApplicationRuntime, Mock, str, Mock]:
+        service = Mock()
+        services = ServiceRegistry()
+        services.register("keyboard", KeyboardService(Mock()), autostart=False)
+        services.register("relative-pointer", service, autostart=False)
+        runtime = ApplicationRuntime(_app(), services=services, show_startup_windows=False)
+        window_id = runtime.context.config.keyboard_window_id
+        window = Mock()
+        window.isVisible.return_value = True
+        window.winId.return_value = 123
+        return runtime, service, window_id, window
+
+    def test_drag_end_stops_compositor_pointer_movement(self) -> None:
+        runtime = _runtime_without_platform_services()
+        window_id = runtime.context.config.keyboard_window_id
+
+        with patch.object(runtime._window_manager, "move_by") as move_by:
+            runtime.context.dispatcher.dispatch_event(WindowDragStarted(window_id))
+            runtime.context.dispatcher.dispatch_event(WindowDragEnded(window_id))
+            runtime.context.dispatcher.dispatch_event(PointerMotionObserved(4, 5))
+
+        move_by.assert_not_called()
+
     def test_linux_permission_prompt_has_one_setup_action(self) -> None:
         prompt = build_default_app_config().linux_permission_prompt
 

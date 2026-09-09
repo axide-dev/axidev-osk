@@ -134,6 +134,15 @@ class WindowClose:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowMoveBy:
+    """Move a managed window by one relative pointer movement."""
+
+    window_id: str
+    dx: int
+    dy: int
+
+
+@dataclass(frozen=True, slots=True)
 class AppQuit:
     """Command requesting application shutdown.
 
@@ -144,4 +153,18 @@ class AppQuit:
     exit_code: int = 0
 
 
-RuntimeCommand = KeyboardRegisterKeySpec | KeyboardKeyDown | KeyboardKeyUp | KeyboardSyncLatchedKey | StateSet | SecureInputPanelPrepare | SecureInputPanelRelease | WindowShow | WindowHide | WindowToggleOpacity | WindowClose | AppQuit
+RuntimeCommand = (
+    KeyboardRegisterKeySpec
+    | KeyboardKeyDown
+    | KeyboardKeyUp
+    | KeyboardSyncLatchedKey
+    | StateSet
+    | SecureInputPanelPrepare
+    | SecureInputPanelRelease
+    | WindowShow
+    | WindowHide
+    | WindowToggleOpacity
+    | WindowClose
+    | WindowMoveBy
+    | AppQuit
+)

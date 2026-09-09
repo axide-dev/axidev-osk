@@ -17,6 +17,7 @@ from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
+from .commands import WindowMoveBy
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import (
@@ -24,6 +25,7 @@ from .event_handlers import (
     register_event_handlers,
     route_component_pressed,
     route_hot_corner_triggered,
+    route_pointer_drag_event,
 )
 from .events import WindowCloseRequested
 from .prompt import PromptResolutionWaiter
@@ -71,6 +73,8 @@ class ApplicationRuntime:
 
         self._app = app
         self._show_startup_windows = show_startup_windows
+        self._active_pointer_drag_window_id: str | None = None
+        self._pointer_drag_remainder = (0.0, 0.0)
         self._secure_input_panel_prepared = False
         self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
@@ -200,6 +204,38 @@ class ApplicationRuntime:
         """Map configured component actions to runtime commands."""
 
         route_component_pressed(event, self)
+
+    def _handle_pointer_drag_event(self, event: object) -> None:
+        """Route raw pointer motion to the active layer-shell window drag."""
+
+        route_pointer_drag_event(event, self)
+
+    def _set_pointer_drag_active(self, enabled: bool) -> None:
+        """Start or stop relative-pointer collection in interested services."""
+
+        for service in self._services.services():
+            if enabled:
+                begin_drag = getattr(service, "begin_drag", None)
+                if begin_drag is not None:
+                    begin_drag()
+            else:
+                end_drag = getattr(service, "end_drag", None)
+                if end_drag is not None:
+                    end_drag()
+
+    def _move_pointer_drag_window(self, window_id: str, dx: int, dy: int) -> bool:
+        """Move one live dragged window, then commit its current Wayland surface."""
+
+        window = self._window_manager.get(window_id)
+        if window is None or not window.isVisible():
+            return False
+        self._dispatcher.dispatch_command(WindowMoveBy(window_id, dx, dy))
+        surface = int(window.winId())
+        for service in self._services.services():
+            commit_surface = getattr(service, "commit_surface", None)
+            if commit_surface is not None:
+                commit_surface(surface)
+        return True
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

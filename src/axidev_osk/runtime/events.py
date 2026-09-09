@@ -79,6 +79,14 @@ class BackendKeyStateChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class PointerMotionObserved:
+    """Observed compositor-accelerated relative pointer movement."""
+
+    dx: float
+    dy: float
+
+
+@dataclass(frozen=True, slots=True)
 class KeyLatchChanged:
     """Runtime latch state changed for a logical key.
 
@@ -116,6 +124,20 @@ class WindowCloseRequested:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowDragStarted:
+    """A managed window title bar started a raw-pointer drag."""
+
+    window_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class WindowDragEnded:
+    """A managed window title bar ended a raw-pointer drag."""
+
+    window_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class PromptResolved:
     """A prompt window resolved to the selected button role.
 
@@ -134,8 +156,11 @@ RuntimeEvent = (
     | ComponentStateChanged
     | BackendKeyRegistered
     | BackendKeyStateChanged
+    | PointerMotionObserved
     | KeyLatchChanged
     | HotCornerTriggered
     | WindowCloseRequested
+    | WindowDragStarted
+    | WindowDragEnded
     | PromptResolved
 )

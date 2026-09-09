@@ -223,6 +223,19 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(window.moves[-1], (42, 84))
         self.assertIn((Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True), window.attributes)
 
+    def test_x11_move_by_remains_immediate(self) -> None:
+        window = FakeWindow()
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.X11_UTILITY,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+
+        controller.move_by(12, 34)
+
+        self.assertEqual(window.moves, [(12, 34)])
+
     def test_wayland_layer_shell_manual_move_persists_across_show(self) -> None:
         window = FakeWindow()
         calls: list[tuple[int, QMargins]] = []
@@ -280,7 +293,7 @@ class OverlayWindowControllerTests(unittest.TestCase):
         self.assertEqual(anchors, ANCHOR_LEFT | ANCHOR_TOP)
         self.assertEqual(margins, QMargins(-10, -20, 0, 0))
 
-    def test_wayland_layer_shell_move_by_preserves_negative_margins(self) -> None:
+    def test_wayland_layer_shell_move_by_clamps_margins_to_screen(self) -> None:
         window = FakeWindow()
         calls: list[tuple[int, QMargins]] = []
 
@@ -293,9 +306,22 @@ class OverlayWindowControllerTests(unittest.TestCase):
             AlwaysOnTopWindowController,
             "_detect_backend",
             return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch.object(
+            AlwaysOnTopWindowController,
+            "_current_screen_geometry",
+            return_value=QRect(100, 200, 800, 600),
         ), patch(
             "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.update_wayland_layer_shell_margins",
+            side_effect=lambda _window, margins: calls.append(
+                (layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM, margins)
+            )
+            or True,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.QTimer.singleShot",
+            side_effect=lambda _delay, callback: callback(),
         ):
             controller = AlwaysOnTopWindowController(
                 window,
@@ -303,11 +329,35 @@ class OverlayWindowControllerTests(unittest.TestCase):
             )
             controller.move_to(QPoint(100, 200), screen_geometry=QRect(100, 200, 800, 600))
             controller.move_by(-25, 30)
+            controller.move_by(1000, -1000)
 
-        self.assertGreaterEqual(len(calls), 2)
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertEqual(calls[-2][1], QMargins(0, 0, 0, 0))
         anchors, margins = calls[-1]
         self.assertEqual(anchors, layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM)
-        self.assertEqual(margins, QMargins(-25, 0, 0, -30))
+        self.assertEqual(margins, QMargins(700, 0, 0, 540))
+
+    def test_wayland_layer_shell_applies_each_aggregated_pointer_delta(self) -> None:
+        window = FakeWindow()
+        calls: list[QMargins] = []
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch.object(
+            AlwaysOnTopWindowController,
+            "_current_screen_geometry",
+            return_value=QRect(0, 0, 800, 600),
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.update_wayland_layer_shell_margins",
+            side_effect=lambda _window, margins: calls.append(margins) or True,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+            controller.move_by(2, 3)
+            controller.move_by(4, -1)
+
+        self.assertEqual(calls, [QMargins(686, 0, 0, 521), QMargins(690, 0, 0, 522)])
 
     def test_wayland_layer_shell_uses_full_screen_geometry_for_initial_position(self) -> None:
         window = FakeWindow()
@@ -382,6 +432,15 @@ class OverlayWindowControllerTests(unittest.TestCase):
         ), patch(
             "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell",
             side_effect=record_apply_wayland_layer_shell,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.update_wayland_layer_shell_margins",
+            side_effect=lambda _window, margins: calls.append(
+                (layer_shell.ANCHOR_LEFT | layer_shell.ANCHOR_BOTTOM, margins)
+            )
+            or True,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.QTimer.singleShot",
+            side_effect=lambda _delay, callback: callback(),
         ):
             controller = AlwaysOnTopWindowController(window)
             controller.move_by(10, 20)

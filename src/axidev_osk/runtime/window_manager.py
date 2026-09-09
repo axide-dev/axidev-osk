@@ -96,6 +96,11 @@ class WindowManager:
         self._windows[window_id] = window
         return window
 
+    def get(self, window_id: str) -> RuntimeWindow | None:
+        """Return an existing managed window without creating one."""
+
+        return self._windows.get(window_id)
+
     def create_transient(self, config: WindowConfig, *, parent: QWidget | None = None) -> RuntimeWindow:
         """Build a window that is not retained in the manager dict.
 
@@ -193,6 +198,13 @@ class WindowManager:
             _logger.info("Closing runtime window %s", window_id)
             self._restore_interaction(window_id, window)
             window.close()
+
+    def move_by(self, window_id: str, dx: int, dy: int) -> None:
+        """Move an existing managed window by a relative amount."""
+
+        window = self._windows.get(window_id)
+        if window is not None:
+            window.move_by(dx, dy)
 
     def destroy(self, window_id: str) -> None:
         """Hide and delete a managed window without treating it as an app quit request."""
