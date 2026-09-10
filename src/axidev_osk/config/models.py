@@ -64,10 +64,17 @@ class DwellClickConfig:
 
     Attributes:
         enabled: Whether resting the pointer clicks inside the window.
-        delay_ms: Time the pointer must remain inside the dead zone.
-        dead_zone_px: Allowed pointer displacement around the rest position.
-        full_speed_px_s: Highest speed that advances at the full rate.
+        delay_ms: Base time required to activate the current target.
+        dead_zone_px: Movement required to rearm after activation.
+        full_speed_px_s: Highest speed that advances at the maximum rate.
         stop_speed_px_s: Speed at which progress stops completely.
+        maximum_progress_rate: Progress multiplier at or below full speed.
+        indicator_start_progress: Progress required before feedback appears.
+        direction_reversal_progress_factor: Progress retained after a clear
+            reversal inside the same target.
+        movement_penalty_px: Distance that removes one full dwell of progress.
+        distance_curve_full_px: Travel distance at which slowdown uses the
+            normal rather than short-distance curve.
         velocity_release_ms: Time for remembered speed to fall from the stop
             threshold to zero after movement ends.
     """
@@ -77,6 +84,11 @@ class DwellClickConfig:
     dead_zone_px: int = 10
     full_speed_px_s: float = 20.0
     stop_speed_px_s: float = 240.0
+    maximum_progress_rate: float = 1.75
+    indicator_start_progress: float = 0.25
+    direction_reversal_progress_factor: float = 0.5
+    movement_penalty_px: float = 15.0
+    distance_curve_full_px: float = 200.0
     velocity_release_ms: int = 100
 
     def __post_init__(self) -> None:
@@ -98,6 +110,38 @@ class DwellClickConfig:
         ):
             raise ValueError(
                 "Dwell click stop speed must be finite and greater than full speed"
+            )
+        if (
+            not math.isfinite(self.maximum_progress_rate)
+            or self.maximum_progress_rate < 1
+        ):
+            raise ValueError(
+                "Dwell click maximum progress rate must be finite and at least 1"
+            )
+        if (
+            not math.isfinite(self.indicator_start_progress)
+            or not 0 <= self.indicator_start_progress <= 1
+        ):
+            raise ValueError(
+                "Dwell click indicator start progress must be between 0 and 1"
+            )
+        if (
+            not math.isfinite(self.direction_reversal_progress_factor)
+            or not 0 <= self.direction_reversal_progress_factor <= 1
+        ):
+            raise ValueError(
+                "Dwell click direction reversal progress factor must be between 0 and 1"
+            )
+        if not math.isfinite(self.movement_penalty_px) or self.movement_penalty_px <= 0:
+            raise ValueError(
+                "Dwell click movement penalty distance must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.distance_curve_full_px)
+            or self.distance_curve_full_px <= 0
+        ):
+            raise ValueError(
+                "Dwell click full curve distance must be finite and positive"
             )
         if (
             not math.isfinite(self.velocity_release_ms)
