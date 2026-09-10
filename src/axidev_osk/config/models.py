@@ -71,9 +71,9 @@ class DwellClickConfig:
     """
 
     enabled: bool = False
-    delay_ms: int = 150
+    delay_ms: int = 200
     dead_zone_px: int = 10
-    full_speed_px_s: float = 10.0
+    full_speed_px_s: float = 20.0
     stop_speed_px_s: float = 240.0
 
     def __post_init__(self) -> None:

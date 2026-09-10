@@ -23,9 +23,9 @@ class DwellClickConfigTests(unittest.TestCase):
         config = build_default_app_config().windows[0].dwell_click
 
         self.assertTrue(config.enabled)
-        self.assertEqual(config.delay_ms, 150)
+        self.assertEqual(config.delay_ms, 200)
         self.assertEqual(config.dead_zone_px, 10)
-        self.assertEqual(config.full_speed_px_s, 10)
+        self.assertEqual(config.full_speed_px_s, 20)
         self.assertEqual(config.stop_speed_px_s, 240)
 
     def test_config_rejects_invalid_delay_and_dead_zone(self) -> None:
@@ -67,9 +67,9 @@ class DwellClickControllerTests(unittest.TestCase):
             self.window,
             DwellClickConfig(
                 enabled=True,
-                delay_ms=150,
+                delay_ms=200,
                 dead_zone_px=10,
-                full_speed_px_s=10,
+                full_speed_px_s=20,
                 stop_speed_px_s=240,
             ),
         )
@@ -92,7 +92,7 @@ class DwellClickControllerTests(unittest.TestCase):
             )
             self.controller.update_from_global_position(
                 current_position,
-                now=1.2,
+                now=1.21,
             )
 
         self.assertEqual(clicks, ["B"])
@@ -111,7 +111,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.assertFalse(self.controller.indicator.isVisible())
             self.controller.update_from_global_position(
                 current_position,
-                now=1.075,
+                now=1.1,
             )
 
         indicator = self.controller.indicator
@@ -139,8 +139,8 @@ class DwellClickControllerTests(unittest.TestCase):
         )
 
     def test_progress_rate_decreases_with_pointer_speed(self) -> None:
-        self.assertEqual(self.controller._progress_rate(10), 1.0)
-        self.assertEqual(self.controller._progress_rate(125), 0.5)
+        self.assertEqual(self.controller._progress_rate(20), 1.0)
+        self.assertEqual(self.controller._progress_rate(130), 0.5)
         self.assertEqual(self.controller._progress_rate(240), 0.0)
 
     def test_origin_is_treated_as_a_real_previous_position(self) -> None:
@@ -151,8 +151,8 @@ class DwellClickControllerTests(unittest.TestCase):
             self.controller.update_from_global_position(QPoint(0, 0), now=1.0)
             self.controller.update_from_global_position(QPoint(4, 0), now=1.02)
 
-        expected_rate = (240 - 200) / (240 - 10)
-        expected_progress = 20 / 150 * expected_rate
+        expected_rate = (240 - 200) / (240 - 20)
+        expected_progress = 20 / 200 * expected_rate
         self.assertAlmostEqual(self.controller._progress, expected_progress)
 
     def test_clicks_at_exact_configured_delay(self) -> None:
@@ -165,8 +165,8 @@ class DwellClickControllerTests(unittest.TestCase):
             return_value=self.key,
         ):
             self.controller.update_from_global_position(position, now=1.0)
-            self.controller.update_from_global_position(position, now=1.075)
-            self.controller.update_from_global_position(position, now=1.15)
+            self.controller.update_from_global_position(position, now=1.1)
+            self.controller.update_from_global_position(position, now=1.2)
 
         self.assertEqual(clicks, [True])
 
@@ -194,7 +194,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.assertTrue(self.controller.indicator.isVisible())
             self.controller.update_from_global_position(
                 moved_position,
-                now=1.25,
+                now=1.3,
             )
 
         self.assertEqual(len(clicks), 1)
@@ -209,7 +209,7 @@ class DwellClickControllerTests(unittest.TestCase):
             return_value=self.key,
         ):
             self.controller.update_from_global_position(position, now=1.0)
-            self.controller.update_from_global_position(position, now=1.15)
+            self.controller.update_from_global_position(position, now=1.2)
             self.controller.update_from_global_position(position, now=2.0)
             moved_position = position + QPoint(11, 0)
             self.controller.update_from_global_position(
@@ -218,7 +218,7 @@ class DwellClickControllerTests(unittest.TestCase):
             )
             self.controller.update_from_global_position(
                 moved_position,
-                now=2.26,
+                now=2.31,
             )
 
         self.assertEqual(len(clicks), 2)
