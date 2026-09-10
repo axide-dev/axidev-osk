@@ -63,11 +63,13 @@ class DwellClickConfig:
     """Pointer dwell activation policy for one window.
 
     Attributes:
-        enabled: Whether resting the pointer activates a key.
+        enabled: Whether resting the pointer clicks inside the window.
         delay_ms: Time the pointer must remain inside the dead zone.
         dead_zone_px: Allowed pointer displacement around the rest position.
         full_speed_px_s: Highest speed that advances at the full rate.
         stop_speed_px_s: Speed at which progress stops completely.
+        velocity_release_ms: Time for remembered speed to fall from the stop
+            threshold to zero after movement ends.
     """
 
     enabled: bool = False
@@ -75,6 +77,7 @@ class DwellClickConfig:
     dead_zone_px: int = 10
     full_speed_px_s: float = 20.0
     stop_speed_px_s: float = 240.0
+    velocity_release_ms: int = 100
 
     def __post_init__(self) -> None:
         """Reject timing and distance values that cannot define a dwell."""
@@ -95,6 +98,13 @@ class DwellClickConfig:
         ):
             raise ValueError(
                 "Dwell click stop speed must be finite and greater than full speed"
+            )
+        if (
+            not math.isfinite(self.velocity_release_ms)
+            or self.velocity_release_ms < 1
+        ):
+            raise ValueError(
+                "Dwell click velocity release must be at least 1 millisecond"
             )
 
 

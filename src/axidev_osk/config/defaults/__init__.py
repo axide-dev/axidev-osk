@@ -86,6 +86,7 @@ def build_default_app_config() -> AppConfig:
             dead_zone_px=10,
             full_speed_px_s=20,
             stop_speed_px_s=240,
+            velocity_release_ms=100,
         ),
         opacity=0.85,
     )

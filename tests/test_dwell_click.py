@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QEvent, Qt
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from axidev_osk.config.defaults import build_default_app_config
@@ -18,6 +20,26 @@ def _app() -> QApplication:
     return app
 
 
+class _MouseEventRecorder(QWidget):
+    def __init__(self, events: list[QEvent.Type], parent: QWidget) -> None:
+        super().__init__(parent)
+        self._events = events
+
+    def mousePressEvent(  # type: ignore[override]
+        self,
+        event: QMouseEvent,
+    ) -> None:
+        self._events.append(event.type())
+        event.accept()
+
+    def mouseReleaseEvent(  # type: ignore[override]
+        self,
+        event: QMouseEvent,
+    ) -> None:
+        self._events.append(event.type())
+        event.accept()
+
+
 class DwellClickConfigTests(unittest.TestCase):
     def test_default_keyboard_enables_dwell_click(self) -> None:
         config = build_default_app_config().windows[0].dwell_click
@@ -27,6 +49,7 @@ class DwellClickConfigTests(unittest.TestCase):
         self.assertEqual(config.dead_zone_px, 10)
         self.assertEqual(config.full_speed_px_s, 20)
         self.assertEqual(config.stop_speed_px_s, 240)
+        self.assertEqual(config.velocity_release_ms, 100)
 
     def test_config_rejects_invalid_delay_and_dead_zone(self) -> None:
         for delay in (0, float("nan"), float("inf")):
@@ -47,6 +70,13 @@ class DwellClickConfigTests(unittest.TestCase):
             DwellClickConfig(full_speed_px_s=-1)
         with self.assertRaisesRegex(ValueError, "stop speed"):
             DwellClickConfig(full_speed_px_s=20, stop_speed_px_s=20)
+        for release in (0, float("nan"), float("inf")):
+            with self.subTest(release=release):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "at least 1 millisecond",
+                ):
+                    DwellClickConfig(velocity_release_ms=release)
 
 
 class DwellClickControllerTests(unittest.TestCase):
@@ -71,6 +101,7 @@ class DwellClickControllerTests(unittest.TestCase):
                 dead_zone_px=10,
                 full_speed_px_s=20,
                 stop_speed_px_s=240,
+                velocity_release_ms=100,
             ),
         )
         self.addCleanup(self.window.close)
@@ -79,8 +110,8 @@ class DwellClickControllerTests(unittest.TestCase):
         clicks: list[str] = []
         self.key.clicked.connect(lambda: clicks.append("A"))
         self.other_key.clicked.connect(lambda: clicks.append("B"))
-        first_position = self.key.mapToGlobal(QPoint(20, 20))
-        current_position = self.key.mapToGlobal(QPoint(24, 20))
+        first_position = self.other_key.mapToGlobal(QPoint(20, 20))
+        current_position = self.other_key.mapToGlobal(QPoint(24, 20))
 
         with patch(
             "axidev_osk.windows.dwell_click.QApplication.widgetAt",
@@ -143,6 +174,48 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertEqual(self.controller._progress_rate(130), 0.5)
         self.assertEqual(self.controller._progress_rate(240), 0.0)
 
+    def test_speed_rises_immediately_and_releases_over_time(self) -> None:
+        position = self.key.mapToGlobal(QPoint(20, 20))
+
+        self.controller._sample_speed(position, 1.0)
+        _, speed = self.controller._sample_speed(
+            position + QPoint(4, 0),
+            1.01,
+        )
+        self.assertEqual(speed, 240)
+
+        _, speed = self.controller._sample_speed(
+            position + QPoint(4, 0),
+            1.06,
+        )
+        self.assertAlmostEqual(speed, 120)
+        _, speed = self.controller._sample_speed(
+            position + QPoint(4, 0),
+            1.11,
+        )
+        self.assertEqual(speed, 0)
+
+    def test_dead_zone_exit_preserves_speed_during_new_dwell(self) -> None:
+        position = self.key.mapToGlobal(QPoint(20, 20))
+
+        with patch(
+            "axidev_osk.windows.dwell_click.QApplication.widgetAt",
+            return_value=self.key,
+        ):
+            self.controller.update_from_global_position(position, now=1.0)
+            self.controller.update_from_global_position(
+                position + QPoint(11, 0),
+                now=1.01,
+            )
+            self.controller.update_from_global_position(
+                position + QPoint(11, 0),
+                now=1.026,
+            )
+
+        self.assertAlmostEqual(self.controller._smoothed_speed, 201.6)
+        self.assertGreater(self.controller._progress, 0)
+        self.assertLess(self.controller._progress, 0.02)
+
     def test_origin_is_treated_as_a_real_previous_position(self) -> None:
         with patch(
             "axidev_osk.windows.dwell_click.QApplication.widgetAt",
@@ -181,11 +254,21 @@ class DwellClickControllerTests(unittest.TestCase):
             return_value=self.key,
         ):
             self.controller.update_from_global_position(position, now=1.0)
+            self.controller.update_from_global_position(position, now=1.08)
             self.controller.update_from_global_position(
                 moved_position,
                 now=1.09,
             )
             self.assertFalse(self.controller.indicator.isVisible())
+            feedback = self.controller.indicator.cancel_feedback
+            self.assertTrue(feedback.isVisible())
+            expected_color = feedback.palette().color(
+                feedback.palette().ColorRole.Mid,
+            )
+            self.assertEqual(
+                feedback.feedback_color.name(),
+                expected_color.name(),
+            )
             self.controller.update_from_global_position(
                 moved_position,
                 now=1.1,
@@ -198,6 +281,8 @@ class DwellClickControllerTests(unittest.TestCase):
             )
 
         self.assertEqual(len(clicks), 1)
+        QTest.qWait(300)
+        self.assertFalse(feedback.isVisible())
 
     def test_requires_dead_zone_exit_before_another_click(self) -> None:
         clicks: list[bool] = []
@@ -224,7 +309,7 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertEqual(len(clicks), 2)
         self.assertFalse(self.controller.indicator.isVisible())
 
-    def test_does_not_activate_non_key_controls(self) -> None:
+    def test_activates_non_key_controls_in_the_same_window(self) -> None:
         button = QPushButton("Not a key", self.window)
         button.setProperty("componentType", "button")
         clicks: list[bool] = []
@@ -236,9 +321,45 @@ class DwellClickControllerTests(unittest.TestCase):
             return_value=button,
         ):
             self.controller.update_from_global_position(position, now=1.0)
-            self.controller.update_from_global_position(position, now=1.1)
+            self.controller.update_from_global_position(position, now=1.2)
 
-        self.assertEqual(clicks, [])
+        self.assertEqual(clicks, [True])
+
+    def test_sends_mouse_click_to_plain_window_content(self) -> None:
+        events: list[QEvent.Type] = []
+        target = _MouseEventRecorder(events, self.window)
+        target.setGeometry(200, 10, 30, 30)
+        position = target.mapToGlobal(QPoint(10, 10))
+
+        with patch(
+            "axidev_osk.windows.dwell_click.QApplication.widgetAt",
+            return_value=target,
+        ):
+            self.controller.update_from_global_position(position, now=1.0)
+            self.controller.update_from_global_position(position, now=1.2)
+
+        self.assertEqual(
+            events,
+            [QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease],
+        )
+
+    def test_high_speed_pauses_without_cancellation_feedback(self) -> None:
+        position = self.key.mapToGlobal(QPoint(20, 20))
+
+        with patch(
+            "axidev_osk.windows.dwell_click.QApplication.widgetAt",
+            return_value=self.key,
+        ):
+            self.controller.update_from_global_position(position, now=1.0)
+            self.controller.update_from_global_position(position, now=1.1)
+            self.controller.update_from_global_position(
+                position + QPoint(4, 0),
+                now=1.11,
+            )
+
+        self.assertFalse(self.controller.indicator.isVisible())
+        self.assertFalse(self.controller.indicator.cancel_feedback.isVisible())
+        self.assertAlmostEqual(self.controller._progress, 0.5)
 
     def test_does_not_activate_a_key_from_another_window(self) -> None:
         other_window = QWidget()
