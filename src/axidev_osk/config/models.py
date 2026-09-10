@@ -59,6 +59,46 @@ class ChromeConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DwellClickConfig:
+    """Pointer dwell activation policy for one window.
+
+    Attributes:
+        enabled: Whether resting the pointer activates a key.
+        delay_ms: Time the pointer must remain inside the dead zone.
+        dead_zone_px: Allowed pointer displacement around the rest position.
+        full_speed_px_s: Highest speed that advances at the full rate.
+        stop_speed_px_s: Speed at which progress stops completely.
+    """
+
+    enabled: bool = False
+    delay_ms: int = 150
+    dead_zone_px: int = 10
+    full_speed_px_s: float = 10.0
+    stop_speed_px_s: float = 240.0
+
+    def __post_init__(self) -> None:
+        """Reject timing and distance values that cannot define a dwell."""
+
+        if not math.isfinite(self.delay_ms) or self.delay_ms < 1:
+            raise ValueError("Dwell click delay must be at least 1 millisecond")
+        if not math.isfinite(self.dead_zone_px) or self.dead_zone_px < 0:
+            raise ValueError(
+                "Dwell click dead zone must be finite and non-negative"
+            )
+        if not math.isfinite(self.full_speed_px_s) or self.full_speed_px_s < 0:
+            raise ValueError(
+                "Dwell click full speed must be finite and non-negative"
+            )
+        if (
+            not math.isfinite(self.stop_speed_px_s)
+            or self.stop_speed_px_s <= self.full_speed_px_s
+        ):
+            raise ValueError(
+                "Dwell click stop speed must be finite and greater than full speed"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class PointerLocatorConfig:
     """Component-aware pointer feedback configured as a surface component.
 
@@ -340,6 +380,7 @@ class WindowConfig:
         surface: Root surface content declaration.
         overlay: Overlay behavior for this window.
         chrome: Optional custom chrome policy.
+        dwell_click: Optional pointer dwell activation policy.
         opacity: Normal window opacity from zero through one.
     """
 
@@ -348,6 +389,7 @@ class WindowConfig:
     surface: SurfaceConfig
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     chrome: ChromeConfig = field(default_factory=ChromeConfig)
+    dwell_click: DwellClickConfig = field(default_factory=DwellClickConfig)
     opacity: float = 1.0
 
     def __post_init__(self) -> None:

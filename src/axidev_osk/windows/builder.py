@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested, WindowDragEnded, WindowDragStarted
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
+from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 
@@ -77,6 +78,11 @@ class RuntimeWindow(QMainWindow):
                         else None,
                     )
             self.setCentralWidget(central)
+            self._dwell_click = DwellClickController(
+                self,
+                central,
+                config.dwell_click,
+            )
             self._opacity = WindowOpacityController(self)
             self.set_visual_opacity(config.opacity)
             self.apply_startup_size(minimum_size=config.surface.minimum_size)
@@ -171,6 +177,13 @@ class RuntimeWindow(QMainWindow):
         super().showEvent(event)
         self.apply_startup_size(minimum_size=self._config.surface.minimum_size)
         self._overlay.handle_show()
+        self._dwell_click.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:  # type: ignore[override]
+        """Stop dwell sampling while this window is hidden."""
+
+        self._dwell_click.stop()
+        super().hideEvent(event)
 
 
 def build_window(config: WindowConfig, context: Context, *, parent: QWidget | None = None) -> RuntimeWindow:

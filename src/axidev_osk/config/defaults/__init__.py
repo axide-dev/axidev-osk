@@ -9,6 +9,7 @@ from ..models import (
     AppConfig,
     ButtonConfig,
     ChromeConfig,
+    DwellClickConfig,
     HotCornerConfig,
     KeyboardGridConfig,
     KeyboardStatusConfig,
@@ -79,6 +80,13 @@ def build_default_app_config() -> AppConfig:
             ),
         ),
         chrome=ChromeConfig(enabled=True),
+        dwell_click=DwellClickConfig(
+            enabled=True,
+            delay_ms=150,
+            dead_zone_px=10,
+            full_speed_px_s=10,
+            stop_speed_px_s=240,
+        ),
         opacity=0.85,
     )
 
