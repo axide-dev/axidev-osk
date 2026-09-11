@@ -191,7 +191,7 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertTrue(indicator.isVisible())
         self.assertAlmostEqual(indicator.progress, 0.25)
         expected_color = indicator.palette().color(
-            indicator.palette().ColorRole.Highlight,
+            indicator.palette().ColorRole.Mid,
         )
         self.assertEqual(
             indicator.progress_color.name(),

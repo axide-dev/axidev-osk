@@ -147,17 +147,17 @@ class DwellClickIndicator(QWidget):
 
     @property
     def progress_color(self) -> QColor:
-        """Return the theme accent used for the progress arc."""
+        """Return the theme gray used while dwell progress accumulates."""
 
-        color = self.palette().color(QPalette.ColorRole.Highlight)
+        color = self.palette().color(QPalette.ColorRole.Mid)
         color.setAlpha(240)
         return color
 
     @property
     def track_color(self) -> QColor:
-        """Return the translucent accent marking full progress."""
+        """Return the translucent gray marking full progress."""
 
-        color = self.palette().color(QPalette.ColorRole.Highlight)
+        color = self.palette().color(QPalette.ColorRole.Mid)
         color.setAlpha(130)
         return color
 
@@ -212,7 +212,7 @@ class DwellClickIndicator(QWidget):
         self.complete_feedback.clear()
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
-        """Paint a theme-colored dot that grows with dwell progress."""
+        """Paint a gray dot that grows with dwell progress."""
 
         del event
         _paint_dot(self, 1.0, self.track_color)
