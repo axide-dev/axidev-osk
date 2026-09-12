@@ -81,7 +81,7 @@ def build_default_app_config() -> AppConfig:
         ),
         chrome=ChromeConfig(enabled=True),
         dwell_click=DwellClickConfig(
-            enabled=True,
+            enabled=False,
             delay_ms=200,
             dead_zone_px=10,
             full_speed_px_s=20,

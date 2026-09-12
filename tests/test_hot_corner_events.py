@@ -12,8 +12,8 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.commands import WindowHide, WindowShow, WindowToggleOpacity
-from axidev_osk.runtime.events import ComponentPressed, HotCornerTriggered
+from axidev_osk.runtime.commands import WindowHide, WindowSetDwellEnabled, WindowShow, WindowToggleOpacity
+from axidev_osk.runtime.events import ComponentPressed, ComponentStateChanged, HotCornerTriggered
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 
@@ -269,6 +269,35 @@ class HotCornerEventTests(unittest.TestCase):
                     opacity=0.01,
                 )
             ],
+        )
+
+    def test_latched_dwell_action_dispatches_explicit_window_state(self) -> None:
+        context = make_test_context(FakeKeyboardBackend())
+        dwell = next(
+            component
+            for component in context.config.windows[0].surface.components[0].layout.grids[0].components
+            if component.spec.label == "Dwell"
+        )
+        commands: list[object] = []
+        context.dispatcher.add_command_handler(
+            WindowSetDwellEnabled,
+            lambda command: commands.append(command),
+        )
+        runtime = ApplicationRuntime.__new__(ApplicationRuntime)
+        runtime._dispatcher = context.dispatcher
+
+        runtime._handle_component_state_changed(
+            ComponentStateChanged(
+                component_id=dwell.id,
+                key_id=None,
+                latched=True,
+                key_spec=dwell.spec,
+            )
+        )
+
+        self.assertEqual(
+            commands,
+            [WindowSetDwellEnabled(window_id="window:keyboard", enabled=True)],
         )
 
 

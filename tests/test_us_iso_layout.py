@@ -52,6 +52,7 @@ def test_us_iso_layout_config_covers_expected_sections_and_key_sizes() -> None:
         "F10",
         "F11",
         "F12",
+        "Dwell",
         "PrtSc",
         "ScrLk",
         "Pause",
@@ -100,3 +101,17 @@ def test_ghost_key_uses_the_near_bracket_slot_and_targets_configured_window() ->
     assert ghost.action.kind == "toggle-opacity"
     assert ghost.action.target_window_id == target_window_id
     assert ghost.action.opacity == 0.01
+
+
+def test_dwell_key_is_a_latchable_window_action_after_f12() -> None:
+    target_window_id = "window:alternate"
+    specs = build_us_iso_layout(target_window_id=target_window_id)
+    dwell = next(spec for spec in specs if spec.label == "Dwell")
+
+    assert (dwell.row, dwell.column, dwell.width) == (0, 64, 1.0)
+    assert dwell.latchable
+    assert not dwell.repeats
+    assert dwell.io_key is None
+    assert dwell.action is not None
+    assert dwell.action.kind == "set-dwell-enabled"
+    assert dwell.action.target_window_id == target_window_id

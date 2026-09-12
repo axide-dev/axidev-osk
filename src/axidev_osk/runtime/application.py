@@ -17,17 +17,19 @@ from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
-from .commands import WindowMoveBy
+from .commands import StateSet, WindowMoveBy
 from .context import Context
 from .dispatcher import Dispatcher
 from .event_handlers import (
     register_context_command_handlers,
     register_event_handlers,
     route_component_pressed,
+    route_component_state_changed,
     route_hot_corner_triggered,
     route_pointer_drag_event,
 )
 from .events import WindowCloseRequested
+from .identity import window_state_namespace
 from .prompt import PromptResolutionWaiter
 from .registries import (
     ComponentRegistry,
@@ -204,6 +206,23 @@ class ApplicationRuntime:
         """Map configured component actions to runtime commands."""
 
         route_component_pressed(event, self)
+
+    def _handle_component_state_changed(self, event: object) -> None:
+        """Map configured latch state changes to runtime commands."""
+
+        route_component_state_changed(event, self)
+
+    def _set_window_dwell_enabled(self, window_id: str, enabled: bool) -> None:
+        """Apply and centrally store one window's dwell state."""
+
+        self._window_manager.set_dwell_enabled(window_id, enabled)
+        self._dispatcher.dispatch_command(
+            StateSet(
+                namespace=window_state_namespace(window_id),
+                key="dwell_enabled",
+                value=enabled,
+            )
+        )
 
     def _handle_pointer_drag_event(self, event: object) -> None:
         """Route raw pointer motion to the active layer-shell window drag."""

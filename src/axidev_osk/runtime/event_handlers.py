@@ -16,10 +16,11 @@ from .commands import (
     WindowClose,
     WindowHide,
     WindowMoveBy,
+    WindowSetDwellEnabled,
     WindowShow,
     WindowToggleOpacity,
 )
-from .events import ComponentPressed, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
+from .events import ComponentPressed, ComponentStateChanged, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
 from .registries import EventHandlerRegistry
 
 
@@ -105,12 +106,20 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         ),
     )
     registry.register_command_handler(
+        WindowSetDwellEnabled,
+        lambda runtime: lambda command: runtime._set_window_dwell_enabled(
+            command.window_id,
+            command.enabled,
+        ),
+    )
+    registry.register_command_handler(
         AppQuit,
         lambda runtime: lambda command: runtime._app.exit(command.exit_code),
     )
     registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
     registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
     registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
+    registry.register_event_handler(lambda runtime: runtime._handle_component_state_changed)
     registry.register_event_handler(lambda runtime: runtime._handle_pointer_drag_event)
 
 
@@ -149,6 +158,22 @@ def route_component_pressed(event: object, runtime: object) -> None:
                 opacity=action.opacity,
             )
         )
+
+
+def route_component_state_changed(event: object, runtime: object) -> None:
+    """Map latchable component actions to explicit window-state commands."""
+
+    if not isinstance(event, ComponentStateChanged) or event.key_spec is None:
+        return
+    action = event.key_spec.action
+    if action is None or action.kind != "set-dwell-enabled":
+        return
+    runtime._dispatcher.dispatch_command(  # noqa: SLF001
+        WindowSetDwellEnabled(
+            window_id=action.target_window_id,
+            enabled=event.latched,
+        )
+    )
 
 
 def route_pointer_drag_event(event: object, runtime: object) -> None:

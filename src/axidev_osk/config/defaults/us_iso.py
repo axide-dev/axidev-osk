@@ -23,7 +23,7 @@ from ..models import GridConfig, KeyConfig, LayoutConfig, SpacerConfig
 
 UNIT = 4
 MAIN_BLOCK_WIDTH = 60
-NAV_START = 64
+NAV_START = 68
 
 
 def key(
@@ -193,6 +193,17 @@ def build_us_iso_layout(*, target_window_id: str = "window:keyboard") -> list[Ke
         key("F10", row=0, column=u(13)),
         key("F11", row=0, column=u(14)),
         key("F12", row=0, column=u(15)),
+        key(
+            "Dwell",
+            row=0,
+            column=u(16),
+            latchable=True,
+            repeats=False,
+            action=WindowAction(
+                kind="set-dwell-enabled",
+                target_window_id=target_window_id,
+            ),
+        ),
         key("PrtSc", row=0, column=NAV_START, io_key="PrintScreen"),
         key("ScrLk", row=0, column=NAV_START + u(1), io_key="ScrollLock"),
         key("Pause", row=0, column=NAV_START + u(2), io_key="Pause"),

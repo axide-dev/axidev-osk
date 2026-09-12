@@ -231,6 +231,7 @@ class DwellClickController(QObject):
         super().__init__(window)
         self._window = window
         self._config = config
+        self._enabled = config.enabled
         self.indicator = DwellClickIndicator(
             surface,
             visible_from_progress=config.indicator_start_progress,
@@ -254,11 +255,32 @@ class DwellClickController(QObject):
     def start(self) -> None:
         """Begin sampling while the configured window is visible."""
 
-        if not self._config.enabled or self._timer.isActive():
+        if not self._enabled or self._timer.isActive():
             return
         self._reset()
         self._timer.start()
         self._poll_cursor()
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether dwell activation is currently enabled."""
+
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable dwell activation at runtime."""
+
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        if not enabled:
+            self.stop()
+            return
+        if not self._window.isVisible():
+            return
+        self._reset()
+        self._clicked_position = QCursor.pos()
+        self._timer.start()
 
     def stop(self) -> None:
         """Stop sampling and discard the current dwell."""

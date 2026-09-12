@@ -14,7 +14,7 @@ from ...runtime.commands import KeyboardKeyDown, KeyboardRegisterKeySpec, Keyboa
 from ...runtime.context import Context
 from ...runtime.diagnostics import keyboard_debug_enabled
 from ...runtime.events import BackendKeyRegistered, BackendKeyStateChanged, ComponentPressed, ComponentReleased, ComponentStateChanged, KeyLatchChanged
-from ...runtime.identity import component_state_namespace, keyboard_key_states_namespace, keyboard_latches_namespace
+from ...runtime.identity import component_state_namespace, keyboard_key_states_namespace, keyboard_latches_namespace, window_state_namespace
 from ..button.key import create_key_button, set_key_button_label
 from ..button.state import KeyInteractionState, KeyStateChange, KeyStateMachine
 from .metrics import KeyboardMetrics
@@ -279,7 +279,28 @@ class KeyboardWidget(QFrame):
             tables so live key state can drive its visual state.
         """
 
-        latched = bool(spec.key_id is not None and self._context.state.get(self._latch_namespace(), spec.key_id, False))
+        if spec.action is not None and spec.action.kind == "set-dwell-enabled":
+            target_config = next(
+                window
+                for window in self._context.config.windows
+                if window.id == spec.action.target_window_id
+            )
+            latched = bool(
+                self._context.state.get(
+                    window_state_namespace(target_config.id),
+                    "dwell_enabled",
+                    target_config.dwell_click.enabled,
+                )
+            )
+        else:
+            latched = bool(
+                spec.key_id is not None
+                and self._context.state.get(
+                    self._latch_namespace(),
+                    spec.key_id,
+                    False,
+                )
+            )
         state_key = self._state_key_for_spec(spec)
         # Late-bound holder so ``on_state_change`` (constructed before the
         # button exists) can reach the state machine after construction.
@@ -296,7 +317,7 @@ class KeyboardWidget(QFrame):
             key_spec: KeySpec = spec,
             key_id: str | None = spec.key_id,
         ) -> None:
-            if key_id is None:
+            if key_id is None and key_spec.action is None:
                 return
             machine = machine_ref[0]
             if machine is None:
@@ -314,7 +335,12 @@ class KeyboardWidget(QFrame):
             display.label,
             latchable=spec.latchable,
             initial_latched=latched,
-            on_state_change=on_state_change if spec.latchable and spec.key_id is not None else None,
+            on_state_change=(
+                on_state_change
+                if spec.latchable
+                and (spec.key_id is not None or spec.action is not None)
+                else None
+            ),
             component_id=component_id,
             width=spec.width,
             secondary_label=display.secondary_label,
@@ -423,7 +449,7 @@ class KeyboardWidget(QFrame):
         self,
         component_id: str,
         spec: KeySpec,
-        key_id: str,
+        key_id: str | None,
         state_machine: KeyStateMachine,
         change: KeyStateChange,
     ) -> None:
@@ -467,8 +493,28 @@ class KeyboardWidget(QFrame):
             KeyInteractionState.LATCHED_PRESSED,
         }
 
+        if spec.action is not None:
+            if previously_latched != currently_latched:
+                self._dispatch_event(
+                    ComponentStateChanged(
+                        component_id=component_id,
+                        key_id=None,
+                        latched=currently_latched,
+                        key_spec=spec,
+                    )
+                )
+            return
+
+        if key_id is None:
+            return
         if previously_latched != currently_latched:
-            self._dispatch_event(ComponentStateChanged(component_id=component_id, key_id=key_id, latched=currently_latched))
+            self._dispatch_event(
+                ComponentStateChanged(
+                    component_id=component_id,
+                    key_id=key_id,
+                    latched=currently_latched,
+                )
+            )
             self._dispatch_command(StateSet(namespace=component_state_namespace(component_id), key="latched", value=currently_latched))
             if key_id not in self._syncing_latch_keys:
                 self._dispatch_command(KeyboardSyncLatchedKey(self._layout_config.id, spec, currently_latched, component_id))
@@ -519,6 +565,8 @@ class KeyboardWidget(QFrame):
         self._context.dispatcher.dispatch_command(command)  # type: ignore[arg-type]
 
     def _state_key_for_spec(self, spec: KeySpec) -> str | None:
+        if spec.action is not None:
+            return None
         return spec.io_key or spec.label or spec.key_id
 
     def _latch_namespace(self) -> str:

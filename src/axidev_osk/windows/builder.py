@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.events import WindowCloseRequested, WindowDragEnded, WindowDragStarted
+from ..runtime.identity import window_state_namespace
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
@@ -83,6 +84,14 @@ class RuntimeWindow(QMainWindow):
                 central,
                 config.dwell_click,
             )
+            dwell_enabled = bool(
+                context.state.get(
+                    window_state_namespace(config.id),
+                    "dwell_enabled",
+                    config.dwell_click.enabled,
+                )
+            )
+            self._dwell_click.set_enabled(dwell_enabled)
             self._opacity = WindowOpacityController(self)
             self.set_visual_opacity(config.opacity)
             self.apply_startup_size(minimum_size=config.surface.minimum_size)
@@ -100,6 +109,11 @@ class RuntimeWindow(QMainWindow):
         """Set opacity through the platform-supported window implementation."""
 
         self._opacity.set_opacity(opacity)
+
+    def set_dwell_enabled(self, enabled: bool) -> None:
+        """Set whether pointer dwell activates components in this window."""
+
+        self._dwell_click.set_enabled(enabled)
 
     def move_by(self, dx: int, dy: int) -> None:
         """Move this window through its selected overlay backend."""

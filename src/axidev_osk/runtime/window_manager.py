@@ -181,6 +181,11 @@ class WindowManager:
         self._input_blockers[window_id] = blocker
         window.set_visual_opacity(opacity)
 
+    def set_dwell_enabled(self, window_id: str, enabled: bool) -> None:
+        """Set dwell activation on a managed window."""
+
+        self.get_or_create(window_id).set_dwell_enabled(enabled)
+
     def _restore_interaction(self, window_id: str, window: QWidget) -> None:
         """Restore configured opacity and remove any temporary input blocker."""
 

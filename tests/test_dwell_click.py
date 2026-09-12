@@ -41,10 +41,10 @@ class _MouseEventRecorder(QWidget):
 
 
 class DwellClickConfigTests(unittest.TestCase):
-    def test_default_keyboard_enables_dwell_click(self) -> None:
+    def test_default_keyboard_starts_with_dwell_click_disabled(self) -> None:
         config = build_default_app_config().windows[0].dwell_click
 
-        self.assertTrue(config.enabled)
+        self.assertFalse(config.enabled)
         self.assertEqual(config.delay_ms, 200)
         self.assertEqual(config.dead_zone_px, 10)
         self.assertEqual(config.full_speed_px_s, 20)
@@ -164,6 +164,33 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertFalse(self.other_key.isDown())
         self.assertFalse(self.other_key.isChecked())
         self.assertTrue(self.controller.indicator.complete_feedback.isVisible())
+
+    def test_runtime_disable_stops_and_clears_dwell(self) -> None:
+        with patch.object(self.controller, "_poll_cursor"):
+            self.controller.start()
+        self.controller._progress = 0.8
+        self.controller.indicator.show_progress(QPoint(120, 120), 0.8)
+
+        self.controller.set_enabled(False)
+
+        self.assertFalse(self.controller.enabled)
+        self.assertFalse(self.controller._timer.isActive())
+        self.assertEqual(self.controller._progress, 0)
+        self.assertFalse(self.controller.indicator.isVisible())
+
+    def test_runtime_enable_rearms_after_pointer_leaves_toggle(self) -> None:
+        position = self.key.mapToGlobal(QPoint(20, 20))
+        self.controller.set_enabled(False)
+
+        with patch(
+            "axidev_osk.windows.dwell_click.QCursor.pos",
+            return_value=position,
+        ):
+            self.controller.set_enabled(True)
+
+        self.assertTrue(self.controller.enabled)
+        self.assertTrue(self.controller._timer.isActive())
+        self.assertEqual(self.controller._clicked_position, position)
 
     def test_indicator_tracks_progress_at_pointer_position(self) -> None:
         current_position = self.key.mapToGlobal(QPoint(24, 20))

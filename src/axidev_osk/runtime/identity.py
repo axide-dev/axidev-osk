@@ -101,3 +101,9 @@ def component_state_namespace(component_id: str) -> str:
     """Return the state namespace for a deterministic component ID."""
 
     return state_namespace("component", component_id)
+
+
+def window_state_namespace(window_id: str) -> str:
+    """Return the state namespace for a deterministic window ID."""
+
+    return state_namespace("window", window_id)

@@ -10,14 +10,14 @@ from typing import Literal
 class WindowAction:
     """Declarative action targeting a configured window."""
 
-    kind: Literal["toggle-opacity"]
+    kind: Literal["toggle-opacity", "set-dwell-enabled"]
     target_window_id: str
     opacity: float = 0.01
 
     def __post_init__(self) -> None:
         """Validate values before the action reaches runtime routing."""
 
-        if self.kind != "toggle-opacity":
+        if self.kind not in {"toggle-opacity", "set-dwell-enabled"}:
             raise ValueError(f"Unsupported window action kind: {self.kind!r}")
         if not self.target_window_id.strip():
             raise ValueError("Window action target ID must not be empty")
@@ -87,8 +87,13 @@ class KeySpec:
             return
         if self.is_spacer:
             raise ValueError("Action keys cannot be spacers")
-        if self.io_key is not None or self.key_id is not None or self.latchable or self.holds_when_latched:
-            raise ValueError("Action keys cannot define keyboard output or latch behavior")
+        if self.io_key is not None or self.key_id is not None or self.holds_when_latched:
+            raise ValueError("Action keys cannot define keyboard output behavior")
+        if self.action.kind == "set-dwell-enabled":
+            if not self.latchable:
+                raise ValueError("Dwell action keys must be latchable")
+        elif self.latchable:
+            raise ValueError("Only dwell action keys can define latch behavior")
         if self.repeats:
             raise ValueError("Action keys cannot repeat")
 

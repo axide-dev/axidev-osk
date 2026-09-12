@@ -123,6 +123,14 @@ class WindowToggleOpacity:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowSetDwellEnabled:
+    """Command setting dwell activation for one managed window."""
+
+    window_id: str
+    enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
 class WindowClose:
     """Command requesting a managed window to be closed.
 
@@ -164,6 +172,7 @@ RuntimeCommand = (
     | WindowShow
     | WindowHide
     | WindowToggleOpacity
+    | WindowSetDwellEnabled
     | WindowClose
     | WindowMoveBy
     | AppQuit

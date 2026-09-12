@@ -14,6 +14,7 @@ from axidev_osk.components.grid.keyboard import KeyboardWidget
 from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
+from axidev_osk.runtime.identity import window_state_namespace
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.builder import RuntimeWindow, build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
@@ -281,6 +282,41 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         central = window.centralWidget()
         self.assertTrue(central.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
+
+    def test_rebuilt_window_restores_central_dwell_state(self) -> None:
+        _app()
+        config = build_default_app_config()
+        components = ComponentRegistry()
+        surfaces = SurfaceRegistry()
+        register_components(components)
+        register_surfaces(surfaces)
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=config,
+            components=components,
+            surfaces=surfaces,
+        )
+        window_config = config.windows[0]
+        context.state.set(
+            window_state_namespace(window_config.id),
+            "dwell_enabled",
+            True,
+        )
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=FakeOverlayController(),
+        ):
+            window = build_window(window_config, context)
+
+        self.addCleanup(window.close)
+        dwell = next(
+            button
+            for button in window.findChildren(QPushButton)
+            if button.text() == "Dwell"
+        )
+        self.assertTrue(window._dwell_click.enabled)
+        self.assertTrue(dwell.property("latched"))
 
     def test_startup_size_uses_minimum_size(self) -> None:
         _app()

@@ -37,13 +37,15 @@ class ComponentStateChanged:
 
     Attributes:
         component_id: Deterministic component ID.
-        key_id: Logical key group for latchable keys.
+        key_id: Optional logical key group for latchable keyboard keys.
         latched: New latched state.
+        key_spec: Optional key semantics for action components.
     """
 
     component_id: str
-    key_id: str
+    key_id: str | None
     latched: bool
+    key_spec: KeySpec | None = None
 
 
 @dataclass(frozen=True, slots=True)
