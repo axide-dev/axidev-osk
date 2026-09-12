@@ -4,49 +4,55 @@ import unittest
 from unittest.mock import Mock, patch
 
 from axidev_osk.runtime.commands import SecureInputPanelPrepare, SecureInputPanelRelease
-from axidev_osk.services.secure_input_panel import OBJECT_PATH, SERVICE_NAME, SecureInputPanelService
+from axidev_osk.services.secure_input_panel import SecureInputPanelWorkerService
 
 
-class SecureInputPanelServiceTests(unittest.TestCase):
-    def test_dbus_methods_dispatch_runtime_commands(self) -> None:
-        connection = Mock()
-        connection.isConnected.return_value = True
-        connection.registerService.return_value = True
-        connection.registerObject.return_value = True
-        context = Mock()
+class SecureInputPanelWorkerServiceTests(unittest.TestCase):
+    def test_worker_commands_dispatch_runtime_commands_and_acknowledge(self) -> None:
+        service = SecureInputPanelWorkerService()
+        service._context = Mock()
 
-        with patch(
-            "axidev_osk.services.secure_input_panel.QDBusConnection.sessionBus",
-            return_value=connection,
-        ):
-            service = SecureInputPanelService()
-            service.start(context)
-            service.prepare()
-            service.release()
-            service.stop()
+        with patch.object(service, "_respond") as respond:
+            service._handle_command("PREPARE")
+            service._handle_command("PING")
+            service._handle_command("RELEASE")
 
-        connection.registerService.assert_called_once_with(SERVICE_NAME)
-        self.assertEqual(connection.registerObject.call_args.args[:2], (OBJECT_PATH, service))
-        dispatched = [call.args[0] for call in context.dispatcher.dispatch_command.call_args_list]
-        self.assertEqual(dispatched, [SecureInputPanelPrepare(), SecureInputPanelRelease()])
-        connection.unregisterObject.assert_called_once_with(OBJECT_PATH)
-        connection.unregisterService.assert_called_once_with(SERVICE_NAME)
+        dispatched = [
+            call.args[0]
+            for call in service._context.dispatcher.dispatch_command.call_args_list
+        ]
+        self.assertEqual(
+            dispatched,
+            [SecureInputPanelPrepare(), SecureInputPanelRelease()],
+        )
+        self.assertEqual(
+            respond.call_args_list,
+            [
+                unittest.mock.call("PREPARED"),
+                unittest.mock.call("PONG"),
+                unittest.mock.call("RELEASED"),
+            ],
+        )
 
-    def test_failed_object_registration_releases_service_name(self) -> None:
-        connection = Mock()
-        connection.isConnected.return_value = True
-        connection.registerService.return_value = True
-        connection.registerObject.return_value = False
+    def test_failed_runtime_command_returns_error(self) -> None:
+        service = SecureInputPanelWorkerService()
+        service._context = Mock()
+        service._context.dispatcher.dispatch_command.side_effect = RuntimeError("failed")
 
-        with patch(
-            "axidev_osk.services.secure_input_panel.QDBusConnection.sessionBus",
-            return_value=connection,
-        ):
-            service = SecureInputPanelService()
-            with self.assertRaisesRegex(RuntimeError, OBJECT_PATH):
-                service.start(Mock())
+        with patch.object(service, "_respond") as respond:
+            service._handle_command("PREPARE")
 
-        connection.unregisterService.assert_called_once_with(SERVICE_NAME)
+        respond.assert_called_once_with("ERROR")
+
+    def test_unknown_worker_command_returns_error(self) -> None:
+        service = SecureInputPanelWorkerService()
+        service._context = Mock()
+
+        with patch.object(service, "_respond") as respond:
+            service._handle_command("UNKNOWN")
+
+        service._context.dispatcher.dispatch_command.assert_not_called()
+        respond.assert_called_once_with("ERROR")
 
 
 if __name__ == "__main__":

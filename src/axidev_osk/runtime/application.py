@@ -185,15 +185,15 @@ class ApplicationRuntime:
         self._secure_input_panel_prepared = True
 
     def _release_secure_input_panel(self) -> None:
-        """Destroy runtime resources released by the lock-screen QML."""
+        """Destroy the panel while retaining this KWin input-method connection."""
 
         if not self._secure_input_panel_prepared:
             return
         try:
-            self._window_manager.destroy(self._config.keyboard_window_id)
+            self._keyboard.reset_state()
         finally:
             try:
-                self._keyboard.shutdown()
+                self._window_manager.destroy(self._config.keyboard_window_id)
             finally:
                 self._secure_input_panel_prepared = False
 

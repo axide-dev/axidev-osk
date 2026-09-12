@@ -127,12 +127,89 @@ class NativeAdapterTests(unittest.TestCase):
         "ExecStart=/usr/bin/kwin_wayland --no-lockscreen --inputmethod plasma-keyboard --locale1\n"
     )
 
+    def test_installed_launcher_resolves_fallback_symlink_outside_path(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installed = root / "opt" / "axidev-osk"
+            installed.parent.mkdir()
+            installed.write_text("launcher", encoding="utf-8")
+            fallback = root / "usr" / "local" / "bin" / "axidev-osk"
+            fallback.parent.mkdir(parents=True)
+            fallback.symlink_to(installed)
+
+            with (
+                patch.object(linux_greeter, "DEFAULT_LAUNCHER_PATH", fallback),
+                patch.object(linux_greeter.shutil, "which", return_value=None),
+            ):
+                self.assertEqual(linux_greeter._installed_launcher(), installed)
+                self.assertEqual(linux_greeter._runtime_launcher(), installed)
+
     def test_plasma_input_method_uses_installed_launcher(self) -> None:
         launcher = Path("/opt/axidev-osk/bin/axidev-osk")
         text = linux_greeter._plasma_input_method_text(launcher)
 
-        self.assertIn(f"Exec={launcher}\n", text)
+        self.assertIn(f"Exec={launcher} internal plasma-lock-supervisor\n", text)
         self.assertIn("X-KDE-Wayland-VirtualKeyboard=true", text)
+
+    def test_plasma_upgrade_accepts_only_exact_previous_launcher_files(self) -> None:
+        launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "input-method.desktop"
+            path.write_text(
+                linux_greeter._previous_plasma_input_method_text(launcher),
+                encoding="utf-8",
+            )
+
+            linux_greeter._require_compatible_file(
+                path,
+                linux_greeter._plasma_input_method_text(launcher),
+                linux_greeter._previous_plasma_input_method_text(launcher),
+            )
+            path.write_text("unmanaged\n", encoding="utf-8")
+            with self.assertRaisesRegex(linux.LinuxSetupError, "conflicting file"):
+                linux_greeter._require_compatible_file(
+                    path,
+                    linux_greeter._plasma_input_method_text(launcher),
+                    linux_greeter._previous_plasma_input_method_text(launcher),
+                )
+
+    def test_plasma_supervisor_upgrade_replaces_exact_previous_files(self) -> None:
+        launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_method = root / "input-method.desktop"
+            dropin = root / "kwin.service.d" / "50-axidev-osk.conf"
+            unit = root / "kwin.service"
+            unit.write_text(self.PLASMA_KWIN_UNIT, encoding="utf-8")
+            dropin.parent.mkdir()
+            with (
+                patch.object(linux_greeter, "PLASMA_INPUT_METHOD_PATH", input_method),
+                patch.object(linux_greeter, "PLASMA_KWIN_DROPIN_PATH", dropin),
+                patch.object(linux_greeter, "PLASMA_KWIN_UNIT_PATHS", (unit,)),
+            ):
+                input_method.write_text(
+                    linux_greeter._previous_plasma_input_method_text(launcher),
+                    encoding="utf-8",
+                )
+                dropin.write_text(
+                    linux_greeter._previous_plasma_kwin_dropin_text(launcher),
+                    encoding="utf-8",
+                )
+
+                self.assertTrue(
+                    linux_greeter._upgrade_plasma_supervisor_files(launcher)
+                )
+                self.assertEqual(
+                    input_method.read_text(encoding="utf-8"),
+                    linux_greeter._plasma_input_method_text(launcher),
+                )
+                self.assertEqual(
+                    dropin.read_text(encoding="utf-8"),
+                    linux_greeter._plasma_kwin_dropin_text(launcher),
+                )
+                self.assertFalse(
+                    linux_greeter._upgrade_plasma_supervisor_files(launcher)
+                )
 
     def test_plasma_kwin_config_preserves_unmanaged_content(self) -> None:
         original = (
@@ -164,7 +241,8 @@ class NativeAdapterTests(unittest.TestCase):
 
         self.assertIn("ExecStart=\n", dropin)
         self.assertIn("--inputmethod", dropin)
-        self.assertIn(str(launcher), dropin)
+        self.assertIn(f"{launcher} internal plasma-login-worker", dropin)
+        self.assertNotIn("AXIDEV_OSK_GREETER", dropin)
         self.assertIn("--no-lockscreen", dropin)
         self.assertIn("--locale1", dropin)
         self.assertNotIn("--inputmethod plasma-keyboard", dropin)
@@ -194,8 +272,15 @@ class NativeAdapterTests(unittest.TestCase):
         self.assertLess(managed.index("id: axidevOskButton"), managed.index("id: virtualKeyboardButton"))
         self.assertEqual(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH.count("inputPanel.showHide()"), 1)
         self.assertIn("DBus.SessionBus.asyncCall", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertEqual(
+            linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH.count(
+                'iface: "org.axidev.OSK.LockScreen"'
+            ),
+            2,
+        )
         self.assertIn('member: "prepare"', linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertIn('member: "release"', linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
+        self.assertIn("reply.error.message", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertIn("target: mainBlock", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertIn("function onPasswordResult(password)", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertIn(
@@ -272,6 +357,40 @@ class NativeAdapterTests(unittest.TestCase):
             linux_greeter._plasma_lock_screen_ui_text(changed)
         with self.assertRaisesRegex(linux.LinuxSetupError, "marker pair"):
             linux_greeter._plasma_lock_screen_ui_without_patch(changed)
+
+    def test_file_transaction_restores_regular_files_atomically(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "managed.conf"
+            path.write_text("before\n", encoding="utf-8")
+            transaction = linux_greeter._FileTransaction()
+            transaction.write(path, "after\n")
+
+            with patch.object(linux, "_write_atomic", wraps=linux._write_atomic) as write:
+                transaction.rollback()
+
+        write.assert_called_once_with(path, "before\n", 0o644)
+
+    def test_file_transaction_continues_after_atomic_restore_failure(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.conf"
+            second = root / "second.conf"
+            first.write_text("first before\n", encoding="utf-8")
+            second.write_text("second before\n", encoding="utf-8")
+            transaction = linux_greeter._FileTransaction()
+            transaction.write(first, "first after\n")
+            transaction.write(second, "second after\n")
+            real_write = linux._write_atomic
+
+            def restore(path: Path, contents: str, mode: int) -> None:
+                if path == second:
+                    raise linux.LinuxSetupError("restore failed")
+                real_write(path, contents, mode)
+
+            with patch.object(linux, "_write_atomic", side_effect=restore):
+                transaction.rollback()
+
+            self.assertEqual(first.read_text(encoding="utf-8"), "first before\n")
 
     def test_plasma_version_is_read_from_owning_rpm(self) -> None:
         completed = Mock(returncode=0, stdout="6.7.4")

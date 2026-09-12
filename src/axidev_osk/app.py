@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import ctypes
 import logging
-import os
 import sys
+from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 
@@ -15,12 +15,20 @@ from PySide6.QtWidgets import QApplication
 from .runtime.application import ApplicationRuntime
 from .runtime.registries import ServiceRegistry
 from .services.keyboard import KeyboardService
-from .services.secure_input_panel import SecureInputPanelService
+from .services.secure_input_panel import SecureInputPanelWorkerService
 from .services.single_instance import ExistingInstanceActivated
 from .windows.overlay import OverlayBackend, prepare_always_on_top_window_environment
 
 
 _logger = logging.getLogger(__name__)
+
+
+class ApplicationMode(Enum):
+    """Explicit runtime role selected by an integration entry point."""
+
+    DESKTOP = "desktop"
+    PLASMA_LOCK = "plasma-lock"
+    PLASMA_LOGIN = "plasma-login"
 
 
 def _set_process_name(name: str) -> None:
@@ -56,22 +64,25 @@ def _input_panel_services(
     app: QApplication,
     backend: OverlayBackend,
     *,
-    lock_lifecycle: bool,
+    mode: ApplicationMode,
 ) -> ServiceRegistry | None:
     if backend != OverlayBackend.WAYLAND_INPUT_PANEL:
         return None
     services = ServiceRegistry()
-    services.register("keyboard", KeyboardService(), autostart=not lock_lifecycle)
-    if lock_lifecycle:
-        services.register("secure_input_panel", SecureInputPanelService(parent=app))
+    services.register("keyboard", KeyboardService(), autostart=mode != ApplicationMode.PLASMA_LOCK)
+    if mode == ApplicationMode.PLASMA_LOCK:
+        services.register(
+            "secure_input_panel_worker",
+            SecureInputPanelWorkerService(parent=app),
+        )
     return services
 
 
-def main() -> int:
+def main(*, mode: ApplicationMode = ApplicationMode.DESKTOP) -> int:
     """Run the Axidev OSK Qt application.
 
     Args:
-        None.
+        mode: Explicit desktop or Plasma integration role.
 
     Returns:
         QApplication exit code.
@@ -88,17 +99,19 @@ def main() -> int:
     _set_process_name("axidev-osk")
     _logger.info("Starting axidev-osk v%s", _package_version())
     overlay_backend = prepare_always_on_top_window_environment()
-    lock_lifecycle = (
-        overlay_backend == OverlayBackend.WAYLAND_INPUT_PANEL
-        and os.environ.get("AXIDEV_OSK_GREETER") != "1"
-    )
-    app = QApplication(sys.argv)
+    if (
+        mode != ApplicationMode.DESKTOP
+        and overlay_backend != OverlayBackend.WAYLAND_INPUT_PANEL
+    ):
+        raise RuntimeError(f"{mode.value} requires KWin's privileged input-method connection")
+    lock_lifecycle = mode == ApplicationMode.PLASMA_LOCK
+    app = QApplication([sys.argv[0]])
     app.setApplicationName("axidev-osk")
     _set_application_icon(app)
     app.setQuitOnLastWindowClosed(False)
     runtime = ApplicationRuntime(
         app,
-        services=_input_panel_services(app, overlay_backend, lock_lifecycle=lock_lifecycle),
+        services=_input_panel_services(app, overlay_backend, mode=mode),
         confirm_quit=overlay_backend != OverlayBackend.WAYLAND_INPUT_PANEL,
         show_startup_windows=not lock_lifecycle,
     )

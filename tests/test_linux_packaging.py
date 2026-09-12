@@ -96,6 +96,19 @@ class LinuxPackagingTests(unittest.TestCase):
             installer.index('mv "${INSTALL_PREFIX}" "${temporary}"'),
         )
 
+    def test_payload_replacement_warns_about_running_plasma_processes(self) -> None:
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "processes started before this payload replacement still use the previous code",
+            installer,
+        )
+        self.assertIn(
+            "Log out or reboot before testing the Plasma login or lock-screen integration",
+            installer,
+        )
+        self.assertEqual(installer.count("warn_replaced_processes\n"), 2)
+
     def test_vm_cloud_config_authorizes_test_key(self) -> None:
         public_key = "ssh-ed25519 test-key test-comment"
 

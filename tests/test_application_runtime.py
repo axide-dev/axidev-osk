@@ -246,6 +246,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         with (
             patch.object(runtime._window_manager, "show", return_value=lock_window) as show,
             patch.object(runtime._window_manager, "destroy") as destroy,
+            patch.object(keyboard, "reset_state") as reset_state,
         ):
             runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
             runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
@@ -253,7 +254,8 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             runtime.context.dispatcher.dispatch_command(SecureInputPanelPrepare())
 
         self.assertEqual(backend.initialize.call_count, 2)
-        backend.shutdown.assert_called_once_with()
+        backend.shutdown.assert_not_called()
+        reset_state.assert_called_once_with()
         self.assertEqual(show.call_count, 2)
         self.assertEqual(
             lock_window.set_close_enabled.call_args_list,
@@ -289,6 +291,24 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         self.assertEqual(backend.initialize.call_count, 2)
         backend.shutdown.assert_called_once_with()
         self.assertTrue(runtime._secure_input_panel_prepared)
+
+    def test_failed_key_reset_still_destroys_released_panel(self) -> None:
+        runtime = ApplicationRuntime(_app(), show_startup_windows=False)
+        runtime._secure_input_panel_prepared = True
+
+        with (
+            patch.object(
+                runtime._keyboard,
+                "reset_state",
+                side_effect=RuntimeError("reset failed"),
+            ),
+            patch.object(runtime._window_manager, "destroy") as destroy,
+            self.assertRaisesRegex(RuntimeError, "reset failed"),
+        ):
+            runtime.context.dispatcher.dispatch_command(SecureInputPanelRelease())
+
+        destroy.assert_called_once_with(runtime._config.keyboard_window_id)
+        self.assertFalse(runtime._secure_input_panel_prepared)
 
     def test_failed_panel_prepare_preserves_error_when_cleanup_also_fails(self) -> None:
         backend = Mock()

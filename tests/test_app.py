@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from PySide6.QtCore import QObject
 
-from axidev_osk.app import _input_panel_services
+from axidev_osk.app import ApplicationMode, _input_panel_services
 from axidev_osk.platform.overlay import OverlayBackend
 
 
@@ -16,7 +16,7 @@ class InputPanelRuntimeTests(unittest.TestCase):
         services = _input_panel_services(
             app,
             OverlayBackend.WAYLAND_INPUT_PANEL,
-            lock_lifecycle=True,
+            mode=ApplicationMode.PLASMA_LOCK,
         )
 
         self.assertIsNotNone(services)
@@ -27,7 +27,7 @@ class InputPanelRuntimeTests(unittest.TestCase):
         services = _input_panel_services(
             QObject(),
             OverlayBackend.WAYLAND_INPUT_PANEL,
-            lock_lifecycle=False,
+            mode=ApplicationMode.PLASMA_LOGIN,
         )
 
         self.assertIsNotNone(services)
@@ -38,7 +38,7 @@ class InputPanelRuntimeTests(unittest.TestCase):
         services = _input_panel_services(
             Mock(),
             OverlayBackend.WAYLAND_LAYER_SHELL,
-            lock_lifecycle=False,
+            mode=ApplicationMode.DESKTOP,
         )
 
         self.assertIsNone(services)

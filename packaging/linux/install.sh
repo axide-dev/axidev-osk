@@ -196,6 +196,11 @@ setup_permissions() {
     fi
 }
 
+warn_replaced_processes() {
+    warn "Axidev OSK processes started before this payload replacement still use the previous code."
+    warn "Log out or reboot before testing the Plasma login or lock-screen integration."
+}
+
 install_action() {
     local payload="$1"
     local checksum="$2"
@@ -211,9 +216,14 @@ install_action() {
     verify_local_payload "${payload}" "${checksum}"
     local staged
     staged="$(stage_payload "${payload}")"
+    local replaced_payload=0
+    [ ! -e "${INSTALL_PREFIX}" ] || replaced_payload=1
     activate_payload "${staged}"
     install_shared_files
     setup_permissions "${target_user}"
+    if [ "${replaced_payload}" -eq 1 ]; then
+        warn_replaced_processes
+    fi
     log "Install complete. Run: axidev-osk"
 }
 
@@ -253,6 +263,7 @@ rollback_action() {
     fi
     mv "${temporary}" "${BACKUP_PREFIX}"
     install_shared_files
+    warn_replaced_processes
     log "Rollback complete."
 }
 

@@ -144,6 +144,7 @@ PLASMA_LOCK_SCREEN_BUTTON_PATCH = (
     "                    DBus.SessionBus.asyncCall({\n"
     "                        service: \"org.axidev.OSK.LockScreen\",\n"
     "                        path: \"/org/axidev/OSK/LockScreen\",\n"
+    "                        iface: \"org.axidev.OSK.LockScreen\",\n"
     "                        member: \"release\"\n"
     "                    });\n"
     "                }\n\n"
@@ -164,11 +165,12 @@ PLASMA_LOCK_SCREEN_BUTTON_PATCH = (
     "                    DBus.SessionBus.asyncCall({\n"
     "                        service: \"org.axidev.OSK.LockScreen\",\n"
     "                        path: \"/org/axidev/OSK/LockScreen\",\n"
+    "                        iface: \"org.axidev.OSK.LockScreen\",\n"
     "                        member: \"prepare\"\n"
     "                    }, function() {\n"
     "                        axidevOskButton.showPreparedKeyboard();\n"
-    "                    }, function(error) {\n"
-    "                        console.warn(\"Cannot prepare Axidev OSK:\", error.message);\n"
+    "                    }, function(reply) {\n"
+    "                        console.warn(\"Cannot prepare Axidev OSK:\", reply.error.message);\n"
     "                    });\n"
     "                }\n"
     "            }\n"
@@ -217,15 +219,13 @@ class _FileTransaction:
                     path.unlink()
                 if kind == "file":
                     assert isinstance(value, bytes)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(value)
                     assert mode is not None
-                    path.chmod(mode)
+                    linux._write_atomic(path, value.decode("utf-8"), mode)
                 elif kind == "symlink":
                     assert isinstance(value, str)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.symlink_to(value)
-            except OSError:
+            except (OSError, linux.LinuxSetupError):
                 pass
 
 
@@ -287,6 +287,9 @@ def _setup(requested_manager: str | None) -> int:
             )
         if existing["manager"] == "plasma-login":
             _require_supported_plasma_lock_screen_version()
+            upgraded_supervisor = _upgrade_plasma_supervisor_files(_installed_launcher())
+            if upgraded_supervisor:
+                print("Migrated Plasma lock-screen supervision to the native launcher.")
         repaired_lock_screen = _repair_plasma_lock_screen_patch(existing)
         if repaired_lock_screen:
             print("Restored the managed Plasma lock-screen visibility block.")
@@ -343,9 +346,9 @@ def _repair_plasma_lock_screen_patch(state: dict[str, Any]) -> bool:
 
     if _state_manager(state) != "plasma-login":
         return False
-    if _plasma_lock_screen_patch_is_current(linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)):
-        return False
     lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
+    if _plasma_lock_screen_patch_is_current(lock_screen_ui):
+        return False
     if lock_screen_ui is None:
         raise linux.LinuxSetupError(
             f"Plasma lock-screen QML does not exist: {PLASMA_LOCK_SCREEN_UI_PATH}"
@@ -357,6 +360,36 @@ def _repair_plasma_lock_screen_patch(state: dict[str, Any]) -> bool:
         managed,
         PLASMA_LOCK_SCREEN_UI_PATH.stat().st_mode & 0o777,
     )
+    return True
+
+
+def _upgrade_plasma_supervisor_files(launcher: Path) -> bool:
+    """Atomically replace exact files owned by the pre-supervisor integration."""
+
+    input_method = linux._read_text(PLASMA_INPUT_METHOD_PATH)
+    dropin = linux._read_text(PLASMA_KWIN_DROPIN_PATH)
+    expected_input_method = _plasma_input_method_text(launcher)
+    expected_dropin = _plasma_kwin_dropin_text(launcher)
+    previous_input_method = _previous_plasma_input_method_text(launcher)
+    previous_dropin = _previous_plasma_kwin_dropin_text(launcher)
+    if input_method == expected_input_method and dropin == expected_dropin:
+        return False
+    if input_method not in {expected_input_method, previous_input_method}:
+        raise linux.LinuxSetupError(
+            f"refusing to replace conflicting file: {PLASMA_INPUT_METHOD_PATH}"
+        )
+    if dropin not in {expected_dropin, previous_dropin}:
+        raise linux.LinuxSetupError(
+            f"refusing to replace conflicting file: {PLASMA_KWIN_DROPIN_PATH}"
+        )
+
+    transaction = _FileTransaction()
+    try:
+        transaction.write(PLASMA_INPUT_METHOD_PATH, expected_input_method)
+        transaction.write(PLASMA_KWIN_DROPIN_PATH, expected_dropin)
+    except Exception:
+        transaction.rollback()
+        raise
     return True
 
 
@@ -471,7 +504,7 @@ def _terminal_key_reader() -> str:
 
 def _installed_launcher() -> Path:
     launcher = shutil.which("axidev-osk")
-    path = Path(launcher).resolve() if launcher else DEFAULT_LAUNCHER_PATH
+    path = Path(launcher or DEFAULT_LAUNCHER_PATH).resolve()
     if not path.is_file():
         raise linux.LinuxSetupError("axidev-osk must be installed before greeter setup")
     return path
@@ -488,8 +521,16 @@ def _prepare_plasma(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
         )
     managed_kwinrc = _plasma_kwin_config_text(original_kwinrc)
     managed_lock_screen_ui = _plasma_lock_screen_ui_text(lock_screen_ui)
-    _require_compatible_file(PLASMA_INPUT_METHOD_PATH, _plasma_input_method_text(launcher))
-    _require_compatible_file(PLASMA_KWIN_DROPIN_PATH, _plasma_kwin_dropin_text(launcher))
+    _require_compatible_file(
+        PLASMA_INPUT_METHOD_PATH,
+        _plasma_input_method_text(launcher),
+        _previous_plasma_input_method_text(launcher),
+    )
+    _require_compatible_file(
+        PLASMA_KWIN_DROPIN_PATH,
+        _plasma_kwin_dropin_text(launcher),
+        _previous_plasma_kwin_dropin_text(launcher),
+    )
     if PLASMA_INPUT_METHOD_PATH.exists() or PLASMA_INPUT_METHOD_PATH.is_symlink():
         _require_writable_regular_file(PLASMA_INPUT_METHOD_PATH)
     if original_kwinrc is not None:
@@ -813,7 +854,7 @@ def _plasma_input_method_text(launcher: Path) -> str:
     return (
         "[Desktop Entry]\n"
         "Name=Axidev OSK\n"
-        f"Exec={launcher}\n"
+        f"Exec={launcher} internal plasma-lock-supervisor\n"
         "Type=Application\n"
         "X-KDE-Wayland-VirtualKeyboard=true\n"
         "NoDisplay=true\n"
@@ -821,7 +862,37 @@ def _plasma_input_method_text(launcher: Path) -> str:
     )
 
 
+def _previous_plasma_input_method_text(launcher: Path) -> str:
+    """Return the exact pre-supervisor file accepted during managed upgrade."""
+
+    return _plasma_input_method_text(launcher).replace(
+        " internal plasma-lock-supervisor",
+        "",
+        1,
+    )
+
+
 def _plasma_kwin_dropin_text(launcher: Path) -> str:
+    return _plasma_kwin_dropin_text_for_command(
+        f"{launcher} internal plasma-login-worker",
+        greeter_environment=False,
+    )
+
+
+def _previous_plasma_kwin_dropin_text(launcher: Path) -> str:
+    """Return the exact pre-supervisor drop-in accepted during managed upgrade."""
+
+    return _plasma_kwin_dropin_text_for_command(
+        str(launcher),
+        greeter_environment=True,
+    )
+
+
+def _plasma_kwin_dropin_text_for_command(
+    input_method: str,
+    *,
+    greeter_environment: bool,
+) -> str:
     unit_path = next((path for path in PLASMA_KWIN_UNIT_PATHS if path.is_file()), None)
     if unit_path is None:
         raise linux.LinuxSetupError("Plasma Login Manager KWin service is missing")
@@ -840,12 +911,13 @@ def _plasma_kwin_dropin_text(launcher: Path) -> str:
         ) from exc
     if input_method_index + 1 >= len(arguments):
         raise linux.LinuxSetupError("Plasma Login Manager KWin input method is missing")
-    arguments[input_method_index + 1] = str(launcher)
+    arguments[input_method_index + 1] = input_method
+    environment = "Environment=AXIDEV_OSK_GREETER=1\n" if greeter_environment else ""
     return (
         "[Service]\n"
-        "Environment=AXIDEV_OSK_GREETER=1\n"
-        "ExecStart=\n"
-        f"ExecStart={shlex.join(arguments)}\n"
+        + environment
+        + "ExecStart=\n"
+        + f"ExecStart={shlex.join(arguments)}\n"
     )
 
 
@@ -1302,9 +1374,9 @@ def _parse_greetd_config(contents: str) -> GreetdConfig:
     return GreetdConfig(account, command, index, original_line, newline)
 
 
-def _require_compatible_file(path: Path, expected: str) -> None:
+def _require_compatible_file(path: Path, expected: str, *previous: str) -> None:
     current = linux._read_text(path)
-    if current is not None and current != expected:
+    if current is not None and current not in {expected, *previous}:
         raise linux.LinuxSetupError(f"refusing to replace conflicting file: {path}")
 
 
@@ -1391,9 +1463,12 @@ def _is_v0173_plasma_state(state: dict[str, Any]) -> bool:
 
 def _runtime_launcher() -> Path:
     launcher = shutil.which("axidev-osk")
-    return Path(launcher).resolve() if launcher else DEFAULT_LAUNCHER_PATH
+    return Path(launcher or DEFAULT_LAUNCHER_PATH).resolve()
 
 
+# LightDM and greetd still use this legacy Python/shell supervision path. If it
+# needs behavioral changes, migrate that manager to the native launcher's
+# internal supervisor protocol instead of extending this parallel mechanism.
 class _KeyboardSupervisor:
     def __init__(self, manager: str, environment: dict[str, str]) -> None:
         self.manager = manager
