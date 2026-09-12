@@ -13,7 +13,9 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+
+from ..components.button import Button
 
 
 MoveResizeHandler = Callable[[int, int], None]
@@ -65,7 +67,7 @@ class OverlayTitleBar(QFrame):
         layout.addWidget(title_label)
         layout.addStretch(1)
 
-        close_button = QPushButton("x", self)
+        close_button = Button("x", self)
         self._close_button = close_button
         close_button.setObjectName("layerShellCloseButton")
         close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
