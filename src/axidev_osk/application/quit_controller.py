@@ -136,17 +136,20 @@ class ApplicationQuitController(QObject):
         self._signal_timer.start()
         self._install_stdin_eof_handler()
 
-    def request_quit(self) -> None:
+    def request_quit(self, *, confirm: bool = True) -> None:
         """Begin the graceful shutdown sequence, if not already running.
+
+        Args:
+            confirm: Whether to ask the user before starting shutdown.
 
         Returns:
             None.
 
         Side effects:
-            Prompts the user; on confirmation, invokes registered quit
-            callbacks in order, hides and closes all registered windows,
-            then calls ``QApplication.exit(0)``. Subsequent calls while
-            shutdown is in progress are ignored.
+            When requested, prompts the user. Then invokes registered quit
+            callbacks in order, hides and closes all registered windows, and
+            calls ``QApplication.exit(0)``. Subsequent calls while shutdown
+            is in progress are ignored.
         """
 
         if self._quitting:
@@ -154,7 +157,7 @@ class ApplicationQuitController(QObject):
             return
 
         active_window = self._app.activeWindow()
-        if not self._prompt(active_window):
+        if confirm and not self._prompt(active_window):
             _logger.info("Graceful shutdown cancelled")
             return
 
@@ -182,8 +185,9 @@ class ApplicationQuitController(QObject):
         _logger.info("Graceful shutdown completed in %.3fs", time.perf_counter() - shutdown_started_at)
         self._app.exit(0)
 
-    def _handle_signal(self, _signum: int, _frame: object) -> None:
-        QTimer.singleShot(0, self.request_quit)
+    def _handle_signal(self, signum: int, _frame: object) -> None:
+        confirm = signum != signal.SIGTERM
+        QTimer.singleShot(0, lambda: self.request_quit(confirm=confirm))
 
     def _callback_name(self, callback: QuitCallback) -> str:
         self_obj = getattr(callback, "__self__", None)
