@@ -20,6 +20,14 @@ def test_held_modifiers_opt_into_backend_repeat() -> None:
     assert all(spec.repeats for spec in held_modifiers)
 
 
+def test_function_keys_declare_matching_io_keys() -> None:
+    function_specs = [spec for spec in build_us_iso_layout() if spec.label.startswith("F")]
+
+    assert [(spec.label, spec.io_key) for spec in function_specs] == [
+        (f"F{number}", f"F{number}") for number in range(1, 13)
+    ]
+
+
 def test_us_iso_layout_config_preserves_key_geometry_and_ids() -> None:
     specs = build_us_iso_layout()
     config = build_us_iso_layout_config()
