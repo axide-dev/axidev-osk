@@ -50,6 +50,9 @@ class FakeWidgetKeyboardBackend:
         self._pressed_key_names = pressed_key_names or set()
         self._listeners = []
 
+    def add_modifier_state_listener(self, listener):
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         self._listeners.append(listener)
 
@@ -177,6 +180,43 @@ class KeyStateListenerTests(unittest.TestCase):
 
         fake_listener.callback(SimpleNamespace(key_name="A", pressed=False))
         self.assertEqual(events, [("A", True), ("A", False)])
+
+    def test_letters_get_shift_only_from_the_shift_latch(self) -> None:
+        backend, fake_keyboard, _listener = self._initialized_backend()
+        spec = KeySpec(label="a", row=0, column=0, io_key="A")
+
+        backend.key_down(spec, {"caps": True})
+        fake_keyboard.sender.key_down.assert_called_once_with("A", repeat=True)
+
+        fake_keyboard.sender.key_down.reset_mock()
+        backend.key_down(spec, {"shift": True, "caps": True})
+        fake_keyboard.sender.key_down.assert_called_once_with("A", mods="Shift", repeat=True)
+
+    def test_listener_reports_lock_modifiers_before_the_key(self) -> None:
+        backend, _keyboard, fake_listener = self._initialized_backend()
+        events: list[object] = []
+        backend.add_modifier_state_listener(events.append)
+        backend.add_key_state_listener(lambda key_name, pressed: events.append((key_name, pressed)))
+
+        fake_listener.callback(SimpleNamespace(key_name="CapsLock", pressed=True, modifiers=("CapsLock",)))
+
+        self.assertEqual(events, [frozenset({"capslock"}), ("CapsLock", True)])
+
+    def _initialized_backend(self):
+        backend = AxidevIoKeyboardBackend()
+        fake_listener = FakeNativeListener()
+        fake_keyboard = SimpleNamespace(
+            initialize=Mock(),
+            status=Mock(return_value=SimpleNamespace(backend_name="fake")),
+            keys=FakeKeys(),
+            listener=fake_listener,
+            sender=FakeSender(),
+        )
+        fake_module = ModuleType("axidev_io")
+        fake_module.keyboard = fake_keyboard
+        with patch.dict("sys.modules", {"axidev_io": fake_module}):
+            self.assertTrue(backend.initialize())
+        return backend, fake_keyboard, fake_listener
 
     def test_keyboard_widget_reflects_backend_key_state_for_sent_io_key(self) -> None:
         _app()

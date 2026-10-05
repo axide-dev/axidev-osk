@@ -356,7 +356,7 @@ class KeyboardWidget(QFrame):
                 button.set_pressed(bool(snapshot.get("pressed", False)), reason="store_snapshot")
             if spec.key_id is not None:
                 button.set_latched(bool(self._context.state.get(self._latch_namespace(), spec.key_id, False)), reason="store_snapshot")
-        if spec.latchable and spec.key_id is not None:
+        if spec.key_id is not None and (spec.latchable or spec.lock_modifier is not None):
             if spec.holds_when_latched:
                 self._hold_visual_modifiers.add(spec.key_id)
             self._latch_groups.setdefault(spec.key_id, []).append(button)

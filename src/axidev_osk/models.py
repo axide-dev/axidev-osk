@@ -59,6 +59,7 @@ class KeySpec:
         io_key: Backend key name emitted for normal presses.
         holds_when_latched: Whether the backend key should stay held while latched.
         honors_latched_modifiers: Whether display resolution should account for active latches.
+        lock_modifier: Backend lock modifier, such as ``CapsLock``, whose observed state drives this key's latch.
         repeats: Whether holding this key should produce repeat events.
         display_variants: Modifier-aware display alternatives.
         action: Optional window action used instead of keyboard output.
@@ -76,6 +77,7 @@ class KeySpec:
     io_key: str | None = None
     holds_when_latched: bool = False
     honors_latched_modifiers: bool = True
+    lock_modifier: str | None = None
     repeats: bool = True
     display_variants: tuple[KeyDisplay, ...] = ()
     action: WindowAction | None = None
@@ -83,11 +85,13 @@ class KeySpec:
     def __post_init__(self) -> None:
         """Reject action keys with conflicting keyboard behavior."""
 
+        if self.lock_modifier is not None and self.key_id is None:
+            raise ValueError("Lock modifier keys need a key ID for their latch state")
         if self.action is None:
             return
         if self.is_spacer:
             raise ValueError("Action keys cannot be spacers")
-        if self.io_key is not None or self.key_id is not None or self.holds_when_latched:
+        if self.io_key is not None or self.key_id is not None or self.holds_when_latched or self.lock_modifier is not None:
             raise ValueError("Action keys cannot define keyboard output behavior")
         if self.action.kind == "set-dwell-enabled":
             if not self.latchable:

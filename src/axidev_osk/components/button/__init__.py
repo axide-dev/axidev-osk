@@ -106,10 +106,8 @@ class Button(QPushButton):
         )
 
     def set_latched(self, latched: bool, *, reason: str = "set_latched") -> None:
-        """Set the latched dimension when the button supports latching."""
+        """Set the latched dimension from external state."""
 
-        if not self._latchable:
-            return
         self._transition_to(
             self._compose_state(pressed=self.is_pressed, latched=latched),
             reason,

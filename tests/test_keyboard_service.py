@@ -32,6 +32,7 @@ class FakeKeyboardBackend:
         self.permission_setup_text = ""
         self._pressed_key_names = pressed_key_names or set()
         self._listeners = []
+        self._modifier_listeners = []
         self.key_down = Mock(return_value=SimpleNamespace(name="press"))
         self.key_up = Mock()
         self.sync_latched_key = Mock(return_value=None)
@@ -41,6 +42,14 @@ class FakeKeyboardBackend:
 
     def shutdown(self) -> None:
         return None
+
+    def add_modifier_state_listener(self, listener):
+        self._modifier_listeners.append(listener)
+        return lambda: self._modifier_listeners.remove(listener)
+
+    def emit_modifiers(self, *names: str) -> None:
+        for listener in tuple(self._modifier_listeners):
+            listener(frozenset(names))
 
     def add_key_state_listener(self, listener):
         self._listeners.append(listener)
@@ -402,6 +411,46 @@ class KeyboardServiceTests(unittest.TestCase):
             if button.property("ioKeyName") == io_key_name:
                 return button
         raise AssertionError(f"button for {io_key_name!r} was not found")
+
+    def test_caps_key_and_letter_labels_follow_observed_caps_lock(self) -> None:
+        _app()
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
+        self.addCleanup(widget.close)
+        caps = self._button_for_key_id(widget, "caps")
+        letter = self._button_for_io_key(widget, "A")
+
+        backend.emit_modifiers("capslock")
+        QApplication.processEvents()
+
+        self.assertTrue(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "caps"))
+        self.assertTrue(caps.property("latched"))
+        self.assertEqual(letter.text(), "A")
+
+        backend.emit_modifiers()
+        QApplication.processEvents()
+
+        self.assertFalse(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "caps"))
+        self.assertFalse(caps.property("latched"))
+        self.assertEqual(letter.text(), "a")
+
+    def test_caps_button_sends_caps_lock_without_toggling_its_latch(self) -> None:
+        _app()
+        backend = FakeKeyboardBackend()
+        context = make_test_context(backend)
+        widget = KeyboardWidget(layout_config=build_us_iso_layout_config(), context=context)
+        self.addCleanup(widget.close)
+        caps = self._button_for_key_id(widget, "caps")
+
+        caps.pressed.emit()
+        caps.released.emit()
+        QApplication.processEvents()
+
+        self.assertEqual(backend.key_down.call_args.args[0].io_key, "CapsLock")
+        backend.key_up.assert_called_once()
+        self.assertFalse(context.state.get(keyboard_latches_namespace(LAYOUT_ID), "caps", False))
+        self.assertFalse(caps.property("latched"))
 
     def _button_for_key_id(self, widget: KeyboardWidget, key_id: str) -> QPushButton:
         for button in widget.findChildren(QPushButton):

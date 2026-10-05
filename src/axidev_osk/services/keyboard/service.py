@@ -44,6 +44,7 @@ class KeyboardService:
         self._specs_by_key_name: dict[str, list[tuple[str, KeySpec]]] = {}
         self._layouts: set[str] = set()
         self._backend_listener_unsubscribe: Unsubscribe | None = None
+        self._modifier_listener_unsubscribe: Unsubscribe | None = None
 
     def bind_context(self, context: "Context") -> None:
         """Bind the runtime context used for events and state updates."""
@@ -227,6 +228,15 @@ class KeyboardService:
                 continue
             self._emit_key_state(layout_id, key_id, pressed=pressed, latched=self._is_spec_latched(layout_id, spec))
 
+    def _handle_backend_modifier_state_change(self, modifiers: frozenset[str]) -> None:
+        for registrations in tuple(self._specs_by_key_name.values()):
+            for layout_id, spec in registrations:
+                if spec.lock_modifier is None or spec.key_id is None:
+                    continue
+                latched = spec.lock_modifier.lower() in modifiers
+                if latched != self.is_latched(layout_id, spec.key_id):
+                    self._set_latch_state(layout_id, spec.key_id, latched)
+
     def _set_latch_state(self, layout_id: str, key_id: str, latched: bool) -> None:
         self._layouts.add(layout_id)
         self._latched_keys[(layout_id, key_id)] = latched
@@ -290,3 +300,7 @@ class KeyboardService:
     def _ensure_backend_listener(self) -> None:
         if self._backend_listener_unsubscribe is None:
             self._backend_listener_unsubscribe = self._backend.add_key_state_listener(self._handle_backend_key_state_change)
+        if self._modifier_listener_unsubscribe is None:
+            self._modifier_listener_unsubscribe = self._backend.add_modifier_state_listener(
+                self._handle_backend_modifier_state_change
+            )
