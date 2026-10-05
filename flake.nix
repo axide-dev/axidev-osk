@@ -41,7 +41,7 @@
 
           axidev-osk = python.pkgs.buildPythonApplication {
             pname = "axidev-osk";
-            version = "0.18.0";
+            version = "0.18.1";
             pyproject = true;
             src = self;
 
