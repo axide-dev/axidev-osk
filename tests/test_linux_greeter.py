@@ -141,8 +141,8 @@ class NativeAdapterTests(unittest.TestCase):
                 patch.object(linux_greeter, "DEFAULT_LAUNCHER_PATH", fallback),
                 patch.object(linux_greeter.shutil, "which", return_value=None),
             ):
-                self.assertEqual(linux_greeter._installed_launcher(), installed)
-                self.assertEqual(linux_greeter._runtime_launcher(), installed)
+                self.assertEqual(linux_greeter._installed_launcher(), installed.resolve())
+                self.assertEqual(linux_greeter._runtime_launcher(), installed.resolve())
 
     def test_plasma_input_method_uses_installed_launcher(self) -> None:
         launcher = Path("/opt/axidev-osk/bin/axidev-osk")
@@ -361,7 +361,7 @@ class NativeAdapterTests(unittest.TestCase):
     def test_file_transaction_restores_regular_files_atomically(self) -> None:
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "managed.conf"
-            path.write_text("before\n", encoding="utf-8")
+            path.write_bytes(b"before\n")
             transaction = linux_greeter._FileTransaction()
             transaction.write(path, "after\n")
 
@@ -375,8 +375,8 @@ class NativeAdapterTests(unittest.TestCase):
             root = Path(temporary)
             first = root / "first.conf"
             second = root / "second.conf"
-            first.write_text("first before\n", encoding="utf-8")
-            second.write_text("second before\n", encoding="utf-8")
+            first.write_bytes(b"first before\n")
+            second.write_bytes(b"second before\n")
             transaction = linux_greeter._FileTransaction()
             transaction.write(first, "first after\n")
             transaction.write(second, "second after\n")
