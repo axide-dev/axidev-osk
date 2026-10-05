@@ -226,3 +226,9 @@ class WindowManager:
         """Return all live managed windows."""
 
         return list(self._windows.values())
+
+    def refresh_screen_configuration(self) -> None:
+        """Recover existing windows without constructing additional instances."""
+
+        for window in self.all_windows():
+            window.refresh_screen_configuration()

@@ -8,6 +8,11 @@ from ..models import KeySpec
 
 
 @dataclass(frozen=True, slots=True)
+class DisplayConfigurationChanged:
+    """The connected outputs or their usable dimensions have changed."""
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentPressed:
     """A component was pressed by the user.
 
@@ -153,7 +158,8 @@ class PromptResolved:
 
 
 RuntimeEvent = (
-    ComponentPressed
+    DisplayConfigurationChanged
+    | ComponentPressed
     | ComponentReleased
     | ComponentStateChanged
     | BackendKeyRegistered

@@ -120,6 +120,13 @@ class RuntimeWindow(QMainWindow):
 
         self._overlay.move_by(dx, dy)
 
+    def refresh_screen_configuration(self) -> None:
+        """Apply display recovery through the selected overlay backend."""
+
+        refresh = getattr(self._overlay, "refresh_screen_configuration", None)
+        if refresh is not None:
+            refresh()
+
     def set_close_enabled(self, enabled: bool) -> None:
         """Set whether installed custom chrome exposes its close control."""
 
@@ -179,6 +186,10 @@ class RuntimeWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Route managed close requests through the runtime dispatcher."""
 
+        removed_output = getattr(self._overlay, "has_removed_output", None)
+        if removed_output is not None and removed_output():
+            event.ignore()
+            return
         if not self._quit_controller_managed:
             super().closeEvent(event)
             return

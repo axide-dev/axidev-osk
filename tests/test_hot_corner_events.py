@@ -38,6 +38,9 @@ class FakeOverlayController:
     def handle_show(self) -> bool:
         return True
 
+    def set_screen(self, screen: object) -> None:
+        del screen
+
 
 class FakeKeyboardBackend:
     ready = True

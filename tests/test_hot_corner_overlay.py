@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QMargins, QPoint, QRect, Qt
+from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QApplication
 
 from axidev_osk.hot_corner.controller import (
@@ -44,6 +44,8 @@ class FakeWindow:
         self._window_flags = Qt.WindowType.Widget
         self._attributes_enabled: set[Qt.WidgetAttribute] = set()
         self.lifecycle: list[str] = []
+        self._minimum_size = QSize(0, 0)
+        self._maximum_size = QSize(16777215, 16777215)
 
     def setFocusPolicy(self, policy: Qt.FocusPolicy) -> None:
         self.focus_policies.append(policy)
@@ -96,6 +98,12 @@ class FakeWindow:
     def minimumHeight(self) -> int:
         return 0
 
+    def minimumSize(self) -> QSize:
+        return self._minimum_size
+
+    def maximumSize(self) -> QSize:
+        return self._maximum_size
+
     def x(self) -> int:
         return self._x
 
@@ -103,6 +111,9 @@ class FakeWindow:
         return self._y
 
     def screen(self) -> None:
+        return None
+
+    def windowHandle(self) -> None:
         return None
 
     def show(self) -> None:
@@ -136,6 +147,14 @@ class FakeOverlayController:
         self.prepare_show_calls = 0
         self.handle_show_calls = 0
         self.backend = backend
+        self.screen = None
+        self.released = False
+
+    def set_screen(self, screen: object) -> None:
+        self.screen = screen
+
+    def release_resources(self) -> None:
+        self.released = True
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         geometry = QRect(screen_geometry) if screen_geometry is not None else QRect()
@@ -292,6 +311,63 @@ class OverlayWindowControllerTests(unittest.TestCase):
         anchors, margins = calls[-1]
         self.assertEqual(anchors, ANCHOR_LEFT | ANCHOR_TOP)
         self.assertEqual(margins, QMargins(-10, -20, 0, 0))
+
+    def test_reappearance_centers_each_clipped_edge_using_layer_margins(self) -> None:
+        geometry = QRect(-800, 200, 800, 600)
+        for position in (QPoint(-801, 220), QPoint(-50, 220), QPoint(-780, 199), QPoint(-780, 750)):
+            with self.subTest(position=position), patch.object(
+                AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL
+            ), patch.object(
+                AlwaysOnTopWindowController, "_current_screen_geometry", return_value=geometry
+            ), patch(
+                "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell", return_value=True
+            ) as apply:
+                window = FakeWindow()
+                controller = AlwaysOnTopWindowController(window)
+                controller.move_to(position, screen_geometry=geometry)
+                # Qt coordinates are not reliable for layer-shell placement.
+                window.move(-780, 220)
+                controller.handle_show()
+                self.assertEqual(apply.call_args.kwargs["margins"], QMargins(350, 0, 0, 270))
+                self.assertEqual(apply.call_args.kwargs["anchors"], ANCHOR_LEFT | ANCHOR_BOTTOM)
+                self.assertTrue(apply.call_args.kwargs["wants_to_be_on_active_screen"])
+
+    def test_active_output_change_rechecks_saved_position(self) -> None:
+        with patch.object(
+            AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL
+        ), patch.object(
+            AlwaysOnTopWindowController, "_current_screen_geometry", return_value=QRect(0, 0, 1920, 1080)
+        ) as geometry, patch(
+            "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell", return_value=True
+        ) as apply:
+            controller = AlwaysOnTopWindowController(FakeWindow())
+            controller.move_to(QPoint(1600, 800))
+            controller.handle_show()
+            geometry.return_value = QRect(-800, 0, 800, 600)
+            controller._layer_shell_screen_changed(FakeScreen(geometry.return_value))
+            self.assertEqual(apply.call_args.kwargs["margins"], QMargins(350, 0, 0, 270))
+
+    def test_removed_output_remaps_visible_window_but_keeps_hidden_window_hidden(self) -> None:
+        app = Mock()
+        app.screens.return_value = [FakeScreen(QRect(0, 0, 800, 600), name="remaining")]
+        for visible in (True, False):
+            with self.subTest(visible=visible), patch.object(
+                AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL
+            ), patch.object(
+                AlwaysOnTopWindowController, "_current_screen_geometry", return_value=QRect(0, 0, 800, 600)
+            ), patch(
+                "axidev_osk.windows.overlay.always_on_top.QGuiApplication.instance", return_value=app
+            ), patch(
+                "axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell", return_value=True
+            ):
+                window = FakeWindow()
+                window._visible = visible
+                controller = AlwaysOnTopWindowController(window)
+                controller._mapped_screen_name = "unplugged"
+                with patch.object(window, "show", wraps=window.show) as show:
+                    controller.refresh_screen_configuration()
+                self.assertEqual(show.call_count, int(visible))
+                self.assertEqual(window.isVisible(), visible)
 
     def test_wayland_layer_shell_move_by_clamps_margins_to_screen(self) -> None:
         window = FakeWindow()
@@ -671,6 +747,29 @@ class HotCornerControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dispatcher = Dispatcher()
 
+    def test_initial_fullscreen_configure_preserves_sensor_and_indicator_corner_margins(self) -> None:
+        geometry = QRect(-1920, 100, 1920, 1200)
+        for size, margin in ((20, 0), (52, 14)):
+            for corner in ScreenCorner:
+                with self.subTest(size=size, corner=corner), patch.object(
+                    HotCornerOverlayController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL
+                ), patch("axidev_osk.hot_corner.controller.apply_wayland_layer_shell", return_value=True) as apply:
+                    window = FakeWindow()
+                    window._minimum_size = window._maximum_size = QSize(size, size)
+                    # Reproduce the compositor's first, screen-sized configure.
+                    window.resize(1920, 1200)
+                    anchors = HotCornerWindowToggleController._corner_anchors(corner)
+                    x = geometry.left() + margin if anchors & ANCHOR_LEFT else geometry.right() - size - margin + 1
+                    y = geometry.top() + margin if anchors & ANCHOR_TOP else geometry.bottom() - size - margin + 1
+                    overlay = HotCornerOverlayController(window)
+                    overlay.move_to_anchored(QPoint(x, y), anchors=anchors, screen_geometry=geometry)
+                    self.assertEqual(apply.call_args.kwargs["margins"], QMargins(
+                        margin if anchors & ANCHOR_LEFT else 0,
+                        margin if anchors & ANCHOR_TOP else 0,
+                        margin if anchors & ANCHOR_RIGHT else 0,
+                        margin if anchors & ANCHOR_BOTTOM else 0,
+                    ))
+
     def test_wayland_helper_uses_explicit_corner_anchors(self) -> None:
         window = FakeWindow()
         with patch.object(
@@ -691,6 +790,7 @@ class HotCornerControllerTests(unittest.TestCase):
         self.assertEqual(window.moves[-1], (800, 200))
         self.assertEqual(apply_layer_shell.call_args.kwargs["anchors"], ANCHOR_RIGHT | ANCHOR_TOP)
         self.assertEqual(apply_layer_shell.call_args.kwargs["margins"], QMargins(0, 0, 0, 0))
+        self.assertFalse(apply_layer_shell.call_args.kwargs["wants_to_be_on_active_screen"])
 
     def test_show_indicator_uses_overlay_controller_for_manual_position(self) -> None:
         overlay = FakeOverlayController()
@@ -860,7 +960,8 @@ class HotCornerControllerTests(unittest.TestCase):
             self.assertEqual(len(overlay.anchored_moves), len(ScreenCorner))
             screen._available_geometry = QRect(120, 260, 760, 520)
 
-            screen.availableGeometryChanged.emit(screen.availableGeometry())
+            with patch("axidev_osk.hot_corner.controller.QGuiApplication.instance", return_value=app):
+                controller.refresh_screen_configuration()
 
             changed_moves = overlay.anchored_moves[-len(ScreenCorner) :]
             self.assertEqual(
@@ -884,6 +985,62 @@ class HotCornerControllerTests(unittest.TestCase):
         finally:
             controller.stop()
             controller._indicator.close()
+
+    def test_unplug_replug_reconciles_sensors_and_cancels_active_dwell(self) -> None:
+        first = FakeScreen(QRect(0, 0, 1920, 1080), name="first")
+        second = FakeScreen(QRect(1920, 0, 800, 600), name="second")
+        app = Mock()
+        app.screens.return_value = [first, second]
+        with patch(
+            "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
+            side_effect=lambda _window: FakeOverlayController(OverlayBackend.WAYLAND_LAYER_SHELL),
+        ), patch("axidev_osk.hot_corner.controller.QGuiApplication.instance", return_value=app):
+            controller = HotCornerWindowToggleController(self.dispatcher)
+            try:
+                controller.start()
+                first_handles = [h for h in controller._sensor_handles if h.screen is first]
+                second_handles = [h for h in controller._sensor_handles if h.screen is second]
+                controller._sensor_entered(second_handles[0])
+                self.assertIs(controller._active_screen, second)
+                self.assertIs(controller._indicator_overlay.screen, second)
+
+                app.screens.return_value = [first]
+                controller.refresh_screen_configuration()
+
+                self.assertEqual(controller._sensor_handles, first_handles)
+                self.assertIsNone(controller._active_screen)
+                self.assertFalse(controller._indicator.isVisible())
+                for handle in second_handles:
+                    self.assertTrue(handle.overlay.released)
+                    self.assertFalse(handle.window.isVisible())
+                for handle in first_handles:
+                    self.assertTrue(handle.window.isVisible())
+                    self.assertIs(handle.overlay.screen, first)
+
+                # A reconnected connector is a new QScreen, even with the same name.
+                reconnected = FakeScreen(QRect(-800, 0, 800, 600), name="second")
+                app.screens.return_value = [first, reconnected]
+                controller.refresh_screen_configuration()
+                self.assertEqual(len(controller._sensor_handles), 8)
+                self.assertEqual(controller._sensor_handles[:4], first_handles)
+                for handle in controller._sensor_handles[4:]:
+                    self.assertIs(handle.screen, reconnected)
+                    self.assertIs(handle.overlay.screen, reconnected)
+                    self.assertTrue(handle.window.isVisible())
+
+                controller.stop()
+                app.screens.return_value = []
+                controller.refresh_screen_configuration()
+                self.assertEqual(controller._sensor_handles, [])
+                app.screens.return_value = [first]
+                controller.refresh_screen_configuration()
+                self.assertEqual(len(controller._sensor_handles), 4)
+                self.assertTrue(all(not h.window.isVisible() for h in controller._sensor_handles))
+            finally:
+                controller.stop()
+                for handle in controller._sensor_handles:
+                    handle.window.deleteLater()
+                controller._indicator.deleteLater()
 
     def test_sensor_window_polling_uses_active_sensor(self) -> None:
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)

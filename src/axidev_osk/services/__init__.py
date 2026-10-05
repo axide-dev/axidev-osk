@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject
 from ..hot_corner.service import HotCornerService
 from ..runtime.registries import ServiceRegistry
 from .keyboard import KeyboardService
+from .displays import DisplayService
 from .single_instance import WindowsSingleInstanceService
 
 if sys.platform.startswith("linux"):
@@ -46,4 +47,6 @@ def register_services(
         registry.register("keyboard", keyboard or KeyboardService())
     if include is None or "hot_corner" in include:
         registry.register("hot_corner", HotCornerService(parent=parent))
+    if include is None or "displays" in include:
+        registry.register("displays", DisplayService(parent=parent))
 __all__ = ["KeyboardService", "WindowsSingleInstanceService", "register_services"]

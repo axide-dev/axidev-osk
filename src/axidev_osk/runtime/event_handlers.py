@@ -20,7 +20,7 @@ from .commands import (
     WindowShow,
     WindowToggleOpacity,
 )
-from .events import ComponentPressed, ComponentStateChanged, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
+from .events import ComponentPressed, ComponentStateChanged, DisplayConfigurationChanged, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
 from .registries import EventHandlerRegistry
 
 
@@ -121,6 +121,19 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
     registry.register_event_handler(lambda runtime: runtime._handle_component_state_changed)
     registry.register_event_handler(lambda runtime: runtime._handle_pointer_drag_event)
+    registry.register_event_handler(lambda runtime: lambda event: route_display_configuration_changed(event, runtime))
+
+
+def route_display_configuration_changed(event: object, runtime: object) -> None:
+    """Coordinate display recovery through the main runtime boundary."""
+
+    if not isinstance(event, DisplayConfigurationChanged):
+        return
+    runtime._window_manager.refresh_screen_configuration()  # noqa: SLF001
+    for service in runtime._services.services():  # noqa: SLF001
+        refresh = getattr(service, "refresh_screen_configuration", None)
+        if refresh is not None:
+            refresh()
 
 
 def route_hot_corner_triggered(event: object, runtime: object) -> None:

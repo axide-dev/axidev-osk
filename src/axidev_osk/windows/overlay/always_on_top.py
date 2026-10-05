@@ -189,6 +189,8 @@ class AlwaysOnTopWindowController:
         self._show_adjustments_applied = False
         self._layer_shell_startup_refresh_applied = False
         self._input_panel_attachment = None
+        self._screen_handle = None
+        self._mapped_screen_name: str | None = None
 
     @property
     def backend(self) -> OverlayBackend:
@@ -268,6 +270,8 @@ class AlwaysOnTopWindowController:
             return True
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self._watch_layer_shell_screen()
+            self._recover_layer_shell_position()
             applied = self._apply_wayland_layer_shell_if_needed()
             self._refresh_wayland_layer_shell_surface_after_startup()
             return applied
@@ -294,6 +298,7 @@ class AlwaysOnTopWindowController:
         """Apply backend-specific adjustments before showing the window."""
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self._recover_layer_shell_position()
             return self._sync_wayland_layer_shell()
         if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
             return True
@@ -301,6 +306,77 @@ class AlwaysOnTopWindowController:
             self._position_floating_window_if_needed()
             return True
         return False
+
+    def refresh_screen_configuration(self) -> None:
+        """Recover a layer surface after its output disappears or changes size."""
+
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
+            return
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        if not screens:
+            return
+        output_removed = self.has_removed_output()
+        if output_removed and self._window.isVisible():
+            # A dismissed layer surface cannot be reused; showing again lets
+            # the compositor choose the active output for the same Qt window.
+            self._window.hide()
+            self.prepare_show()
+            self._window.show()
+        else:
+            self._recover_layer_shell_position()
+            self._sync_wayland_layer_shell()
+
+    def has_removed_output(self) -> bool:
+        """Identify a dismissed layer surface without treating it as app quit."""
+
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL or self._mapped_screen_name is None:
+            return False
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        return all(screen.name() != self._mapped_screen_name for screen in screens)
+
+    def _watch_layer_shell_screen(self) -> None:
+        handle = self._window.windowHandle()
+        if handle is not None and handle is not self._screen_handle:
+            handle.screenChanged.connect(self._layer_shell_screen_changed)
+            self._screen_handle = handle
+        screen = self._window.screen()
+        if screen is not None:
+            self._mapped_screen_name = screen.name()
+
+    def _layer_shell_screen_changed(self, screen: object) -> None:
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        # Retain the old identity until runtime recovery has remapped a
+        # surface whose output was removed.
+        if screen is not None and (
+            self._mapped_screen_name is None
+            or any(item.name() == self._mapped_screen_name for item in screens)
+        ):
+            self._mapped_screen_name = screen.name()
+        self._recover_layer_shell_position()
+        self._sync_wayland_layer_shell()
+
+    def _recover_layer_shell_position(self) -> None:
+        if not self._layer_shell_position_initialized:
+            self._initialize_layer_shell_position()
+        geometry = self._current_screen_geometry(for_layer_shell=True)
+        if geometry.isEmpty():
+            return
+        width, height = self._window.width(), self._window.height()
+        margins = self._layer_shell_margins
+        anchors = self._layer_shell_anchors
+        left = margins.left() if anchors & ANCHOR_LEFT else geometry.width() - margins.right() - width
+        top = margins.top() if anchors & ANCHOR_TOP else geometry.height() - margins.bottom() - height
+        if QRect(0, 0, geometry.width(), geometry.height()).contains(QRect(left, top, width, height)):
+            return
+        self._layer_shell_left_margin = (geometry.width() - width) // 2
+        self._layer_shell_bottom_margin = (geometry.height() - height) // 2
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(
+            self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin
+        )
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         """Move the overlay to an absolute screen position."""

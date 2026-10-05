@@ -6,7 +6,7 @@ from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.components import register_components
@@ -15,6 +15,7 @@ from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
 from axidev_osk.runtime.identity import window_state_namespace
+from axidev_osk.runtime.events import WindowCloseRequested
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.builder import RuntimeWindow, build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
@@ -97,6 +98,29 @@ def _build_keyboard_window(backend: FakeKeyboardBackend):
 
 class RuntimeWindowLayoutTests(unittest.TestCase):
     """Tests covering the default keyboard window built via ``build_window``."""
+
+    def test_removed_output_close_does_not_request_application_quit(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+        overlay.has_removed_output = Mock(return_value=True)
+        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=overlay):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+        try:
+            window.set_quit_controller_managed(True)
+            events = []
+            window._context.dispatcher.add_event_handler(events.append)
+            event = QCloseEvent()
+            window.closeEvent(event)
+            self.assertFalse(event.isAccepted())
+            self.assertEqual(events, [])
+
+            overlay.has_removed_output.return_value = False
+            window.closeEvent(QCloseEvent())
+            self.assertEqual(events, [WindowCloseRequested(window.window_id)])
+        finally:
+            overlay.has_removed_output.return_value = False
+            window.set_quit_controller_managed(False)
+            window.close()
 
     def test_failed_content_build_releases_platform_resources(self) -> None:
         _app()
