@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, cast
 
-from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage
+from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage, copy_data_map
 
 
 DecodedT = TypeVar("DecodedT")
@@ -31,7 +31,7 @@ class _ActionDefinition(Generic[DecodedT]):
 @dataclass(slots=True)
 class _EventDefinition(Generic[DecodedT]):
     decoder: Decoder[DecodedT]
-    handlers: list[MessageHandler[DecodedT]] = field(default_factory=list)
+    handlers: list[tuple[Callable[[object], MessageResult], bool]] = field(default_factory=list)
 
 
 class Dispatcher:
@@ -105,15 +105,34 @@ class Dispatcher:
     ) -> Unsubscribe:
         """Subscribe a typed handler to one registered event name."""
 
+        return self._subscribe(name, cast(Callable[[object], MessageResult], handler), raw=False)
+
+    def add_raw_event_handler(
+        self,
+        name: str,
+        handler: Callable[[DataMap], MessageResult],
+    ) -> Unsubscribe:
+        """Subscribe a handler that receives a copy of the plain event arguments.
+
+        Profile callbacks use this so they see the same plain data a Lua
+        callback would. The event is still validated by its decoder first.
+        """
+
+        return self._subscribe(name, cast(Callable[[object], MessageResult], handler), raw=True)
+
+    def has_event(self, name: str) -> bool:
+        return name in self._events
+
+    def _subscribe(self, name: str, handler: Callable[[object], MessageResult], *, raw: bool) -> Unsubscribe:
         definition = self._events.get(name)
         if definition is None:
             raise ValueError(f"Event {name!r} is not registered")
-        erased_handler = cast(MessageHandler[object], handler)
-        definition.handlers.append(erased_handler)
+        entry = (handler, raw)
+        definition.handlers.append(entry)
 
         def unsubscribe() -> None:
-            if erased_handler in definition.handlers:
-                definition.handlers.remove(erased_handler)
+            if entry in definition.handlers:
+                definition.handlers.remove(entry)
 
         return unsubscribe
 
@@ -190,9 +209,9 @@ class Dispatcher:
         except Exception:
             _logger.exception("Discarding event %s with invalid arguments %r", event.event, event.arguments)
             return
-        for handler in tuple(definition.handlers):
+        for handler, raw in tuple(definition.handlers):
             try:
-                self._append_results(handler(decoded))
+                self._append_results(handler(copy_data_map(event.arguments) if raw else decoded))
             except Exception:
                 _logger.exception("Event handler failed for %s with arguments %r", event.event, event.arguments)
                 return

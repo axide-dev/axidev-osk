@@ -136,7 +136,7 @@ Lifecycle that stays in Python:
 Each step keeps the full test suite, flake8, and pyright passing.
 
 - [x] 0. Record this plan and point `AGENTS.md` to it.
-- [ ] 1. Config maps, decoders, function registry, bindings with read tracking, profile `on` table.
+- [x] 1. Config maps, decoders, function registry, bindings with read tracking, profile `on` table.
 - [ ] 2. Observed state, `input.key`, keyboard actions, `process.spawn` with its background lane, log actions.
 - [ ] 3. Generic nodes replace the keyboard grid and key components.
 - [ ] 4. `osk.std` library in `python_defaults/` with its own tests.
