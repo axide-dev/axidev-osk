@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ DecodedT = TypeVar("DecodedT")
 Decoder = Callable[[DataMap], DecodedT]
 MessageHandler = Callable[[DecodedT], MessageResult]
 Unsubscribe = Callable[[], None]
+Wake = Callable[[], None]
 
 _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
@@ -33,13 +35,35 @@ class _EventDefinition(Generic[DecodedT]):
 
 
 class Dispatcher:
-    """Own registered message definitions and drain them in FIFO order."""
+    """Own registered message definitions and drain them in FIFO order.
 
-    def __init__(self) -> None:
+    Handlers run only on the thread that created the dispatcher. Messages
+    sent from any other thread wait in a locked inbox, and the optional
+    ``wake`` callback asks the owner thread to call ``process_pending``.
+    """
+
+    def __init__(self, *, wake: Wake | None = None) -> None:
         self._actions: dict[str, _ActionDefinition[object]] = {}
         self._events: dict[str, _EventDefinition[object]] = {}
         self._queue: deque[RuntimeMessage] = deque()
         self._draining = False
+        self._owner_thread = threading.get_ident()
+        self._inbox: deque[RuntimeMessage] = deque()
+        self._inbox_lock = threading.Lock()
+        self._wake = wake
+
+    def set_wake(self, wake: Wake | None) -> None:
+        """Set the callback that schedules ``process_pending`` on the owner thread."""
+
+        self._wake = wake
+
+    def process_pending(self) -> None:
+        """Drain messages sent from other threads; call on the owner thread."""
+
+        if threading.get_ident() != self._owner_thread:
+            raise RuntimeError("Runtime messages must be processed on the dispatcher owner thread")
+        if not self._draining:
+            self._drain()
 
     def register_action(
         self,
@@ -104,13 +128,32 @@ class Dispatcher:
         self._enqueue(event)
 
     def _enqueue(self, message: RuntimeMessage) -> None:
+        if threading.get_ident() != self._owner_thread:
+            with self._inbox_lock:
+                self._inbox.append(message)
+            wake = self._wake
+            if wake is not None:
+                wake()
+            return
         self._queue.append(message)
         if self._draining:
             return
+        self._drain()
+
+    def _take_inbox(self) -> None:
+        with self._inbox_lock:
+            self._queue.extend(self._inbox)
+            self._inbox.clear()
+
+    def _drain(self) -> None:
         self._draining = True
         processed = 0
         try:
-            while self._queue:
+            while True:
+                if not self._queue:
+                    self._take_inbox()
+                    if not self._queue:
+                        break
                 current = self._queue.popleft()
                 processed += 1
                 if processed % _DRAIN_WARNING_INTERVAL == 0:

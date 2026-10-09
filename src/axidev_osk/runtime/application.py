@@ -34,6 +34,7 @@ from .events import (
     secure_input_panel_released,
 )
 from .prompt import PromptResolutionWaiter
+from .qt_wake import QtDispatcherWake
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
@@ -78,6 +79,7 @@ class ApplicationRuntime:
         self._secure_input_panel_prepared = False
         self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
+        self._dispatcher_wake = QtDispatcherWake(self._dispatcher, parent=app)
         register_builtin_events(self._dispatcher)
         self._services = services or ServiceRegistry()
         if services is None:

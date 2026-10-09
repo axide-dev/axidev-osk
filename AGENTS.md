@@ -114,7 +114,7 @@ Bundled layouts such as the default US ISO keyboard should eventually be ordinar
 
 ## Queue And State Architecture
 
-The runtime uses one synchronous first-in, first-out queue for events and actions. Producers add messages to the queue. The dispatcher drains them in order on the calling thread. A handler can return more events or actions, and the dispatcher appends those messages after the handler finishes.
+The runtime uses one synchronous first-in, first-out queue for events and actions. Producers add messages to the queue. The dispatcher drains them in order on the thread that owns it, which is the Qt thread in the application. A message sent from another thread, such as a backend listener, waits in a locked inbox until the owner thread drains it, so handlers never run on producer threads. A handler can return more events or actions, and the dispatcher appends those messages after the handler finishes.
 
 ### Message Contract
 
