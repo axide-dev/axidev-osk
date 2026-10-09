@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication
 
 from ..platform.overlay import OverlayBackend, read_selected_overlay_backend
-from ..runtime.events import pointer_motion_observed
+from ..runtime.app_messages import pointer_motion_observed
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
@@ -264,7 +264,7 @@ class WaylandRelativePointerService(QObject):
         self._pending_dy = 0.0
         if self._context is None or not self._drag_active or (dx == 0.0 and dy == 0.0):
             return
-        self._context.dispatcher.dispatch_event(pointer_motion_observed(dx, dy))
+        self._context.dispatcher.dispatch(pointer_motion_observed(dx, dy))
 
     def begin_drag(self) -> None:
         """Start a fresh relative-pointer drag."""

@@ -7,13 +7,17 @@ talks to it through actions, events, and observed state.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
 from ..config.reader import ConfigError, ConfigReader
+from ..kind_registry import KindRegistry
 
 CORNERS = frozenset({"top_left", "top_right", "bottom_left", "bottom_right"})
+
+SettingsT = TypeVar("SettingsT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,23 +49,7 @@ class AttachmentKind:
     decode_options: Callable[[ConfigReader], object]
 
 
-class AttachmentKindRegistry(Mapping[str, AttachmentKind]):
-    def __init__(self) -> None:
-        self._kinds: dict[str, AttachmentKind] = {}
-
-    def register(self, kind: AttachmentKind, *, override: bool = False) -> None:
-        if kind.name in self._kinds and not override:
-            raise ValueError(f"Attachment kind {kind.name!r} is already registered")
-        self._kinds[kind.name] = kind
-
-    def __getitem__(self, name: str) -> AttachmentKind:
-        return self._kinds[name]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._kinds)
-
-    def __len__(self) -> int:
-        return len(self._kinds)
+AttachmentKindRegistry = KindRegistry[AttachmentKind]
 
 
 def register_builtin_attachments(registry: AttachmentKindRegistry) -> None:
@@ -71,9 +59,13 @@ def register_builtin_attachments(registry: AttachmentKindRegistry) -> None:
     registry.register(AttachmentKind("secure_input_panel", _decode_secure_input_panel))
 
 
-def _settings(reader: ConfigReader, build: Callable[[], object]) -> object:
+def _settings(reader: ConfigReader, build: Callable[[], SettingsT]) -> SettingsT:
+    """Build a settings record, reporting its own range checks with the attachment's path."""
+
     try:
         return build()
+    except ConfigError:
+        raise
     except ValueError as exc:
         raise ConfigError(f"{reader.path}: {exc}") from exc
 
@@ -99,7 +91,6 @@ def _decode_dwell(reader: ConfigReader) -> DwellOptions:
             velocity_release_ms=reader.integer("velocity_release_ms", defaults.velocity_release_ms),
         ),
     )
-    assert isinstance(settings, DwellClickConfig)
     return DwellOptions(window=reader.string("window"), settings=settings)
 
 
@@ -114,7 +105,6 @@ def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorOptions:
             radius_standard_deviations=reader.number("radius_standard_deviations", 3.0),
         ),
     )
-    assert isinstance(settings, PointerLocatorConfig)
     return PointerLocatorOptions(window=reader.string("window"), settings=settings)
 
 
@@ -132,6 +122,10 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
             corner_size_px=reader.integer("corner_size_px", defaults.corner_size_px, minimum=1),
             indicator_size_px=reader.integer("indicator_size_px", defaults.indicator_size_px, minimum=1),
             indicator_margin_px=reader.integer("indicator_margin_px", defaults.indicator_margin_px, minimum=0),
+            indicator_background=reader.color("indicator_background", defaults.indicator_background),
+            indicator_track=reader.color("indicator_track", defaults.indicator_track),
+            indicator_progress=reader.color("indicator_progress", defaults.indicator_progress),
+            indicator_center=reader.color("indicator_center", defaults.indicator_center),
         ),
     )
 

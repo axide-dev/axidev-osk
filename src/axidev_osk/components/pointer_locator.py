@@ -10,20 +10,18 @@ from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradien
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import PointerLocatorConfig
+from ..windows.surface import RootSurface
 
 _GRADIENT_SEGMENTS = 32
 _GAP_COLOR = QColor("#242424")
 
 
-def install_pointer_locator(host: QWidget, settings: PointerLocatorConfig) -> QWidget:
-    """Install pointer feedback behind a root surface's content.
-
-    ``host`` must offer ``install_background_component``, as ``RootSurface`` does.
-    """
+def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> QWidget:
+    """Install pointer feedback behind a root surface's content."""
 
     host.setProperty("pointerLocatorEnabled", True)
     locator = PointerLocator(settings, host)
-    host.install_background_component(locator)  # type: ignore[attr-defined]
+    host.install_background_component(locator)
     return locator
 
 

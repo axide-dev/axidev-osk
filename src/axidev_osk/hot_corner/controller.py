@@ -29,8 +29,6 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEven
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import HotCornerConfig
-from ..runtime.dispatcher import Dispatcher
-from ..runtime.events import hot_corner_triggered
 from ..platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
@@ -39,9 +37,11 @@ from ..platform.layer_shell import (
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
+    attach_wayland_layer_shell,
 )
 from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
-from ..styles.theme import ThemePalette, build_theme_palette
+from ..runtime.app_messages import hot_corner_triggered
+from ..runtime.dispatcher import Dispatcher
 
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
@@ -103,6 +103,9 @@ class HotCornerOverlayController:
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE}:
             self._window.setWindowFlag(Qt.WindowType.Tool, True)
             self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
+
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            attach_wayland_layer_shell(self._window)
 
     def set_screen(self, screen: QScreen) -> None:
         """Bind a helper to its corner's output rather than the active output."""
@@ -272,15 +275,14 @@ class HotCornerIndicator(QWidget):
     def __init__(
         self,
         *,
-        size_px: int,
-        palette: ThemePalette,
+        config: HotCornerConfig,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._progress = 0.0
-        self._palette = palette
+        self._config = config
 
-        self.setFixedSize(QSize(size_px, size_px))
+        self.setFixedSize(QSize(config.indicator_size_px, config.indicator_size_px))
         _configure_hot_corner_window(self, accepts_input=False)
 
     def set_progress(self, progress: float) -> None:
@@ -301,13 +303,13 @@ class HotCornerIndicator(QWidget):
 
         bounds = QRectF(6, 6, self.width() - 12, self.height() - 12)
         center_bounds = QRectF(16, 16, self.width() - 32, self.height() - 32)
-        shell_fill = QColor(self._palette.shell_fill)
+        shell_fill = QColor(self._config.indicator_background)
         shell_fill.setAlpha(220)
-        shell_edge = QColor(self._palette.shell_edge)
+        shell_edge = QColor(self._config.indicator_track)
         shell_edge.setAlpha(180)
-        active_edge = QColor(self._palette.active_edge)
+        active_edge = QColor(self._config.indicator_progress)
         active_edge.setAlpha(235)
-        active_fill = QColor(self._palette.active_fill)
+        active_fill = QColor(self._config.indicator_center)
         active_fill.setAlpha(105 + int(90 * self._progress))
 
         painter.setPen(Qt.PenStyle.NoPen)
@@ -387,10 +389,7 @@ class HotCornerWindowToggleController(QObject):
         self._active_screen: QScreen | None = None
         self._entered_at = 0.0
         self._triggered_corner: ScreenCorner | None = None
-        self._indicator = HotCornerIndicator(
-            size_px=self._config.indicator_size_px,
-            palette=build_theme_palette(),
-        )
+        self._indicator = HotCornerIndicator(config=self._config)
         self._indicator_overlay = configure_hot_corner_overlay(self._indicator)
         self._sensor_handles: list[HotCornerSensorHandle] = []
         self._use_sensor_windows = self._indicator_overlay.backend in {
@@ -505,7 +504,7 @@ class HotCornerWindowToggleController(QObject):
         self._emit_hot_corner_triggered(self._active_corner)
 
     def _emit_hot_corner_triggered(self, corner: ScreenCorner) -> None:
-        self._dispatcher.dispatch_event(hot_corner_triggered(corner.value))
+        self._dispatcher.dispatch(hot_corner_triggered(corner.value))
 
     def _reset_corner_tracking(self) -> None:
         self._active_corner = None

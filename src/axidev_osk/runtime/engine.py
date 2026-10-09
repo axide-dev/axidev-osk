@@ -6,10 +6,11 @@ from dataclasses import dataclass
 
 from ..attachments import AttachmentKindRegistry, register_builtin_attachments
 from ..config.profile import ConfigDecoder
+from ..function_registry import FunctionRegistry
 from ..nodes import NodeBuilder, NodeKindRegistry, register_builtin_nodes
+from .app_messages import register_app_events
 from .dispatcher import Dispatcher
 from .engine_messages import KeyboardEffects, ProcessEffects, install_engine_handlers, register_engine_events
-from .functions import FunctionRegistry
 from .profile_runtime import BindingTracker, ProfileRuntime, register_profile_events
 from .state import StateTree
 
@@ -19,7 +20,6 @@ class Engine:
     """State, profile functions, and bindings shared by every subsystem."""
 
     functions: FunctionRegistry
-    state: StateTree
     profile: ProfileRuntime
     bindings: BindingTracker
     nodes: NodeKindRegistry
@@ -38,34 +38,27 @@ def build_engine(
     keyboard: KeyboardEffects,
     processes: ProcessEffects,
 ) -> Engine:
-    """Register engine messages on ``dispatcher`` and return the engine pieces.
+    """Register every built-in event on ``dispatcher`` and return the engine pieces.
 
-    Observation handlers are installed here, before any profile starts, so they
-    record state before profile callbacks for the same event run.
+    This is the one place that registers event names, for the app and for
+    tests alike. Observation handlers are installed here, before any profile
+    starts, so they record state before profile callbacks for the same event
+    run. The application registers the actions that need objects it owns.
     """
 
     register_profile_events(dispatcher)
     register_engine_events(dispatcher)
+    register_app_events(dispatcher)
     functions = FunctionRegistry()
-    state = StateTree(
-        {
-            "input": {"keys": {}, "locks": {"capslock": False, "numlock": False}},
-            "keyboard": {"ready": False, "status": "", "needs_permission_setup": False, "permission_setup_text": ""},
-            "windows": {},
-            "dwell": {},
-        }
-    )
-    profile = ProfileRuntime(dispatcher, functions, state)
+    profile = ProfileRuntime(dispatcher, functions, StateTree())
     install_engine_handlers(dispatcher, profile_runtime=profile, keyboard=keyboard, processes=processes)
-    bindings = BindingTracker(dispatcher, functions, state)
-    nodes = NodeKindRegistry()
+    bindings = BindingTracker(dispatcher, functions, profile.state)
+    nodes = NodeKindRegistry(dispatcher)
     register_builtin_nodes(nodes)
-    nodes.register_events(dispatcher)
     attachments = AttachmentKindRegistry()
     register_builtin_attachments(attachments)
     return Engine(
         functions=functions,
-        state=state,
         profile=profile,
         bindings=bindings,
         nodes=nodes,

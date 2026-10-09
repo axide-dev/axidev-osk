@@ -15,19 +15,20 @@ The root config is plain data plus functions:
         },
     }
 
-Node kinds and attachment kinds register how their options decode. The
-decoder here owns everything common to every kind: IDs, style, bindings,
-callbacks, children, and grid cells.
+Node kinds and attachment kinds register how their options decode, and a
+node kind with children also decodes the placement fields its children carry,
+such as a grid ``cell``. The decoder here owns everything common to every
+kind: IDs, style, bindings, callbacks, and children.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ..function_registry import FunctionRef, FunctionRegistry
 from ..messages import DataMap, DataValue
-from ..runtime.functions import FunctionRef, FunctionRegistry
 from .models import AlwaysOnTopWindowConfig, ChromeConfig, OverlayConfig, OverlayPlacement
 from .reader import Bindable, ConfigError, ConfigReader
 
@@ -56,6 +57,13 @@ class NodeKindSpec(Protocol):
 
     def decode_options(self, reader: ConfigReader, /) -> object: ...
 
+    def decode_child_placement(self, reader: ConfigReader, /) -> object:
+        """Read the fields this kind places its children with, such as a grid ``cell``."""
+        ...
+
+
+PlacementDecoder = Callable[[ConfigReader], object]
+
 
 class AttachmentKindSpec(Protocol):
     def decode_options(self, reader: ConfigReader, /) -> object: ...
@@ -70,16 +78,13 @@ class StyleConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class GridCell:
-    row: int
-    column: int
-    row_span: int = 1
-    column_span: int = 1
-
-
-@dataclass(frozen=True, slots=True)
 class NodeConfig:
-    """One decoded node. Kind-specific settings live in ``options``."""
+    """One decoded node.
+
+    Kind-specific settings live in ``options``. ``placement`` holds what the
+    parent kind decoded for this child, such as a grid cell; it is ``None``
+    for a window's content.
+    """
 
     kind: str
     id: str
@@ -88,8 +93,7 @@ class NodeConfig:
     bindings: Mapping[str, Bindable]
     callbacks: Mapping[str, FunctionRef]
     children: tuple["NodeConfig", ...] = ()
-    cell: GridCell | None = None
-    stretch: int = 0
+    placement: object = None
 
     def walk(self) -> "list[NodeConfig]":
         nodes: list[NodeConfig] = [self]
@@ -100,15 +104,23 @@ class NodeConfig:
 
 @dataclass(frozen=True, slots=True)
 class WindowConfig:
+    """One decoded window; ``_decode_window`` owns every default.
+
+    ``default_close`` keeps the engine's close rule for this window: closing it
+    closes it, and closing the last visible window asks to quit. A profile
+    turns it off for a window whose close it handles itself.
+    """
+
     id: str
     title: str
     content: NodeConfig
     style: StyleConfig
-    opacity: float = 1.0
-    show_on_start: bool = False
-    overlay: OverlayConfig = field(default_factory=OverlayConfig)
-    chrome: ChromeConfig = field(default_factory=ChromeConfig)
-    minimum_size: tuple[int, int] = (0, 0)
+    opacity: float
+    show_on_start: bool
+    overlay: OverlayConfig
+    chrome: ChromeConfig
+    minimum_size: tuple[int, int]
+    default_close: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,9 +130,41 @@ class AttachmentConfig:
     options: object
 
 
+PALETTE_ROLES = frozenset(
+    {
+        "window",
+        "base",
+        "alternate_base",
+        "window_text",
+        "text",
+        "button",
+        "button_text",
+        "highlight",
+        "highlighted_text",
+        "placeholder_text",
+    }
+)
+"""Qt palette roles a theme may color, named the way Lua configs spell them."""
+
+FONT_WEIGHTS = frozenset(
+    {"thin", "extra_light", "light", "normal", "medium", "demi_bold", "bold", "extra_bold", "black"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FontConfig:
+    families: tuple[str, ...]
+    pixel_size: int
+    weight: str
+
+
 @dataclass(frozen=True, slots=True)
 class ThemeConfig:
+    """A profile's look: Qt palette colors by role, the application font, and its stylesheet."""
+
     qss: str = ""
+    palette: Mapping[str, str] = field(default_factory=dict)
+    font: FontConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,12 +186,6 @@ class ProfileConfig:
         return [node for window in self.windows for node in window.content.walk()]
 
 
-@dataclass(frozen=True, slots=True)
-class RootConfig:
-    active_profile: str
-    profile: ProfileConfig
-
-
 class ConfigDecoder:
     """Decode root config data with registered node and attachment kinds."""
 
@@ -162,23 +200,29 @@ class ConfigDecoder:
         self._attachment_kinds = attachment_kinds
         self._functions = functions
 
-    def decode_root(self, data: object) -> RootConfig:
+    def decode_root(self, data: object) -> ProfileConfig:
+        """Validate every profile in a root config and return the active one."""
+
         reader = ConfigReader(data, "config", self._functions)
         active = reader.string("active_profile")
-        profiles = dict(reader.items("profiles"))
+        profiles = reader.items("profiles")
         reader.finish()
-        if active not in profiles:
+        decoded: dict[str, ProfileConfig] = {}
+        for name, value in profiles:
+            profile_reader = ConfigReader(value, _profile_path(name), self._functions)
+            decoded[name] = profile_reader.decode(lambda profile_data, name=name: self._decode_profile(name, profile_data))
+        if active not in decoded:
             raise ConfigError(f"config.active_profile names unknown profile {active!r}")
-        profile_reader = ConfigReader(profiles[active], f"config.profiles.{active}", self._functions)
-        profile = profile_reader.decode(lambda profile_data: self._decode_profile(active, profile_data))
-        return RootConfig(active_profile=active, profile=profile)
+        return decoded[active]
 
-    def decode_node(self, reader: ConfigReader) -> NodeConfig:
-        return reader.decode(self._decode_node)
+    def decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None = None) -> NodeConfig:
+        """Decode one node; ``placement`` reads the fields its parent kind places it with."""
+
+        return reader.decode(lambda node: self._decode_node(node, placement))
 
     def _decode_profile(self, profile_id: str, reader: ConfigReader) -> ProfileConfig:
         state = reader.data_map("state", {})
-        theme_reader = reader.child("theme", None)
+        theme_reader = reader.optional_child("theme")
         theme = theme_reader.decode(_decode_theme) if theme_reader is not None else ThemeConfig()
         windows = tuple(child.decode(self._decode_window) for child in reader.children("windows"))
         attachments = tuple(
@@ -186,7 +230,7 @@ class ConfigDecoder:
         )
         on: dict[str, tuple[FunctionRef, ...]] = {}
         for event_name, value in reader.items("on", {}):
-            functions = value if isinstance(value, (list, tuple)) else (value,)
+            functions = value if isinstance(value, list) else [value]
             refs: list[FunctionRef] = []
             for index, function in enumerate(functions):
                 if not callable(function):
@@ -207,29 +251,24 @@ class ConfigDecoder:
         return profile
 
     def _decode_window(self, reader: ConfigReader) -> WindowConfig:
-        overlay_reader = reader.child("overlay", None)
+        overlay_reader = reader.optional_child("overlay")
         overlay = overlay_reader.decode(_decode_overlay) if overlay_reader is not None else OverlayConfig()
-        chrome_reader = reader.child("chrome", None)
-        chrome = (
-            chrome_reader.decode(lambda chrome_data: ChromeConfig(enabled=chrome_data.boolean("enabled", True)))
-            if chrome_reader is not None
-            else ChromeConfig()
-        )
-        content_reader = reader.child("content")
-        assert content_reader is not None
+        chrome_reader = reader.optional_child("chrome")
+        chrome = chrome_reader.decode(_decode_chrome) if chrome_reader is not None else ChromeConfig()
         return WindowConfig(
             id=reader.string("id"),
             title=reader.string("title"),
-            content=self.decode_node(content_reader),
+            content=self.decode_node(reader.child("content")),
             style=_decode_style(reader),
             opacity=reader.number("opacity", 1.0, minimum=0.0, maximum=1.0),
             show_on_start=reader.boolean("show_on_start", False),
             overlay=overlay,
             chrome=chrome,
             minimum_size=_size(reader, "minimum_size", (0, 0)),
+            default_close=reader.boolean("default_close", True),
         )
 
-    def _decode_node(self, reader: ConfigReader) -> NodeConfig:
+    def _decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None) -> NodeConfig:
         kind_name = reader.string("kind")
         kind = self._node_kinds.get(kind_name)
         if kind is None:
@@ -240,7 +279,7 @@ class ConfigDecoder:
             if not reader.has(name):
                 continue
             value = reader.bindable(name)
-            if not isinstance(value, FunctionRef) and value is not None and not isinstance(value, spec.value_type):
+            if not isinstance(value, FunctionRef) and not isinstance(value, spec.value_type):
                 raise ConfigError(f"{reader.field_path(name)} has the wrong type for a {kind_name} node")
             bindings[name] = value
         callbacks: dict[str, FunctionRef] = {}
@@ -250,8 +289,9 @@ class ConfigDecoder:
                 callbacks[event_name] = ref
         children: tuple[NodeConfig, ...] = ()
         if kind.has_children:
-            children = tuple(self.decode_node(child) for child in reader.children("children", []))
-        cell_reader = reader.child("cell", None)
+            children = tuple(
+                self.decode_node(child, kind.decode_child_placement) for child in reader.children("children", [])
+            )
         return NodeConfig(
             kind=kind_name,
             id=node_id,
@@ -260,8 +300,7 @@ class ConfigDecoder:
             bindings=bindings,
             callbacks=callbacks,
             children=children,
-            cell=cell_reader.decode(_decode_cell) if cell_reader is not None else None,
-            stretch=reader.integer("stretch", 0, minimum=0),
+            placement=placement(reader) if placement is not None else None,
         )
 
     def _decode_attachment(self, reader: ConfigReader) -> AttachmentConfig:
@@ -273,11 +312,29 @@ class ConfigDecoder:
 
 
 def _decode_theme(reader: ConfigReader) -> ThemeConfig:
-    return ThemeConfig(qss=reader.optional_string("qss") or "")
+    palette_reader = reader.optional_child("palette")
+    palette = palette_reader.decode(_decode_palette) if palette_reader is not None else {}
+    font_reader = reader.optional_child("font")
+    font = font_reader.decode(_decode_font) if font_reader is not None else None
+    return ThemeConfig(qss=reader.optional_string("qss") or "", palette=palette, font=font)
+
+
+def _decode_palette(reader: ConfigReader) -> dict[str, str]:
+    """Read colors by palette role; ``finish`` rejects a role name Qt does not have."""
+
+    return {role: reader.color(role) for role in sorted(PALETTE_ROLES) if reader.has(role)}
+
+
+def _decode_font(reader: ConfigReader) -> FontConfig:
+    return FontConfig(
+        families=reader.string_list("families"),
+        pixel_size=reader.integer("pixel_size", minimum=1),
+        weight=reader.choice("weight", FONT_WEIGHTS, "normal"),
+    )
 
 
 def _decode_style(reader: ConfigReader) -> StyleConfig:
-    style_reader = reader.child("style", None)
+    style_reader = reader.optional_child("style")
     if style_reader is None:
         return StyleConfig()
 
@@ -293,34 +350,36 @@ def _decode_style(reader: ConfigReader) -> StyleConfig:
 
 
 def _decode_overlay(reader: ConfigReader) -> OverlayConfig:
+    defaults = OverlayConfig()
     placement = reader.choice(
         "placement",
         frozenset(item.value for item in OverlayPlacement),
-        OverlayPlacement.TOP_RIGHT.value,
+        defaults.config.placement.value,
     )
     return OverlayConfig(
-        always_on_top=reader.boolean("always_on_top", True),
+        always_on_top=reader.boolean("always_on_top", defaults.always_on_top),
         config=AlwaysOnTopWindowConfig(
             placement=OverlayPlacement(placement),
-            screen_margin=reader.integer("screen_margin", 16, minimum=0),
-            manage_position=reader.boolean("manage_position", True),
+            screen_margin=reader.integer("screen_margin", defaults.config.screen_margin, minimum=0),
+            manage_position=reader.boolean("manage_position", defaults.config.manage_position),
         ),
     )
 
 
-def _decode_cell(reader: ConfigReader) -> GridCell:
-    return GridCell(
-        row=reader.integer("row", minimum=0),
-        column=reader.integer("column", minimum=0),
-        row_span=reader.integer("row_span", 1, minimum=1),
-        column_span=reader.integer("column_span", 1, minimum=1),
-    )
+def _decode_chrome(reader: ConfigReader) -> ChromeConfig:
+    return ChromeConfig(enabled=reader.boolean("enabled", ChromeConfig().enabled))
+
+
+def _profile_path(name: str) -> str:
+    """Config path of one profile; a name containing dots is quoted so the path stays readable."""
+
+    return f"config.profiles[{name!r}]" if "." in name else f"config.profiles.{name}"
 
 
 def _size(reader: ConfigReader, key: str, default: tuple[int, int]) -> tuple[int, int]:
     value = reader.raw(key, list(default))
     if (
-        not isinstance(value, (list, tuple))
+        not isinstance(value, list)
         or len(value) != 2
         or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in value)
     ):

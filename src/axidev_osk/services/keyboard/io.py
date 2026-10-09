@@ -60,12 +60,12 @@ class KeyPressHandle:
 
     Attributes:
         key_name: Canonical backend key name.
-        mods: Optional backend modifier chord sent with the key.
+        mods: Modifier names sent with the key.
         repeats: Whether the backend auto-repeats the press.
     """
 
     key_name: str
-    mods: str | None = None
+    mods: tuple[str, ...] = ()
     repeats: bool = True
 
 
@@ -188,63 +188,40 @@ class AxidevIoKeyboardBackend:
         except Exception:
             return key_name
 
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle | None:
-        """Send a key down with explicit modifiers and return its release handle."""
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle:
+        """Send ``key`` (already canonical) down with explicit modifiers and return its release handle.
 
-        if not self._ready or self._keyboard is None:
-            return None
-        press = KeyPressHandle(
-            key_name=self.canonical_key(key),
-            mods="+".join(mods) if mods else None,
-            repeats=repeat,
-        )
-        try:
-            self._debug_press("down", press)
-            if press.mods is None:
-                self._keyboard.sender.key_down(press.key_name, repeat=press.repeats)
-            else:
-                self._keyboard.sender.key_down(press.key_name, mods=press.mods, repeat=press.repeats)
-            return press
-        except Exception as exc:
-            _logger.exception("axidev_io key down failed for %r: %s", key, exc)
-            return None
+        Raises when output is not ready or the backend refuses the key, so the
+        failing action reaches the profile as ``action.failed``.
+        """
 
-    def key_up(self, press: object | None) -> None:
+        keyboard = self._require_ready()
+        press = KeyPressHandle(key_name=key, mods=mods, repeats=repeat)
+        self._debug_press("down", press)
+        keyboard.sender.key_down(press.key_name, mods=list(press.mods), repeat=press.repeats)
+        return press
+
+    def key_up(self, press: KeyPressHandle) -> None:
         """Release a key press previously returned by ``press``."""
 
-        if not self._ready or self._keyboard is None or not isinstance(press, KeyPressHandle):
-            return
-        try:
-            self._debug_press("up", press)
-            if press.mods is None:
-                self._keyboard.sender.key_up(press.key_name)
-            else:
-                self._keyboard.sender.key_up(press.key_name, mods=press.mods)
-        except Exception as exc:
-            _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
+        keyboard = self._require_ready()
+        self._debug_press("up", press)
+        keyboard.sender.key_up(press.key_name, mods=list(press.mods))
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
         """Send one key press and release with explicit modifiers."""
 
-        if not self._ready or self._keyboard is None:
-            return
-        try:
-            if mods:
-                self._keyboard.sender.tap(self.canonical_key(key), mods=list(mods))
-            else:
-                self._keyboard.sender.tap(self.canonical_key(key))
-        except Exception as exc:
-            _logger.exception("axidev_io tap failed for %r: %s", key, exc)
+        self._require_ready().sender.tap(self.canonical_key(key), mods=list(mods))
 
     def type_text(self, text: str) -> None:
         """Type text through the backend's layout-aware text output."""
 
+        self._require_ready().sender.type_text(text)
+
+    def _require_ready(self) -> Any:
         if not self._ready or self._keyboard is None:
-            return
-        try:
-            self._keyboard.sender.type_text(text)
-        except Exception as exc:
-            _logger.exception("axidev_io type_text failed: %s", exc)
+            raise RuntimeError(f"Keyboard output is not ready: {self._status_text}")
+        return self._keyboard
 
     def _debug_press(self, action: str, press: KeyPressHandle) -> None:
         if not keyboard_debug_enabled() or press.key_name.casefold() not in _MODIFIER_KEY_NAMES:

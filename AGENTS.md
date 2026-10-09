@@ -44,7 +44,9 @@ osk.config(
 )
 ```
 
-Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error.
+Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error. A key set to `None` counts as absent, the way a Lua table has no key set to `nil`.
+
+A profile's `theme` holds its stylesheet (`qss`), Qt palette colors by role (`palette`), and its font (`font`). The engine owns no colors or font families.
 
 Two kinds of function appear in a profile.
 
@@ -66,17 +68,20 @@ An unknown action, invalid arguments, or a failing action handler is logged and 
 
 Where messages are defined:
 
-- `runtime/events.py` and `runtime/actions.py`: engine lifecycle, windows, hot corners, displays, drag, lock-screen panel, `app.quit`.
-- `runtime/engine_messages.py`: keyboard effects and observations, processes, logging, quit requests, permission setup.
+- `runtime/dispatcher.py`: `action.failed`, which the dispatcher reports itself.
+- `runtime/app_messages.py`: messages the application runtime handles or sends: windows, drags, displays, hot corners, the lock-screen panel, quit requests, `app.activated`, and Linux permission setup.
+- `runtime/engine_messages.py`: messages the engine handles itself: keyboard effects and observations, window state, processes, and logging.
 - `runtime/profile_runtime.py`: `state.set`, `state.changed`, `callback.failed`.
-- `nodes/kinds.py`: node events such as `button.pressed`.
+- `nodes/kinds.py`: node events such as `button.pressed`, registered as each kind is added.
 - `attachments/runtime.py`: `dwell.set_enabled`.
+
+`build_engine` registers every event name, so a profile can handle any of them. The application registers the actions that need objects it owns. `dispatcher.dispatch(*messages)` queues a whole batch before draining, so the batch keeps its order.
 
 ## State
 
-Durable state lives in one tree, `runtime/state.py`, owned by the runtime. Profiles read it through views (`s.shift`, `s.input.keys.A`, `s["input"]["keys"]["."]` for names containing dots) and change it only with `state.set`. A missing value reads as `None`, the way Lua reads `nil`, and setting a value to `None` removes it. Paths are dot-separated strings or lists of segments when a segment comes from a name that may contain a dot.
+Durable state lives in one tree, `runtime/state.py`, owned by the runtime. Profiles read it through views (`s.shift`, `s.input.keys.A`, `s["input"]["keys"]["."]` for names containing dots) and change it only with `state.set`. A missing value reads as `None`, the way Lua reads `nil`, and setting a value to `None` removes it. State follows Lua's rules in two more places: a map never holds `None`, so removing the last key of a branch removes the branch, and `True` is not equal to `1`. Paths are dot-separated strings or lists of segments when a segment comes from a name that may contain a dot.
 
-Some roots are written by the engine from observations and are read-only to profiles: `input.keys.<key>`, `input.locks.capslock` and `numlock`, `keyboard.ready` and `keyboard.status`, `windows.<id>.visible` and `minimized`, `dwell.<id>.enabled`. The standard library keeps its own state under `std`. Everything else belongs to the profile, and the profile's `state` map gives its starting values.
+Some roots are written by the engine from observations and are read-only to profiles: `input.keys.<key>`, `input.locks.capslock` and `numlock`, `keyboard.ready`, `status`, `needs_permission_setup`, and `permission_setup_text`, `windows.<id>.visible`, `minimized`, `opacity`, `configured_opacity`, and `input_blocked`, `dwell.<id>.enabled`. Each of these roots is declared by the code that writes it, with `ProfileRuntime.declare_root`. The standard library keeps its own state under `std`. Everything else belongs to the profile, and the profile's `state` map gives its starting values.
 
 Widgets render state; they are never its source of truth. Only purely visual, momentary details stay local to Qt, such as a button's pressed look while the mouse is down.
 
@@ -84,21 +89,23 @@ Widgets render state; they are never its source of truth. Only purely visual, mo
 
 Node kinds are the curated widgets a profile composes: `window` (top level), `grid`, `box`, `stack`, `button`, `label`, `spacer`. Each kind declares its bindable properties, its callback fields and the events they map to, how its options decode, how it builds a widget, and how a property value is applied. Every built widget carries `componentType` and `componentId` properties, and profile style hooks (`object_name`, `classes`, `properties`, `qss`) are applied to it, so QSS can target any of them. Buttons never take keyboard focus, because an on-screen keyboard must not steal typing from the target app.
 
+Every window keeps the engine's close rule unless it sets `default_close` to false: closing the window closes it, and closing the last visible window asks to quit. A profile's own `window.close_requested` handler runs as well, so a window whose close the profile handles itself, like the default keyboard, turns the rule off.
+
 Attachments are Python-owned features that run their own loop and are attached to a target by reference: `dwell` and `pointer_locator` on a window, `hot_corners` for the screen, `secure_input_panel` naming the window shown on the Plasma lock screen. A profile sets their options and talks to them through actions, events, and observed state. They do not call profile functions per pointer movement.
 
-Engine effects include `keyboard.down/up/tap/type_text`, window actions (`show`, `hide`, `close`, `move_by`, `set_opacity`, `block_input`, `unblock_input`), `dwell.set_enabled`, `state.set`, `process.spawn` with an argument list (never a shell string), `log.info/warn/error`, `app.quit`, and `linux.open_permission_setup`.
+Engine effects include `keyboard.down/up/tap/type_text`, window actions (`show`, `hide`, `close`, `move_by`, `set_opacity`, `block_input`, `unblock_input`), `dwell.set_enabled`, `state.set`, `process.spawn` with an argument list (never a shell string), `log.info/warn/error`, `app.quit`, and `linux.open_permission_setup`. A keyboard action that cannot run, for example because output is not ready, reports `action.failed`.
 
-Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other quit requests become `app.quit_requested` when the profile handles it), the lock-screen supervisor protocol, display recovery, and the background lane where spawned programs report `process.exited`.
+Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other quit requests become `app.quit_requested` with their reason, `signal`, `stdin_closed`, or `window_closed`, when the profile handles it; shutdown stops the profile before tearing anything down, and a step that fails is logged without stopping the exit), the lock-screen supervisor protocol, display recovery, and the background lane where spawned programs report `process.exited`.
 
 ## How To Add Things
 
-A node kind. Write its build and apply functions and register a `NodeKind` in `nodes/kinds.py` (or a new module called from `register_builtin_nodes`). Declare bindable properties with `PropertySpec`, map callback fields to event names, and decode options with `ConfigReader`, which rejects unknown keys for you. The builder emits events through `builder.emit(event_name, node.id)` and never decides what a press means. Add a matching builder function in `python_defaults/osk/__init__.py`, then a test next to `tests/test_nodes.py`.
+A node kind. Write its build and apply functions and register a `NodeKind` in `nodes/kinds.py` (or a new module called from `register_builtin_nodes`). Declare bindable properties with `PropertySpec`, map callback fields to event names, and decode options with `ConfigReader`, which rejects unknown keys for you. A kind with children also decodes the fields its children are placed with in `decode_child_placement`, the way a grid reads `cell` and a box reads `stretch`, so those fields are unknown keys under any other parent. The builder emits events through `builder.emit(event_name, node.id)` and never decides what a press means. Add a matching builder function in `python_defaults/osk/__init__.py`, then a test next to `tests/test_nodes.py`.
 
-An attachment. Add its options record and decoder in `attachments/__init__.py` and register it in `register_builtin_attachments`. If it acts on a window, extend `WindowAttachments` and install it in `build_profile_window`. If it owns state, write it as observed state under its own root and expose an action to change it, as dwell does. Validate its references in `AttachmentRuntime.start`. Add the `osk` builder and a test in `tests/test_attachments.py`.
+An attachment. Add its options record and decoder in `attachments/__init__.py` and register it in `register_builtin_attachments`. If it acts on a window, extend `WindowAttachments` and install it in `build_profile_window`. If it owns state, declare its root with `ProfileRuntime.declare_root`, write it as observed state, and expose an action to change it, as dwell does. Validate its references in `AttachmentRuntime.start`. Add the `osk` builder and a test in `tests/test_attachments.py`.
 
 An action or event. Pick a lowercase dot-separated name, write an arguments record, a decoder, and a typed constructor, and register the name where the owning subsystem registers its messages. Add the `osk` action builder if profiles should send it. An event that reports an observation profiles should read later also writes runtime-owned state, and that handler is installed before profiles start so callbacks see current state.
 
-A standard-library helper. Write it in `python_defaults/osk/std/` using only `osk` builders and actions. Take an `opts` map and merge it last with `osk.merge`, so any single field can be overridden. Keep library state under `std`. Test it in `tests/test_std_library.py`.
+A standard-library helper. Write it in `python_defaults/osk/std/` using only `osk` builders and actions. Take an `opts` map and merge it last with `osk.merge`, so any single field can be overridden. Keep library state under `std`. When the library must react to an event, add its handler to `std.with_handlers`, which profiles use to build their `on` table. Test it in `tests/test_std_library.py`.
 
 A profile change. Edit `python_defaults/default_profile.py`, or build a new root config with the same helpers. If you change the default keyboard on purpose, update the expected data in `tests/test_default_profile.py` in the same change and say so in the PR.
 

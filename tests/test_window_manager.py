@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from axidev_osk.runtime.window_manager import WindowManager, _WindowInputBlocker
+from axidev_osk.runtime.window_manager import WindowManager
+from axidev_osk.windows.builder import _WindowInputBlocker
 
 
 class WindowManagerVisibilityTests(unittest.TestCase):
@@ -16,40 +17,30 @@ class WindowManagerVisibilityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.window = Mock(configured_opacity=0.85)
-        self.manager = WindowManager({"window:keyboard": lambda parent: self.window})
+        self.manager = WindowManager({"window:keyboard": lambda: self.window})
         self.manager.get_or_create("window:keyboard")
 
-    def test_windows_hide_hides_window(self) -> None:
-        with patch("axidev_osk.runtime.window_manager.sys.platform", "win32"):
-            self.manager.hide("window:keyboard")
+    def test_hide_hides_window(self) -> None:
+        self.manager.hide("window:keyboard")
 
         self.window.hide.assert_called_once_with()
         self.window.showMinimized.assert_not_called()
 
-    def test_windows_show_restores_window(self) -> None:
+    def test_show_restores_a_minimized_window_on_every_platform(self) -> None:
         self.window.isMinimized.return_value = True
 
-        with patch("axidev_osk.runtime.window_manager.sys.platform", "win32"):
-            self.manager.show("window:keyboard")
+        self.manager.show("window:keyboard")
 
         self.window.showNormal.assert_called_once_with()
         self.window.show.assert_not_called()
 
-    def test_windows_show_uses_normal_show_when_not_minimized(self) -> None:
+    def test_show_uses_normal_show_when_not_minimized(self) -> None:
         self.window.isMinimized.return_value = False
 
-        with patch("axidev_osk.runtime.window_manager.sys.platform", "win32"):
-            self.manager.show("window:keyboard")
+        self.manager.show("window:keyboard")
 
         self.window.show.assert_called_once_with()
         self.window.showNormal.assert_not_called()
-
-    def test_linux_hide_still_hides_window(self) -> None:
-        with patch("axidev_osk.runtime.window_manager.sys.platform", "linux"):
-            self.manager.hide("window:keyboard")
-
-        self.window.hide.assert_called_once_with()
-        self.window.showMinimized.assert_not_called()
 
     def test_input_blocker_allows_only_the_recovery_component(self) -> None:
         window = QWidget()
@@ -64,9 +55,9 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.assertTrue(blocker.eventFilter(normal_key, event))
         self.assertTrue(blocker.eventFilter(window, event))
 
-    def test_windows_are_built_lazily_from_factories(self) -> None:
+    def test_windows_are_built_lazily(self) -> None:
         built: list[object] = []
-        manager = WindowManager({"pad": lambda parent: built.append(parent) or self.window})
+        manager = WindowManager({"pad": lambda: built.append(None) or self.window})
 
         self.assertIsNone(manager.get("pad"))
         self.assertIs(manager.get_or_create("pad"), self.window)
@@ -75,29 +66,39 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No window named 'nope'"):
             manager.get_or_create("nope")
 
-    def test_opacity_and_input_blocking_are_separate_effects(self) -> None:
-        self.manager.set_opacity("window:keyboard", 0.01)
-        self.manager.block_input("window:keyboard", frozenset({"ghost"}))
-        self.manager.show("window:keyboard")
+    def test_opacity_and_input_blocking_reach_built_windows_only(self) -> None:
+        unbuilt = Mock()
+        manager = WindowManager({"window:keyboard": lambda: self.window, "other": unbuilt})
+        manager.get_or_create("window:keyboard")
+
+        for window_id in ("window:keyboard", "other"):
+            manager.set_opacity(window_id, 0.01)
+            manager.block_input(window_id, frozenset({"ghost"}))
+            manager.unblock_input(window_id)
 
         self.window.set_visual_opacity.assert_called_once_with(0.01)
-        self.assertIn("window:keyboard", self.manager._input_blockers)
+        self.window.block_input.assert_called_once_with(frozenset({"ghost"}))
+        self.window.unblock_input.assert_called_once_with()
+        unbuilt.assert_not_called()
+        self.assertIsNone(manager.get("other"))
 
-        self.manager.unblock_input("window:keyboard")
-        self.manager.unblock_input("window:keyboard")
-        self.assertNotIn("window:keyboard", self.manager._input_blockers)
+    def test_close_releases_and_forgets_every_window(self) -> None:
+        other = Mock()
+        manager = WindowManager({"a": lambda: self.window, "b": lambda: other})
+        manager.get_or_create("a")
+        manager.get_or_create("b")
 
-    def test_close_and_destroy_remove_input_blocks(self) -> None:
-        self.manager.get_or_create("window:keyboard")
-        self.manager.block_input("window:keyboard", frozenset())
-        self.manager.close("window:keyboard")
-        self.assertEqual(self.manager._input_blockers, {})
+        manager.close("a")
 
-        self.manager.get_or_create("window:keyboard")
-        self.manager.block_input("window:keyboard", frozenset())
-        self.manager.destroy("window:keyboard")
-        self.assertEqual(self.manager._input_blockers, {})
+        self.assertIsNone(manager.get("a"))
+        self.window.unblock_input.assert_called_once_with()
         self.window.release_platform_resources.assert_called_once_with()
+        self.window.deleteLater.assert_called_once_with()
+        self.window.close.assert_not_called()
+
+        manager.close_all()
+        self.assertEqual(manager.all_windows(), [])
+        other.deleteLater.assert_called_once_with()
 
 
 if __name__ == "__main__":

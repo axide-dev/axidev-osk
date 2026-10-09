@@ -52,10 +52,33 @@ class SizeOptions:
 
 
 @dataclass(frozen=True, slots=True)
-class LayoutOptions:
+class GridOptions:
+    spacing: int = 0
+    margins: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+
+@dataclass(frozen=True, slots=True)
+class BoxOptions:
     spacing: int = 0
     margins: tuple[int, int, int, int] = (0, 0, 0, 0)
     direction: str = "vertical"
+
+
+@dataclass(frozen=True, slots=True)
+class GridCell:
+    """Where a grid child sits, read from its ``cell`` field."""
+
+    row: int
+    column: int
+    row_span: int = 1
+    column_span: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class BoxPlacement:
+    """How much spare space a box child takes, read from its ``stretch`` field."""
+
+    stretch: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +122,8 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             apply=_apply_common,
             properties=_VISIBLE,
             has_children=True,
-            decode_options=_decode_layout,
+            decode_options=_decode_grid,
+            decode_child_placement=_decode_grid_cell,
         )
     )
     registry.register(
@@ -109,7 +133,8 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             apply=_apply_common,
             properties=_VISIBLE,
             has_children=True,
-            decode_options=_decode_layout,
+            decode_options=_decode_box,
+            decode_child_placement=_decode_box_placement,
         )
     )
     registry.register(
@@ -140,24 +165,53 @@ def _decode_label(reader: ConfigReader) -> LabelOptions:
     )
 
 
-def _decode_layout(reader: ConfigReader) -> LayoutOptions:
+def _decode_margins(reader: ConfigReader) -> tuple[int, int, int, int]:
     margins = reader.raw("margins", [0, 0, 0, 0])
     if (
-        not isinstance(margins, (list, tuple))
+        not isinstance(margins, list)
         or len(margins) != 4
         or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in margins)
     ):
         raise ConfigError(f"{reader.field_path('margins')} must be [left, top, right, bottom] in pixels")
-    return LayoutOptions(
+    return (margins[0], margins[1], margins[2], margins[3])
+
+
+def _decode_grid(reader: ConfigReader) -> GridOptions:
+    return GridOptions(spacing=reader.integer("spacing", 0, minimum=0), margins=_decode_margins(reader))
+
+
+def _decode_box(reader: ConfigReader) -> BoxOptions:
+    return BoxOptions(
         spacing=reader.integer("spacing", 0, minimum=0),
-        margins=(margins[0], margins[1], margins[2], margins[3]),
+        margins=_decode_margins(reader),
         direction=reader.choice("direction", frozenset({"vertical", "horizontal"}), "vertical"),
     )
 
 
+def _decode_grid_cell(reader: ConfigReader) -> GridCell:
+    cell = reader.child("cell")
+    return cell.decode(
+        lambda fields: GridCell(
+            row=fields.integer("row", minimum=0),
+            column=fields.integer("column", minimum=0),
+            row_span=fields.integer("row_span", 1, minimum=1),
+            column_span=fields.integer("column_span", 1, minimum=1),
+        )
+    )
+
+
+def _decode_box_placement(reader: ConfigReader) -> BoxPlacement:
+    return BoxPlacement(stretch=reader.integer("stretch", 0, minimum=0))
+
+
 def _apply_common(widget: QWidget, name: str, value: DataValue) -> None:
     if name == "visible":
-        widget.setVisible(bool(value))
+        if not value:
+            widget.hide()
+        elif widget.parentWidget() is not None:
+            widget.show()
+        # A widget without a parent yet must not be shown: it would become its
+        # own window. Qt shows it with its parent once it is placed.
 
 
 def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
@@ -208,6 +262,9 @@ def _build_label(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     label = QLabel()
     label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(options.word_wrap)
+    if options.word_wrap:
+        # A wrapped label must keep the height its lines need at its width.
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
     label.setAlignment(_ALIGNMENTS[options.align])
     options.size.apply(label)
     return label
@@ -234,7 +291,7 @@ def _build_spacer(node: NodeConfig, builder: NodeBuilder) -> QWidget:
 
 def _build_grid(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     options = node.options
-    assert isinstance(options, LayoutOptions)
+    assert isinstance(options, GridOptions)
     container = QWidget()
     layout = QGridLayout(container)
     layout.setContentsMargins(*options.margins)
@@ -243,9 +300,8 @@ def _build_grid(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     rows: set[int] = set()
     columns: set[int] = set()
     for child in node.children:
-        cell = child.cell
-        if cell is None:
-            raise ConfigError(f"Grid {node.id!r} child {child.id!r} needs a cell")
+        cell = child.placement
+        assert isinstance(cell, GridCell)
         widget = builder.build(child)
         layout.addWidget(widget, cell.row, cell.column, cell.row_span, cell.column_span)
         rows.update(range(cell.row, cell.row + cell.row_span))
@@ -259,13 +315,15 @@ def _build_grid(node: NodeConfig, builder: NodeBuilder) -> QWidget:
 
 def _build_box(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     options = node.options
-    assert isinstance(options, LayoutOptions)
+    assert isinstance(options, BoxOptions)
     container = QWidget()
     layout: QBoxLayout = QVBoxLayout(container) if options.direction == "vertical" else QHBoxLayout(container)
     layout.setContentsMargins(*options.margins)
     layout.setSpacing(options.spacing)
     for child in node.children:
-        layout.addWidget(builder.build(child), child.stretch)
+        placement = child.placement
+        assert isinstance(placement, BoxPlacement)
+        layout.addWidget(builder.build(child), placement.stretch)
     return container
 
 

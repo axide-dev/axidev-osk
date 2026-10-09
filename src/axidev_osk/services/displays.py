@@ -7,8 +7,8 @@ from typing import cast
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 
+from ..runtime.app_messages import display_configuration_changed
 from ..runtime.context import Context
-from ..runtime.events import display_configuration_changed
 
 
 class DisplayService(QObject):
@@ -68,4 +68,4 @@ class DisplayService(QObject):
 
     def _notify(self) -> None:
         if self._context is not None:
-            self._context.dispatcher.dispatch_event(display_configuration_changed())
+            self._context.dispatcher.dispatch(display_configuration_changed())

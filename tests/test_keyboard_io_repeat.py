@@ -36,37 +36,39 @@ class KeyboardIoRepeatTests(unittest.TestCase):
 
         self.assertEqual(
             sender.key_down.call_args_list,
-            [call("A", repeat=True), call("A", repeat=False)],
+            [call("A", mods=[], repeat=True), call("A", mods=[], repeat=False)],
         )
-        self.assertEqual(repeating, KeyPressHandle("A", None, True))
-        self.assertEqual(single, KeyPressHandle("A", None, False))
+        self.assertEqual(repeating, KeyPressHandle("A", (), True))
+        self.assertEqual(single, KeyPressHandle("A", (), False))
 
-    def test_press_joins_modifiers_and_key_up_repeats_them(self) -> None:
+    def test_press_and_key_up_send_the_same_modifier_list(self) -> None:
         backend, sender = self._ready_backend()
 
-        press = backend.press("a", ("Shift", "Ctrl"), True)
-        backend.key_up(press)
+        backend.key_up(backend.press("A", ("Shift", "Ctrl"), True))
 
-        sender.key_down.assert_called_once_with("A", mods="Shift+Ctrl", repeat=True)
-        sender.key_up.assert_called_once_with("A", mods="Shift+Ctrl")
+        sender.key_down.assert_called_once_with("A", mods=["Shift", "Ctrl"], repeat=True)
+        sender.key_up.assert_called_once_with("A", mods=["Shift", "Ctrl"])
 
-    def test_key_up_without_modifiers_sends_only_the_key(self) -> None:
-        backend, sender = self._ready_backend()
-
-        backend.key_up(backend.press("A", (), True))
-
-        sender.key_up.assert_called_once_with("A")
-
-    def test_unready_backend_sends_nothing(self) -> None:
+    def test_unready_backend_raises_for_every_effect(self) -> None:
         backend, sender = self._ready_backend()
         backend._ready = False
 
-        self.assertIsNone(backend.press("A", (), True))
-        backend.key_up(KeyPressHandle("A"))
-        backend.tap("A", ())
-        backend.type_text("moo")
-
+        for effect in (
+            lambda: backend.press("A", (), True),
+            lambda: backend.key_up(KeyPressHandle("A")),
+            lambda: backend.tap("A", ()),
+            lambda: backend.type_text("moo"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not ready"):
+                effect()
         self.assertEqual(sender.method_calls, [])
+
+    def test_backend_errors_reach_the_caller(self) -> None:
+        backend, sender = self._ready_backend()
+        sender.key_down.side_effect = TypeError("Unknown modifier: AltGr")
+
+        with self.assertRaisesRegex(TypeError, "AltGr"):
+            backend.press("A", ("AltGr",), True)
 
     def test_tap_and_type_text_use_the_sender(self) -> None:
         backend, sender = self._ready_backend()
@@ -77,7 +79,7 @@ class KeyboardIoRepeatTests(unittest.TestCase):
 
         self.assertEqual(
             sender.tap.call_args_list,
-            [call("A"), call("A", mods=["Ctrl", "Alt"])],
+            [call("A", mods=[]), call("A", mods=["Ctrl", "Alt"])],
         )
         sender.type_text.assert_called_once_with("moo")
 

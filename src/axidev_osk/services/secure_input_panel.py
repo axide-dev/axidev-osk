@@ -5,27 +5,23 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QSocketNotifier
 from PySide6.QtWidgets import QApplication
 
-from collections.abc import Callable
-
 from ..messages import MessageResult
-from ..runtime.actions import (
+from ..runtime.app_messages import (
     SECURE_INPUT_PANEL_PREPARE,
+    SECURE_INPUT_PANEL_PREPARED,
     SECURE_INPUT_PANEL_RELEASE,
+    SECURE_INPUT_PANEL_RELEASED,
     secure_input_panel_prepare,
     secure_input_panel_release,
 )
-from ..runtime.events import (
-    ACTION_FAILED,
-    SECURE_INPUT_PANEL_PREPARED,
-    SECURE_INPUT_PANEL_RELEASED,
-    ActionFailedArguments,
-    NoEventArguments,
-)
+from ..runtime.decoding import EmptyArguments
+from ..runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
@@ -97,10 +93,10 @@ class SecureInputPanelWorkerService(QObject):
         try:
             if command == "PREPARE":
                 self._pending_action = SECURE_INPUT_PANEL_PREPARE
-                context.dispatcher.dispatch_action(secure_input_panel_prepare())
+                context.dispatcher.dispatch(secure_input_panel_prepare())
             elif command == "RELEASE":
                 self._pending_action = SECURE_INPUT_PANEL_RELEASE
-                context.dispatcher.dispatch_action(secure_input_panel_release())
+                context.dispatcher.dispatch(secure_input_panel_release())
             elif command == "PING":
                 self._respond("PONG")
             else:
@@ -111,12 +107,12 @@ class SecureInputPanelWorkerService(QObject):
             self._pending_action = None
             self._respond("ERROR")
 
-    def _handle_prepared(self, event: NoEventArguments) -> MessageResult:
+    def _handle_prepared(self, event: EmptyArguments) -> MessageResult:
         del event
         self._answer_pending(SECURE_INPUT_PANEL_PREPARE, "PREPARED")
         return []
 
-    def _handle_released(self, event: NoEventArguments) -> MessageResult:
+    def _handle_released(self, event: EmptyArguments) -> MessageResult:
         del event
         self._answer_pending(SECURE_INPUT_PANEL_RELEASE, "RELEASED")
         return []

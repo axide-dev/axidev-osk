@@ -40,7 +40,8 @@ Each decision below was made by the project owner. Do not reopen one without a n
 
 ### Config Shape
 
-- The root config holds `profiles` and `active_profile`.
+- The root config holds `profiles` and `active_profile`. Every profile is validated; the active one runs.
+- A profile's `theme` holds `qss`, `palette` (Qt color roles), and `font`.
 - A profile holds `state` (initial values), `windows`, `attachments`, and `on` (callbacks for any registered event).
 - Every node is a map with `kind`, `id`, options, `style` (object name, classes, properties, QSS), function bindings, and callbacks.
 - Each node kind and attachment kind registers a decoder that validates its map into a typed record. Bundled defaults and future Lua configs use the same decoders.
@@ -57,7 +58,7 @@ Each decision below was made by the project owner. Do not reopen one without a n
 
 Nodes:
 
-- `window`: title, opacity, overlay placement, chrome, `show_on_start`, content.
+- `window`: title, opacity, overlay placement, chrome, `show_on_start`, `default_close`, content.
 - `grid`: rows, columns, spans, cell metrics, children.
 - `box`, `stack`, `button`, `label`, `spacer`.
 - A button keeps Qt's instant pressed look locally. `active`, `latched`, `label`, and `visible` are bindable.
@@ -66,7 +67,7 @@ Attachments:
 
 - `dwell` on a window.
 - `pointer_locator` on a window.
-- `hot_corners` with sensor settings.
+- `hot_corners` with sensor settings and indicator colors.
 - `secure_input_panel` naming the window shown on the lock screen.
 
 Actions:
@@ -75,7 +76,7 @@ Actions:
 - `window.show`, `window.hide`, `window.close`, `window.move_by`, `window.set_opacity`, `window.block_input {window, except}`, `window.unblock_input`.
 - `dwell.set_enabled`.
 - `state.set`.
-- `process.spawn {argv, tag}` with an argument list, never a shell string.
+- `process.spawn {argv, tag, detached}` with an argument list, never a shell string.
 - `log.info`, `log.warn`, `log.error`.
 - `app.quit`.
 - `linux.open_permission_setup`.
@@ -89,11 +90,14 @@ Events:
 - `keyboard.permission_required`, `keyboard.reset`.
 - `process.exited {tag, code}`.
 - `window.drag_started`, `window.drag_ended`, `pointer.motion_observed`.
+- `app.activated`, `linux.permission_setup_opened`.
+- `window.state_changed {window, visible, minimized, opacity, configured_opacity, input_blocked}`.
 
 Observed state, written by the runtime and read-only to profiles:
 
+- `keyboard.ready`, `keyboard.status`, `keyboard.needs_permission_setup`, `keyboard.permission_setup_text`.
 - `input.keys.<name>`, `input.locks.capslock`, `input.locks.numlock`.
-- `windows.<id>.visible`, `windows.<id>.minimized`.
+- `windows.<id>.visible`, `windows.<id>.minimized`, `windows.<id>.opacity`, `windows.<id>.configured_opacity`, `windows.<id>.input_blocked`.
 - `dwell.<id>.enabled`.
 
 Lifecycle that stays in Python:
@@ -106,9 +110,10 @@ Lifecycle that stays in Python:
 
 ### Standard Library (`osk.std`)
 
-- `keys`: `letter`, `shifted`, `modifier` (latching, one-shot or held), lock-lit keys such as Caps. Library state lives under `std.*`.
-- `windows`: `toggle`, `ghost_button`.
-- `prompts`: quit and Linux-permission prompt builders.
+- `keys`: `letter`, `shifted`, `modifier` (latching, one-shot or held), lock-lit keys such as Caps. The left and right keys of one modifier share a latch when nothing else about them differs; the `latch` option overrides that. Library state lives under `std.*`.
+- `windows`: `toggle`, `reveal`, `corner_toggle`, `ghost_button`.
+- `prompts`: generic `prompt_window` and `prompt_button`. The quit and permission prompts live in the default profile.
+- `with_handlers`: adds the event handlers the library needs to a profile's `on` table.
 - Every builder takes `opts` to override any field and uses only engine building blocks.
 
 ### Default Profile

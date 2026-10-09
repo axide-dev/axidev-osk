@@ -1,9 +1,9 @@
 """Application-wide graceful quit coordination.
 
 Owns OS signal handlers, stdin EOF detection, and an ordered list of
-shutdown callbacks. Components register windows and callbacks; the
-controller serializes one shutdown sequence regardless of how the quit
-was triggered (signal, EOF, window close, programmatic).
+shutdown callbacks. Components register callbacks; the controller
+serializes one shutdown sequence regardless of how the quit was
+triggered (signal, EOF, window close, programmatic).
 """
 
 from __future__ import annotations
@@ -16,11 +16,12 @@ import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
 
 QuitCallback = Callable[[], None]
-AskToQuit = Callable[[], None]
+AskToQuit = Callable[[str], None]
+"""Called with the reason, such as ``signal`` or ``window_closed``, when a quit needs confirmation."""
 
 _logger = logging.getLogger(__name__)
 
@@ -50,8 +51,9 @@ class ApplicationQuitController(QObject):
         Args:
             app: Application instance whose ``exit`` is called at end of
                 shutdown.
-            ask_to_quit: Called instead of shutting down when a quit needs
-                confirmation. ``None`` means every quit proceeds immediately.
+            ask_to_quit: Called with the quit reason instead of shutting down
+                when a quit needs confirmation. ``None`` means every quit
+                proceeds immediately.
             parent: Standard ``QObject`` parent.
 
         Returns:
@@ -65,45 +67,18 @@ class ApplicationQuitController(QObject):
         self._app = app
         self._ask_to_quit = ask_to_quit
         self._callbacks: list[QuitCallback] = []
-        self._windows: list[QWidget] = []
         self._quitting = False
         self._signal_timer = QTimer(self)
         self._signal_timer.setInterval(250)
         self._signal_timer.timeout.connect(lambda: None)
         self._stdin_notifier: QSocketNotifier | None = None
 
-    def register_window(self, window: QWidget) -> None:
-        """Register a top-level window that participates in shutdown.
-
-        The runtime is responsible for routing ``WindowCloseRequested``
-        events on the dispatcher to ``request_quit``; this method only
-        records the window so it can be closed at the end of the
-        shutdown sequence and informs it that the controller now owns
-        close behavior.
-
-        Args:
-            window: Window participating in graceful shutdown. If the
-                window defines ``set_quit_controller_managed`` it is
-                informed so it can suppress its own confirmation UI.
-
-        Returns:
-            None.
-
-        Side effects:
-            Appends the window to the controller's tracked list and
-            flags it as managed.
-        """
-
-        self._windows.append(window)
-        if hasattr(window, "set_quit_controller_managed"):
-            window.set_quit_controller_managed(True)  # type: ignore[attr-defined]
-
     def register_quit_callback(self, callback: QuitCallback) -> None:
         """Register a callback fired in registration order during shutdown.
 
         Args:
-            callback: Zero-arg callable invoked synchronously after the
-                user confirms the quit prompt and before windows close.
+            callback: Zero-arg callable invoked synchronously, in
+                registration order, once shutdown begins.
 
         Returns:
             None.
@@ -134,10 +109,11 @@ class ApplicationQuitController(QObject):
         self._signal_timer.start()
         self._install_stdin_eof_handler()
 
-    def request_quit(self, *, confirm: bool = True) -> None:
+    def request_quit(self, reason: str, *, confirm: bool = True) -> None:
         """Ask to quit, or shut down right away when no confirmation is needed.
 
         Args:
+            reason: What triggered the quit, passed to ``ask_to_quit``.
             confirm: Whether the user should confirm before shutdown.
 
         Side effects:
@@ -148,7 +124,7 @@ class ApplicationQuitController(QObject):
             _logger.info("Graceful shutdown already in progress")
             return
         if confirm and self._ask_to_quit is not None:
-            self._ask_to_quit()
+            self._ask_to_quit(reason)
             return
         self.shutdown()
 
@@ -156,8 +132,9 @@ class ApplicationQuitController(QObject):
         """Run the graceful shutdown sequence once.
 
         Side effects:
-            Invokes registered quit callbacks in order, hides and closes all
-            registered windows, and calls ``QApplication.exit(exit_code)``.
+            Invokes registered quit callbacks in order, then calls
+            ``QApplication.exit(exit_code)``. A callback that raises is
+            logged and the sequence continues, so the app always exits.
             Later calls while shutdown is in progress are ignored.
         """
 
@@ -175,23 +152,22 @@ class ApplicationQuitController(QObject):
             callback_name = self._callback_name(callback)
             callback_started_at = time.perf_counter()
             _logger.info("Shutting down %s", callback_name)
-            callback()
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Shutdown step %s failed; continuing", callback_name)
+                continue
             _logger.info(
                 "Finished shutting down %s in %.3fs",
                 callback_name,
                 time.perf_counter() - callback_started_at,
             )
-        for window in list(self._windows):
-            if hasattr(window, "set_quit_controller_managed"):
-                window.set_quit_controller_managed(False)  # type: ignore[attr-defined]
-            window.hide()
-            window.close()
         _logger.info("Graceful shutdown completed in %.3fs", time.perf_counter() - shutdown_started_at)
         self._app.exit(exit_code)
 
     def _handle_signal(self, signum: int, _frame: object) -> None:
         confirm = signum != signal.SIGTERM
-        QTimer.singleShot(0, lambda: self.request_quit(confirm=confirm))
+        QTimer.singleShot(0, lambda: self.request_quit("signal", confirm=confirm))
 
     def _callback_name(self, callback: QuitCallback) -> str:
         self_obj = getattr(callback, "__self__", None)
@@ -214,4 +190,4 @@ class ApplicationQuitController(QObject):
         except OSError:
             return
         if data == b"":
-            self.request_quit()
+            self.request_quit("stdin_closed")

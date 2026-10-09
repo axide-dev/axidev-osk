@@ -2,21 +2,24 @@
 
 Profiles are plain data plus functions, the same shape a Lua table produces.
 ``ConfigReader`` reads one map, reports errors with the full config path, and
-rejects keys the decoder did not consume so typos fail loudly.
+rejects keys the decoder did not consume so typos fail loudly. A key set to
+``None`` counts as absent, the way a Lua table has no key set to ``nil``.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterator, Mapping
+import re
+from collections.abc import Callable, Mapping
 from typing import TypeVar
 
-from ..messages import DataMap, DataValue, copy_data_map
-from ..runtime.functions import FunctionRef, FunctionRegistry
+from ..function_registry import FunctionRef, FunctionRegistry
+from ..messages import DataMap, DataValue, copy_data_map, copy_data_value
 
 T = TypeVar("T")
 
 _MISSING = object()
+_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 
 
 class ConfigError(ValueError):
@@ -53,12 +56,13 @@ class ConfigReader:
         return f"{self._path}.{key}"
 
     def has(self, key: str) -> bool:
-        return key in self._data
+        return self._data.get(key) is not None
 
     def raw(self, key: str, default: object = _MISSING) -> object:
         self._consumed.add(key)
-        if key in self._data:
-            return self._data[key]
+        value = self._data.get(key)
+        if value is not None:
+            return value
         if default is _MISSING:
             raise ConfigError(f"{self.field_path(key)} is required")
         return default
@@ -109,6 +113,14 @@ class ConfigReader:
             raise ConfigError(f"{self.field_path(key)} must be at most {maximum}")
         return number
 
+    def color(self, key: str, default: str | object = _MISSING) -> str:
+        """Read a ``#RRGGBB`` or ``#AARRGGBB`` color."""
+
+        value = self.raw(key, default)
+        if not isinstance(value, str) or not _COLOR.fullmatch(value):
+            raise ConfigError(f"{self.field_path(key)} must be a color like #RRGGBB or #AARRGGBB")
+        return value
+
     def choice(self, key: str, choices: frozenset[str], default: str | object = _MISSING) -> str:
         value = self.string(key, default)
         if value not in choices:
@@ -143,37 +155,50 @@ class ConfigReader:
         if callable(value):
             return self._functions.register(value)
         try:
-            return copy_data_map({"value": value})["value"]
+            return copy_data_value(value)
         except (TypeError, ValueError) as exc:
             raise ConfigError(f"{self.field_path(key)} must be plain data or a function: {exc}") from exc
 
     def string_list(self, key: str, default: list[str] | object = _MISSING) -> tuple[str, ...]:
         value = self.raw(key, default)
-        if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) and item for item in value):
+        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
             raise ConfigError(f"{self.field_path(key)} must be a list of non-empty strings")
         return tuple(value)
 
-    def child(self, key: str, default: object = _MISSING) -> "ConfigReader | None":
-        value = self.raw(key, default)
+    def child(self, key: str) -> "ConfigReader":
+        return ConfigReader(self.raw(key), self.field_path(key), self._functions)
+
+    def optional_child(self, key: str) -> "ConfigReader | None":
+        value = self.raw(key, None)
         if value is None:
             return None
         return ConfigReader(value, self.field_path(key), self._functions)
 
-    def children(self, key: str, default: object = _MISSING) -> Iterator["ConfigReader"]:
-        value = self.raw(key, default)
-        if not isinstance(value, (list, tuple)):
-            raise ConfigError(f"{self.field_path(key)} must be a list")
-        for index, item in enumerate(value):
-            yield ConfigReader(item, f"{self.field_path(key)}[{index}]", self._functions)
+    def children(self, key: str, default: object = _MISSING) -> list["ConfigReader"]:
+        """Read a list of maps, skipping ``None`` items as a Lua array has no ``nil`` entries."""
 
-    def items(self, key: str, default: object = _MISSING) -> Iterator[tuple[str, object]]:
+        value = self.raw(key, default)
+        if not isinstance(value, list):
+            raise ConfigError(f"{self.field_path(key)} must be a list")
+        return [
+            ConfigReader(item, f"{self.field_path(key)}[{index}]", self._functions)
+            for index, item in enumerate(value)
+            if item is not None
+        ]
+
+    def items(self, key: str, default: object = _MISSING) -> list[tuple[str, object]]:
+        """Read a map's entries, skipping keys set to ``None``."""
+
         value = self.raw(key, default)
         if not isinstance(value, Mapping):
             raise ConfigError(f"{self.field_path(key)} must be a map")
+        entries: list[tuple[str, object]] = []
         for name, item in value.items():
             if not isinstance(name, str):
                 raise ConfigError(f"{self.field_path(key)} keys must be strings")
-            yield name, item
+            if item is not None:
+                entries.append((name, item))
+        return entries
 
     def decode(self, decoder: Callable[["ConfigReader"], T]) -> T:
         """Run ``decoder`` on this map and reject keys it did not read."""
@@ -183,6 +208,6 @@ class ConfigReader:
         return result
 
     def finish(self) -> None:
-        unknown = sorted(set(self._data) - self._consumed)
+        unknown = sorted(key for key, value in self._data.items() if value is not None and key not in self._consumed)
         if unknown:
             raise ConfigError(f"{self._path} has unknown keys: {', '.join(unknown)}")

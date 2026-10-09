@@ -18,7 +18,8 @@ class DispatcherThreadTests(unittest.TestCase):
     def setUp(self) -> None:
         self.wakes = 0
         self.handled_threads: list[int] = []
-        self.dispatcher = Dispatcher(wake=self._wake)
+        self.dispatcher = Dispatcher()
+        self.dispatcher.set_wake(self._wake)
         self.dispatcher.register_event("probe.ping", lambda arguments: arguments)
         self.dispatcher.add_event_handler("probe.ping", self._record)
 
@@ -33,7 +34,7 @@ class DispatcherThreadTests(unittest.TestCase):
     def _send_from_thread(self, count: int) -> None:
         def send() -> None:
             for _ in range(count):
-                self.dispatcher.dispatch_event(_ping())
+                self.dispatcher.dispatch(_ping())
 
         thread = threading.Thread(target=send)
         thread.start()
@@ -56,18 +57,18 @@ class DispatcherThreadTests(unittest.TestCase):
         self.dispatcher.add_event_handler("probe.ping", lambda event: order.append("other") or [])
         self._send_from_thread(1)
 
-        self.dispatcher.dispatch_event(RuntimeEvent("probe.owner", {}))
+        self.dispatcher.dispatch(RuntimeEvent("probe.owner", {}))
 
         self.assertEqual(order, ["owner", "other"])
 
     def test_concurrent_senders_never_run_handlers_off_the_owner_thread(self) -> None:
         owner = threading.get_ident()
         sender = threading.Thread(
-            target=lambda: [self.dispatcher.dispatch_event(_ping()) for _ in range(2_000)]
+            target=lambda: [self.dispatcher.dispatch(_ping()) for _ in range(2_000)]
         )
         sender.start()
         for _ in range(2_000):
-            self.dispatcher.dispatch_event(_ping())
+            self.dispatcher.dispatch(_ping())
         sender.join()
         self.dispatcher.process_pending()
 
@@ -100,7 +101,7 @@ class QtDispatcherWakeTests(unittest.TestCase):
         wake = QtDispatcherWake(dispatcher)
         self.addCleanup(wake.deleteLater)
 
-        thread = threading.Thread(target=lambda: dispatcher.dispatch_event(_ping()))
+        thread = threading.Thread(target=lambda: dispatcher.dispatch(_ping()))
         thread.start()
         thread.join()
         deadline = QDeadlineTimer(2_000)

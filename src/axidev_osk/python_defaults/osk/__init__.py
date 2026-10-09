@@ -14,14 +14,21 @@ Everything here builds plain maps. Nothing calls the engine directly. A Lua
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 Map = dict[str, Any]
+Binding = Callable[[Any], Any]
+"""``fn(state) -> value``: a node property that follows state."""
+Callback = Callable[[Any, Any], "list[Map] | None"]
+"""``fn(ctx, event) -> [actions]``: what happens when an event arrives."""
 
 
 def action(name: str, **arguments: Any) -> Map:
-    """Build one action map; every action builder below uses this shape."""
+    """Build one action map, leaving out arguments set to ``None`` as Lua leaves out ``nil``.
+
+    ``state.set`` builds its map directly, because a ``None`` value is how it removes a path.
+    """
 
     return {"action": name, "arguments": {key: value for key, value in arguments.items() if value is not None}}
 
@@ -130,7 +137,7 @@ class _Window:
 
     @staticmethod
     def block_input(window: str, allowed: list[str] | None = None) -> Map:
-        return {"action": "window.block_input", "arguments": {"window": window, "except": list(allowed or [])}}
+        return action("window.block_input", window=window, **{"except": list(allowed or [])})
 
     @staticmethod
     def unblock_input(window: str) -> Map:

@@ -8,24 +8,9 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from axidev_osk.attachments import DwellOptions
 from axidev_osk.config.models import DwellClickConfig
-from axidev_osk.python_defaults.default_profile import build_default_config
-from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.dwell_click import DwellClickController
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
-class FakeKeyboardBackend:
-    def add_observation_listener(self, listener):
-        del listener
-        return lambda: None
+from support import qt_app
 
 
 class _MouseEventRecorder(QWidget):
@@ -49,27 +34,6 @@ class _MouseEventRecorder(QWidget):
 
 
 class DwellClickConfigTests(unittest.TestCase):
-    def test_default_keyboard_starts_with_dwell_click_disabled(self) -> None:
-        engine = make_test_context(FakeKeyboardBackend()).engine
-        profile = engine.decoder().decode_root(build_default_config()).profile
-        attachment = next(attachment for attachment in profile.attachments if attachment.id == "keyboard-dwell")
-        assert isinstance(attachment.options, DwellOptions)
-        self.assertEqual(attachment.kind, "dwell")
-        self.assertEqual(attachment.options.window, "keyboard")
-        config = attachment.options.settings
-
-        self.assertFalse(config.enabled)
-        self.assertEqual(config.delay_ms, 200)
-        self.assertEqual(config.dead_zone_px, 10)
-        self.assertEqual(config.full_speed_px_s, 20)
-        self.assertEqual(config.stop_speed_px_s, 240)
-        self.assertEqual(config.maximum_progress_rate, 1.75)
-        self.assertEqual(config.indicator_start_progress, 0.25)
-        self.assertEqual(config.direction_reversal_progress_factor, 0.5)
-        self.assertEqual(config.movement_penalty_px, 15)
-        self.assertEqual(config.distance_curve_full_px, 200)
-        self.assertEqual(config.velocity_release_ms, 100)
-
     def test_config_rejects_invalid_delay_and_dead_zone(self) -> None:
         for delay in (0, float("nan"), float("inf")):
             with self.subTest(delay=delay):
@@ -118,7 +82,7 @@ class DwellClickConfigTests(unittest.TestCase):
 
 class DwellClickControllerTests(unittest.TestCase):
     def setUp(self) -> None:
-        _app()
+        qt_app()
         self.window = QWidget()
         self.window.setGeometry(100, 100, 240, 100)
         self.key = QPushButton("A", self.window)

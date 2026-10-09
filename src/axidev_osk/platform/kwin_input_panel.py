@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import ctypes
 import ctypes.util
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 

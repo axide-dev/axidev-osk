@@ -1,107 +1,57 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QWidget
 
-from axidev_osk.config.profile import ConfigDecoder
-from axidev_osk.messages import DataMap, MessageResult, RuntimeEvent
+from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults.osk import std
 from axidev_osk.python_defaults.osk.std import keys, prompts, windows
-from axidev_osk.runtime.engine_messages import input_key, keyboard_reset
+from axidev_osk.runtime.engine_messages import input_key, keyboard_reset, window_state_changed
 from axidev_osk.runtime.state import StateTree
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from axidev_osk.windows.builder import build_profile_window
+from support import FakeOverlay, RecordingBackend, qt_app, record_app_actions
 
 
-class RecordingBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = ""
+def _window_report(window: str, *, blocked: bool, opacity: float, configured: float) -> RuntimeEvent:
+    """What the engine reports about a window once actions on it have run."""
 
-    def __init__(self) -> None:
-        self.sent: list[tuple[object, ...]] = []
-
-    def add_observation_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_key_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_modifier_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def canonical_key(self, key: str) -> str:
-        return key
-
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> object:
-        self.sent.append(("down", key, mods, repeat))
-        return SimpleNamespace(key_name=key)
-
-    def key_up(self, handle: object) -> None:
-        self.sent.append(("up", getattr(handle, "key_name", None)))
-
-
-class FakeOverlay:
-    uses_custom_chrome = False
-
-    def handle_show(self) -> bool:
-        return True
-
-
-def _app() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    assert isinstance(app, QApplication)
-    return app
+    return window_state_changed(
+        window, visible=True, minimized=False, opacity=opacity, configured_opacity=configured, input_blocked=blocked
+    )
 
 
 class StdHarness:
     def __init__(self, children: list[osk.Map], *, on: dict[str, Any] | None = None) -> None:
-        _app()
+        qt_app()
         self.backend = RecordingBackend()
         self.context = make_test_context(self.backend)
         self.engine = self.context.engine
-        self.window_actions: list[tuple[str, DataMap]] = []
-        for name in ("window.set_opacity", "window.block_input", "window.unblock_input", "window.show", "window.hide"):
-            self.context.dispatcher.register_action(
-                name,
-                lambda arguments: arguments,
-                lambda arguments, name=name: self._record(name, arguments),
-                override=True,
-            )
+        self.window_actions = record_app_actions(self.context.dispatcher)
         root = osk.config(
             active_profile="p",
             profiles={
                 "p": osk.profile(
                     windows=[osk.window(id="pad", title="Pad", content=osk.box(id="root", children=children))],
-                    on=on or {"keyboard.reset": keys.on_reset},
+                    on=std.with_handlers(on),
                 )
             },
         )
-        decoder = ConfigDecoder(node_kinds=self.engine.nodes, attachment_kinds={}, functions=self.engine.functions)
-        self.profile = decoder.decode_root(root).profile
-        self.engine.profile.start(self.profile)
+        self.profile = start_test_profile(self.context, root)
         with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
             self.window = build_profile_window(self.profile.window("pad"), self.context)
 
-    def _record(self, name: str, arguments: DataMap) -> MessageResult:
-        self.window_actions.append((name, arguments))
-        return []
-
     def tap(self, node_id: str) -> None:
-        self.context.dispatcher.dispatch_event(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
-        self.context.dispatcher.dispatch_event(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
 
     def observe(self, key: str, pressed: bool, modifiers: tuple[str, ...] = ()) -> None:
-        self.context.dispatcher.dispatch_event(input_key(key, None, modifiers, pressed))
+        self.context.dispatcher.dispatch(input_key(key, None, modifiers, pressed))
 
     def widget(self, node_id: str) -> QWidget:
         for child in self.window.findChildren(QWidget):
@@ -110,7 +60,7 @@ class StdHarness:
         raise AssertionError(node_id)
 
     def state(self, *path: str) -> object:
-        return self.engine.state.get(path)
+        return self.engine.profile.state.get(path)
 
 
 class KeyTests(unittest.TestCase):
@@ -149,8 +99,56 @@ class KeyTests(unittest.TestCase):
 
         self.assertEqual(
             harness.backend.sent,
-            [("down", "A", ("Shift",), True), ("up", "A"), ("down", "A", (), True), ("up", "A")],
+            [
+                ("down", "ShiftLeft", (), False),
+                ("down", "A", (), True),
+                ("up", "A"),
+                ("up", "ShiftLeft"),
+                ("down", "A", (), True),
+                ("up", "A"),
+            ],
         )
+
+    def test_one_shot_altgr_holds_the_real_altgr_key(self) -> None:
+        harness = StdHarness([keys.modifier("AltGr", "AltRight", {"mode": "one_shot"}), keys.key("E", "E")])
+
+        harness.tap("key:AltRight")
+        harness.tap("key:E")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "AltRight", (), False), ("down", "E", (), True), ("up", "E"), ("up", "AltRight")],
+        )
+
+    def test_left_and_right_twins_share_a_latch_and_release_the_original_press(self) -> None:
+        harness = StdHarness([keys.modifier("Shift", "ShiftLeft"), keys.modifier("Shift", "ShiftRight")])
+
+        harness.tap("key:ShiftLeft")
+        self.assertTrue(harness.widget("key:ShiftRight").property("latched"))
+        harness.tap("key:ShiftRight")
+
+        self.assertEqual(harness.backend.sent, [("down", "ShiftLeft", (), True), ("up", "ShiftLeft")])
+        self.assertFalse(harness.widget("key:ShiftLeft").property("latched"))
+
+    def test_twins_that_differ_keep_separate_latches_unless_one_is_named(self) -> None:
+        harness = StdHarness(
+            [
+                keys.modifier("Alt", "AltLeft"),
+                keys.modifier("AltGr", "AltRight"),
+                keys.modifier("Ctrl", "CtrlLeft", {"latch": "chord"}),
+                keys.modifier("Super", "SuperLeft", {"latch": "chord"}),
+            ]
+        )
+
+        harness.tap("key:AltLeft")
+        harness.tap("key:AltRight")
+        harness.tap("key:CtrlLeft")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "AltLeft", (), True), ("down", "AltRight", (), True), ("down", "CtrlLeft", (), True)],
+        )
+        self.assertTrue(harness.widget("key:SuperLeft").property("latched"))
 
     def test_lock_key_taps_without_repeat_and_lights_from_the_system(self) -> None:
         harness = StdHarness([keys.lock("Caps", "CapsLock")])
@@ -167,7 +165,7 @@ class KeyTests(unittest.TestCase):
         harness = StdHarness([keys.modifier("Ctrl", "CtrlLeft")])
         harness.tap("key:CtrlLeft")
 
-        harness.context.dispatcher.dispatch_event(keyboard_reset())
+        harness.context.dispatcher.dispatch(keyboard_reset())
 
         self.assertIsNone(harness.state("std", "latched"))
         self.assertFalse(harness.widget("key:CtrlLeft").property("latched"))
@@ -192,38 +190,48 @@ class KeyTests(unittest.TestCase):
 
 class WindowHelperTests(unittest.TestCase):
     def test_ghost_button_fades_blocks_and_restores(self) -> None:
-        harness = StdHarness([windows.ghost_button("pad", 0.85)])
+        harness = StdHarness([windows.ghost_button("pad")])
 
         harness.tap("ghost:pad")
-        self.assertTrue(harness.widget("ghost:pad").property("latched"))
+        harness.context.dispatcher.dispatch(_window_report("pad", blocked=True, opacity=0.01, configured=0.85))
+        self.assertIs(harness.state("std", "ghosted", "pad"), True)
         harness.tap("ghost:pad")
 
         self.assertEqual(
             harness.window_actions,
             [
-                ("window.set_opacity", {"window": "pad", "opacity": 0.01}),
                 ("window.block_input", {"window": "pad", "except": ["ghost:pad"]}),
+                ("window.set_opacity", {"window": "pad", "opacity": 0.01}),
                 ("window.set_opacity", {"window": "pad", "opacity": 0.85}),
                 ("window.unblock_input", {"window": "pad"}),
             ],
         )
+        self.assertIsNone(harness.state("std", "ghosted", "pad"))
+
+    def test_ghost_flag_clears_when_the_engine_reports_the_window_unblocked(self) -> None:
+        harness = StdHarness([windows.ghost_button("pad")])
+        harness.tap("ghost:pad")
+        self.assertIs(harness.state("std", "ghosted", "pad"), True)
+
+        harness.context.dispatcher.dispatch(_window_report("pad", blocked=False, opacity=0.85, configured=0.85))
+
+        self.assertIsNone(harness.state("std", "ghosted", "pad"))
 
     def test_corner_toggle_brings_back_ghosted_and_minimized_windows(self) -> None:
         def run(state: DataMap) -> list[str]:
-            ctx = SimpleNamespace(state=StateTree(state).view())
-            return [item["action"] for item in windows.corner_toggle(ctx, "pad", 0.85)]
+            return [item["action"] for item in windows.corner_toggle(StateTree(state).view(), "pad")]
 
-        self.assertEqual(run({"std": {"ghosted": {"pad": True}}})[-1], "window.show")
+        ghosted = {"std": {"ghosted": {"pad": True}}, "windows": {"pad": {"visible": True, "configured_opacity": 0.85}}}
+        self.assertEqual(run(ghosted), ["window.set_opacity", "window.unblock_input", "state.set", "window.show"])
         self.assertEqual(run({"windows": {"pad": {"minimized": True, "visible": True}}}), ["window.show"])
         self.assertEqual(run({"windows": {"pad": {"visible": True}}}), ["window.hide"])
         self.assertEqual(run({}), ["window.show"])
 
 
 class PromptTests(unittest.TestCase):
-    def test_prompt_window_builds_with_button_callbacks(self) -> None:
-        _app()
+    def test_prompt_window_builds_with_button_callbacks_and_takes_opts(self) -> None:
+        qt_app()
         context = make_test_context(RecordingBackend())
-        engine = context.engine
         answers: list[str] = []
 
         def answer(ctx: Any, event: DataMap) -> None:
@@ -237,22 +245,23 @@ class PromptTests(unittest.TestCase):
             danger=True,
             buttons=[
                 prompts.prompt_button("quit:yes", "Yes", answer, accept=True),
-                prompts.prompt_button("quit:no", "No", answer, accept=False),
+                prompts.prompt_button("quit:no", "No", answer, accept=False, opts={"label": "Keep"}),
             ],
+            opts={"minimum_size": [500, 200]},
         )
-        decoder = ConfigDecoder(node_kinds=engine.nodes, attachment_kinds={}, functions=engine.functions)
-        profile = decoder.decode_root(osk.config(active_profile="p", profiles={"p": osk.profile(windows=[prompt])})).profile
-        engine.profile.start(profile)
+        profile = start_test_profile(context, osk.config(active_profile="p", profiles={"p": osk.profile(windows=[prompt])}))
         with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
             window = build_profile_window(profile.window("quit"), context)
-        self.addCleanup(window.close)
-        context.dispatcher.dispatch_event(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
+        self.addCleanup(window.deleteLater)
+        context.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
 
-        labels = {child.property("componentId"): child for child in window.findChildren(QWidget)}
-        self.assertEqual(labels["quit:message"].text(), "Close it?")  # type: ignore[attr-defined]
-        self.assertEqual(labels["quit:yes"].objectName(), "confirmAcceptButton")
+        widgets = {child.property("componentId"): child for child in window.findChildren(QWidget)}
+        self.assertEqual(widgets["quit:message"].text(), "Close it?")  # type: ignore[attr-defined]
+        self.assertEqual(widgets["quit:no"].text(), "Keep")  # type: ignore[attr-defined]
+        self.assertEqual(widgets["quit:yes"].objectName(), "confirmAcceptButton")
         self.assertEqual(answers, ["quit:no"])
         self.assertFalse(profile.window("quit").show_on_start)
+        self.assertEqual(profile.window("quit").minimum_size, (500, 200))
 
 
 if __name__ == "__main__":

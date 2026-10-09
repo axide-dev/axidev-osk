@@ -65,9 +65,9 @@ class FakeKeyboardBackend:
 
 
 class RefusingKeyboardBackend(FakeKeyboardBackend):
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> None:  # type: ignore[override]
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> object:
         self.sent.append(("down", key, mods, repeat))
-        return None
+        raise RuntimeError("Keyboard output is not ready")
 
 
 class KeyboardServiceTests(unittest.TestCase):
@@ -123,8 +123,8 @@ class KeyboardServiceTests(unittest.TestCase):
             self.backend.sent,
             [
                 ("down", "A", (), True),
-                ("down", "A", ("Shift",), True),
                 ("up", PressHandle("A")),
+                ("down", "A", ("Shift",), True),
                 ("up", PressHandle("A")),
             ],
         )
@@ -133,7 +133,8 @@ class KeyboardServiceTests(unittest.TestCase):
         backend = RefusingKeyboardBackend()
         service = make_test_context(backend).keyboard
 
-        service.press("a", (), True)
+        with self.assertRaisesRegex(RuntimeError, "not ready"):
+            service.press("a", (), True)
         service.release("a")
 
         self.assertEqual(backend.sent, [("down", "A", (), True)])
@@ -193,7 +194,7 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.publish_status()
 
         self.assertEqual(self._event_names(), [KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED])
-        self.assertEqual(self.context.engine.state.get(("keyboard", "ready")), False)
+        self.assertEqual(self.context.engine.profile.state.get(("keyboard", "ready")), False)
 
     def test_observations_are_forwarded_as_input_key_events(self) -> None:
         self.backend.observe(KeyObservation("A", "a", ("CapsLock",), True))

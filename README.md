@@ -140,17 +140,17 @@ Axidev OSK is usable today as a keyboard overlay, but the project is aimed at a 
 
 What works now:
 
-- a single main keyboard window
-- US legends on an ISO-style physical arrangement
-- modifier latch behavior
+- the bundled keyboard, built as the default profile: US legends on an ISO-style physical arrangement, latching modifiers, Ghost, Dwell, and hot corners
+- profiles that compose several windows from grids, boxes, stacks, buttons, and labels; for now, a profile is changed by editing `src/axidev_osk/python_defaults/`
 - always-on-top overlay behavior across Windows, X11, and supported Wayland compositors
 
 What's planned:
 
-- multiple independent windows and surfaces
-- Lua-based user customization
-- config-driven composition of grids and layouts
-- more reusable grid and container primitives
+- Lua profiles, loaded in place of the bundled one and read by the same decoders, replacing the Python ones in `src/axidev_osk/python_defaults/`
+
+## Contributing
+
+Changes land through pull requests rather than direct pushes to `main`. Read [`AGENTS.md`](./AGENTS.md) before changing the engine, the standard library, or the default profile, since it explains how they fit together and how to add to each. Setting up a development checkout is covered in [`packaging/MANUAL_INSTALL.md`](./packaging/MANUAL_INSTALL.md).
 
 ## License
 

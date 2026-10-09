@@ -9,7 +9,7 @@ from typing import Protocol
 from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
 from ..config.profile import ProfileConfig
 from ..messages import DataMap, MessageResult, RuntimeAction
-from ..runtime.decoding import bool_value, non_empty_string_value, require_keys
+from ..runtime.decoding import bool_value, non_empty_string_value, require_keys, validated_action
 from ..runtime.dispatcher import Dispatcher
 from ..runtime.profile_runtime import ProfileRuntime
 from . import DwellOptions, HotCornersOptions, PointerLocatorOptions, SecureInputPanelOptions
@@ -24,7 +24,7 @@ class DwellSetEnabledArguments:
 
 
 def dwell_set_enabled(dwell: str, enabled: bool) -> RuntimeAction:
-    return RuntimeAction(DWELL_SET_ENABLED, {"dwell": dwell, "enabled": enabled})
+    return validated_action(DWELL_SET_ENABLED, {"dwell": dwell, "enabled": enabled}, decode_dwell_set_enabled)
 
 
 def decode_dwell_set_enabled(arguments: DataMap) -> DwellSetEnabledArguments:
@@ -70,6 +70,7 @@ class AttachmentRuntime:
         self._dwell_by_window: dict[str, str] = {}
         self._locators: dict[str, list[PointerLocatorConfig]] = {}
         self._secure_input_panel_window: str | None = None
+        profile_runtime.declare_root("dwell", {})
         dispatcher.register_action(DWELL_SET_ENABLED, decode_dwell_set_enabled, self._set_dwell_enabled)
 
     @property
@@ -108,9 +109,10 @@ class AttachmentRuntime:
             self._hot_corners.configure(hot_corners[0].settings, hot_corners[0].corners)
         if panels:
             self._secure_input_panel_window = panels[0].window
+        observed: MessageResult = []
         for dwell_id, options in self._dwell.items():
-            for message in self._profile_runtime.set_observed(("dwell", dwell_id, "enabled"), options.settings.enabled):
-                self._dispatcher.dispatch_event(message)  # type: ignore[arg-type]
+            observed.extend(self._profile_runtime.set_observed(("dwell", dwell_id, "enabled"), options.settings.enabled))
+        self._dispatcher.dispatch(*observed)
 
     def for_window(self, window_id: str) -> WindowAttachments:
         """Return the attachments a window installs, with dwell's current enabled state."""

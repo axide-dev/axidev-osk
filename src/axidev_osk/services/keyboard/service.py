@@ -13,7 +13,7 @@ from ...runtime.engine_messages import (
     keyboard_reset,
     keyboard_status_changed,
 )
-from .io import AxidevIoKeyboardBackend, KeyObservation
+from .io import AxidevIoKeyboardBackend, KeyObservation, KeyPressHandle
 
 if TYPE_CHECKING:
     from ...runtime.context import Context
@@ -36,7 +36,7 @@ class KeyboardService:
         self._backend = backend or AxidevIoKeyboardBackend()
         self._shutdown = False
         self._context: Context | None = None
-        self._held: dict[str, object | None] = {}
+        self._held: dict[str, KeyPressHandle] = {}
         self._observation_unsubscribe: Unsubscribe | None = None
 
     def bind_context(self, context: "Context") -> None:
@@ -80,7 +80,7 @@ class KeyboardService:
         if self._context is None:
             return
         dispatcher = self._context.dispatcher
-        dispatcher.dispatch_event(
+        dispatcher.dispatch(
             keyboard_status_changed(
                 self.ready,
                 self.status_text,
@@ -89,7 +89,7 @@ class KeyboardService:
             )
         )
         if self.needs_permission_setup:
-            dispatcher.dispatch_event(keyboard_permission_required())
+            dispatcher.dispatch(keyboard_permission_required())
 
     def shutdown(self) -> None:
         if self._shutdown:
@@ -103,15 +103,17 @@ class KeyboardService:
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
 
     def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> None:
-        """Hold a key down until ``release`` names the same key."""
+        """Hold a key down until ``release`` names the same key.
+
+        Pressing a held key again releases the earlier press first. A failure
+        raises, so the action reports ``action.failed``.
+        """
 
         canonical = self._backend.canonical_key(key)
-        handle = self._backend.press(canonical, mods, repeat)
-        if handle is not None:
-            previous = self._held.pop(canonical, None)
-            if previous is not None:
-                self._backend.key_up(previous)
-            self._held[canonical] = handle
+        previous = self._held.pop(canonical, None)
+        if previous is not None:
+            self._backend.key_up(previous)
+        self._held[canonical] = self._backend.press(canonical, mods, repeat)
 
     def release(self, key: str) -> None:
         """Release a key held by ``press``; releasing an unheld key does nothing."""
@@ -127,17 +129,21 @@ class KeyboardService:
         self._backend.type_text(text)
 
     def reset_state(self) -> None:
-        """Release every held key and report ``keyboard.reset``."""
+        """Release every held key and report ``keyboard.reset``; a key that fails to release is logged."""
 
-        for handle in tuple(self._held.values()):
-            self._backend.key_up(handle)
+        held = tuple(self._held.values())
         self._held.clear()
+        for handle in held:
+            try:
+                self._backend.key_up(handle)
+            except Exception:
+                _logger.exception("Failed to release %s during reset", handle.key_name)
         if self._context is not None:
-            self._context.dispatcher.dispatch_event(keyboard_reset())
+            self._context.dispatcher.dispatch(keyboard_reset())
 
     def _handle_observation(self, observation: KeyObservation) -> None:
         # Called on the listener thread; the dispatcher hands it to its owner thread.
         if self._context is not None:
-            self._context.dispatcher.dispatch_event(
+            self._context.dispatcher.dispatch(
                 input_key(observation.key, observation.text, observation.modifiers, observation.pressed)
             )

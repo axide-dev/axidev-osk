@@ -652,7 +652,7 @@ class OverlayBackendSelectionTests(unittest.TestCase):
             {},
             clear=True,
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.wayland_layer_shell_available",
             return_value=False,
         ), patch(
             "axidev_osk.windows.overlay.always_on_top._configure_x11_bridge_environment",
@@ -677,7 +677,7 @@ class OverlayBackendSelectionTests(unittest.TestCase):
             {},
             clear=True,
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.wayland_layer_shell_available",
             return_value=False,
         ):
             with patch(
@@ -699,7 +699,7 @@ class OverlayBackendSelectionTests(unittest.TestCase):
             {"QT_QPA_PLATFORM": "wayland;xcb"},
             clear=True,
         ), patch(
-            "axidev_osk.windows.overlay.always_on_top.configure_wayland_layer_shell_environment",
+            "axidev_osk.windows.overlay.always_on_top.wayland_layer_shell_available",
             return_value=True,
         ):
             backend = prepare_always_on_top_window_environment()
@@ -730,6 +730,40 @@ class OverlayBackendSelectionTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "without layer-shell support"):
                 AlwaysOnTopWindowController(window)
+
+
+class LayerShellAttachTests(unittest.TestCase):
+    def test_overlay_windows_ask_for_a_layer_surface_before_their_first_show(self) -> None:
+        window = FakeWindow()
+        visible_when_attached: list[bool] = []
+
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.WAYLAND_LAYER_SHELL,
+        ), patch(
+            "axidev_osk.windows.overlay.always_on_top.attach_wayland_layer_shell",
+            side_effect=lambda target: visible_when_attached.append(target.isVisible()) or True,
+        ) as attach:
+            controller = AlwaysOnTopWindowController(window)  # type: ignore[arg-type]
+            controller.configure_window()
+
+        attach.assert_called_once_with(window)
+        self.assertEqual(visible_when_attached, [False])
+
+    def test_detection_uses_the_per_window_api_without_changing_how_qt_makes_windows(self) -> None:
+        for has_window_get in (True, False):
+            with self.subTest(has_window_get=has_window_get), patch.dict("os.environ", {}, clear=True), patch.object(
+                layer_shell, "is_wayland_session", return_value=True
+            ), patch.object(layer_shell, "_find_layer_shell_plugin_root", return_value=Path("/plugins")), patch.object(
+                layer_shell, "_compositor_supports_layer_shell", return_value=True
+            ), patch.object(layer_shell, "_layer_shell_plugin_is_compatible", return_value=True), patch.object(
+                layer_shell, "layer_shell_interface_path", return_value=Path("/lib/libLayerShellQtInterface.so.6")
+            ), patch.object(
+                layer_shell, "layer_shell_interface_has_window_get", return_value=has_window_get
+            ):
+                self.assertIs(layer_shell.wayland_layer_shell_available(), has_window_get)
+                self.assertNotIn("QT_WAYLAND_SHELL_INTEGRATION", os.environ)
 
 
 class HotCornerControllerTests(unittest.TestCase):

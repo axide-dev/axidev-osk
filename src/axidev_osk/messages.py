@@ -17,13 +17,15 @@ _MESSAGE_NAME = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 def copy_data_map(value: object) -> DataMap:
     """Validate and recursively copy a native-data map."""
 
-    copied = _copy_data_value(value, path="arguments")
+    copied = copy_data_value(value, path="arguments")
     if not isinstance(copied, dict):
         raise TypeError("arguments must be a map")
     return copied
 
 
-def _copy_data_value(value: object, *, path: str) -> DataValue:
+def copy_data_value(value: object, *, path: str = "value") -> DataValue:
+    """Validate and recursively copy one native-data value."""
+
     if value is None or isinstance(value, (bool, str)):
         return value
     if isinstance(value, int):
@@ -33,15 +35,29 @@ def _copy_data_value(value: object, *, path: str) -> DataValue:
             raise ValueError(f"{path} must contain only finite numbers")
         return value
     if isinstance(value, list):
-        return [_copy_data_value(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+        return [copy_data_value(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
     if isinstance(value, dict):
         copied: DataMap = {}
         for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError(f"{path} keys must be strings")
-            copied[key] = _copy_data_value(item, path=f"{path}.{key}")
+            copied[key] = copy_data_value(item, path=f"{path}.{key}")
         return copied
     raise TypeError(f"{path} contains unsupported value {type(value).__name__}")
+
+
+def data_equal(left: DataValue, right: DataValue) -> bool:
+    """Compare plain data the way Lua does: ``True`` is not ``1``, while ``1`` equals ``1.0``."""
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(data_equal(a, b) for a, b in zip(left, right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(data_equal(left[key], right[key]) for key in left)
+    if isinstance(left, (list, dict)) or isinstance(right, (list, dict)):
+        return False
+    return left == right
 
 
 def _validate_message_name(name: str, *, field: str) -> None:
@@ -75,9 +91,3 @@ class RuntimeEvent:
 
 RuntimeMessage: TypeAlias = RuntimeAction | RuntimeEvent
 MessageResult: TypeAlias = list[RuntimeMessage]
-
-
-def runtime_action_to_data(action: RuntimeAction) -> DataMap:
-    """Encode a runtime action as native data."""
-
-    return {"action": action.action, "arguments": action.arguments}

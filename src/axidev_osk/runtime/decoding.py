@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
-from ..messages import DataMap, DataValue, RuntimeAction
+from ..messages import DataMap, RuntimeAction, RuntimeEvent
+
+
+@dataclass(frozen=True, slots=True)
+class EmptyArguments:
+    """Arguments of a message that carries no data."""
 
 
 def require_keys(arguments: DataMap, required: Iterable[str], *, optional: Iterable[str] = ()) -> None:
@@ -18,6 +24,11 @@ def require_keys(arguments: DataMap, required: Iterable[str], *, optional: Itera
         raise ValueError(f"Missing arguments: {', '.join(sorted(missing))}")
     if unexpected:
         raise ValueError(f"Unexpected arguments: {', '.join(sorted(unexpected))}")
+
+
+def decode_empty(arguments: DataMap) -> EmptyArguments:
+    require_keys(arguments, ())
+    return EmptyArguments()
 
 
 def string_value(arguments: DataMap, key: str) -> str:
@@ -69,8 +80,18 @@ def map_value(arguments: DataMap, key: str) -> DataMap:
     return value
 
 
-def data_value(arguments: DataMap, key: str) -> DataValue:
-    return arguments[key]
+def string_list_value(arguments: DataMap, key: str, *, non_empty: bool = False) -> tuple[str, ...]:
+    """Decode a list of strings; ``non_empty`` also rejects an empty list or empty item."""
+
+    value = arguments[key]
+    if not isinstance(value, list):
+        raise TypeError(f"Argument {key!r} must be a list of strings")
+    strings = tuple(item for item in value if isinstance(item, str))
+    if len(strings) != len(value):
+        raise TypeError(f"Argument {key!r} must be a list of strings")
+    if non_empty and (not strings or not all(strings)):
+        raise ValueError(f"Argument {key!r} must be a non-empty list of non-empty strings")
+    return strings
 
 
 def runtime_action_from_data(arguments: DataMap) -> RuntimeAction:
@@ -83,12 +104,17 @@ def runtime_action_from_data(arguments: DataMap) -> RuntimeAction:
     )
 
 
-def string_set_value(arguments: DataMap, key: str) -> frozenset[str]:
-    """Decode a list of unique strings as an immutable set."""
+def validated_action(name: str, arguments: DataMap, decoder: Callable[[DataMap], object]) -> RuntimeAction:
+    """Build an action and check it with its registered decoder, so bad calls fail at the call site."""
 
-    value = arguments[key]
-    if not isinstance(value, list):
-        raise TypeError(f"Argument {key!r} must be a list")
-    if not all(isinstance(item, str) for item in value):
-        raise TypeError(f"Argument {key!r} must contain only strings")
-    return frozenset(item for item in value if isinstance(item, str))
+    action = RuntimeAction(name, arguments)
+    decoder(action.arguments)
+    return action
+
+
+def validated_event(name: str, arguments: DataMap, decoder: Callable[[DataMap], object]) -> RuntimeEvent:
+    """Build an event and check it with its registered decoder, so bad calls fail at the call site."""
+
+    event = RuntimeEvent(name, arguments)
+    decoder(event.arguments)
+    return event

@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 
 from axidev_osk.config.profile import ConfigDecoder, PropertySpec
 from axidev_osk.config.reader import ConfigError, ConfigReader
+from axidev_osk.function_registry import FunctionRef, FunctionRegistry
 from axidev_osk.messages import DataMap, MessageResult, RuntimeEvent
+from axidev_osk.runtime.app_messages import register_app_events
 from axidev_osk.runtime.dispatcher import Dispatcher
-from axidev_osk.runtime.events import register_builtin_events
-from axidev_osk.runtime.functions import CallbackContext, FunctionRef, FunctionRegistry, call_callback
+from axidev_osk.runtime.functions import CallbackContext, call_callback
 from axidev_osk.runtime.profile_runtime import (
     CALLBACK_FAILED,
     STATE_CHANGED,
@@ -33,6 +34,9 @@ class FakeNodeKind:
 
     def decode_options(self, reader: ConfigReader) -> object:
         return reader.integer("size", 1)
+
+    def decode_child_placement(self, reader: ConfigReader) -> object:
+        return reader.integer("slot", 0)
 
 
 def _action(name: str, **arguments: object) -> dict[str, object]:
@@ -67,6 +71,27 @@ class StateTreeTests(unittest.TestCase):
         self.assertIsNone(tree.get(("cow", "count")))
         self.assertIsNone(tree.get(("missing", "deep")))
 
+    def test_true_and_one_are_different_values(self) -> None:
+        tree = StateTree({"x": 1})
+
+        self.assertTrue(tree.set(("x",), True))
+        self.assertIs(tree.get(("x",)), True)
+
+    def test_maps_drop_nil_and_removals_leave_no_empty_branches(self) -> None:
+        tree = StateTree({"a": {"b": None, "c": 1}})
+
+        self.assertEqual(list(tree.view().a), ["c"])  # type: ignore[arg-type]
+        self.assertTrue(tree.set(("a", "c"), None))
+        self.assertIsNone(tree.get(("a",)))
+        tree.set(("empty",), {})
+        self.assertTrue(bool(tree.view().empty))
+
+    def test_removing_a_missing_path_leaves_the_tree_unchanged(self) -> None:
+        tree = StateTree({"cow": "moo"})
+
+        self.assertFalse(tree.set(("a", "b", "c"), None))
+        self.assertEqual(tree.get(()), {"cow": "moo"})
+
     def test_view_records_only_the_deepest_paths_read(self) -> None:
         tree = StateTree({"input": {"locks": {"capslock": True}, "keys": {"A": False}}, "shift": False})
         recorder = ReadRecorder()
@@ -81,6 +106,16 @@ class StateTreeTests(unittest.TestCase):
             recorder.paths,
             frozenset({("input", "locks", "capslock"), ("shift",), ("nothing",)}),
         )
+
+    def test_view_keeps_a_whole_branch_read_after_reading_its_children(self) -> None:
+        tree = StateTree({"std": {"latched": {"shift": True}}})
+        recorder = ReadRecorder()
+        branch = tree.view(recorder).std.latched
+
+        names = [name for name in branch if branch[name]]  # type: ignore[union-attr]
+
+        self.assertEqual(names, ["shift"])
+        self.assertIn(("std", "latched"), recorder.paths)
 
 
 class FunctionTests(unittest.TestCase):
@@ -151,7 +186,7 @@ class ConfigDecoderTests(unittest.TestCase):
                                     "label": label,
                                     "latched": True,
                                     "on_press": pressed,
-                                    "cell": {"row": 0, "column": 4, "column_span": 5},
+                                    "slot": 4,
                                 }
                             ],
                         },
@@ -160,14 +195,15 @@ class ConfigDecoderTests(unittest.TestCase):
             )
         )
 
-        profile = root.profile
+        profile = root
         child = profile.window("pad").content.children[0]
         self.assertEqual(profile.state, {"shift": False})
         self.assertEqual(child.options, 3)
         self.assertIsInstance(child.bindings["label"], FunctionRef)
         self.assertIs(child.bindings["latched"], True)
         self.assertEqual(child.callbacks, {"probe.pressed": self.functions.register(pressed)})
-        self.assertEqual((child.cell.column, child.cell.column_span), (4, 5))  # type: ignore[union-attr]
+        self.assertEqual(child.placement, 4)
+        self.assertIsNone(profile.window("pad").content.placement)
         self.assertEqual(tuple(profile.on), ("hot_corner.triggered",))
 
     def test_errors_name_the_config_path(self) -> None:
@@ -184,6 +220,46 @@ class ConfigDecoderTests(unittest.TestCase):
                     }}])
                 )
 
+    def test_keys_set_to_none_count_as_absent(self) -> None:
+        root = self.decoder.decode_root(
+            _root(
+                theme=None,
+                windows=[
+                    {
+                        "id": "pad",
+                        "title": "Pad",
+                        "opacity": None,
+                        "content": {"kind": "probe", "id": "root", "size": None, "label": None},
+                    }
+                ],
+            )
+        )
+
+        window = root.window("pad")
+        self.assertEqual((window.opacity, window.content.options), (1.0, 1))
+        self.assertNotIn("label", window.content.bindings)
+
+    def test_inactive_profiles_are_validated_too(self) -> None:
+        root = _root()
+        root["profiles"]["spare"] = {"windows": [], "colour": "red"}  # type: ignore[index]
+
+        with self.assertRaisesRegex(ConfigError, "config.profiles.spare has unknown keys: colour"):
+            self.decoder.decode_root(root)
+
+    def test_nil_entries_are_skipped_and_only_lists_count_as_lists(self) -> None:
+        profile = self.decoder.decode_root(
+            _root(
+                on={"hot_corner.triggered": None},
+                windows=[{"id": "pad", "title": "Pad", "content": {"kind": "probe", "id": "root", "children": [None]}}],
+            )
+        )
+        self.assertEqual((dict(profile.on), profile.window("pad").content.children), ({}, ()))
+
+        with self.assertRaisesRegex(ConfigError, "children must be a list"):
+            self.decoder.decode_root(
+                _root(windows=[{"id": "pad", "title": "Pad", "content": {"kind": "probe", "id": "root", "children": ()}}])
+            )
+
     def test_duplicate_node_ids_fail(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Duplicate IDs"):
             self.decoder.decode_root(
@@ -197,7 +273,7 @@ class ConfigDecoderTests(unittest.TestCase):
 class ProfileRuntimeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dispatcher = Dispatcher()
-        register_builtin_events(self.dispatcher)
+        register_app_events(self.dispatcher)
         register_profile_events(self.dispatcher)
         self.functions = FunctionRegistry()
         self.state = StateTree()
@@ -218,23 +294,37 @@ class ProfileRuntimeTests(unittest.TestCase):
 
     def _start(self, **profile: object) -> None:
         decoder = ConfigDecoder(node_kinds={"probe": FakeNodeKind()}, attachment_kinds={}, functions=self.functions)
-        self.profile_runtime.start(decoder.decode_root(_root(**profile)).profile)
+        self.profile_runtime.start(decoder.decode_root(_root(**profile)))
 
     def test_state_set_updates_state_and_reports_the_path(self) -> None:
         self._start(state={"shift": False})
 
-        self.dispatcher.dispatch_action(state_set("std.latched.shift", True))
-        self.dispatcher.dispatch_action(state_set("std.latched.shift", True))
+        self.dispatcher.dispatch(state_set("std.latched.shift", True))
+        self.dispatcher.dispatch(state_set("std.latched.shift", True))
 
         self.assertEqual(self.state.get(("std", "latched", "shift")), True)
         self.assertEqual(self.changes, [("std", "latched", "shift")])
 
+    def test_rejected_profile_leaves_the_running_one_untouched(self) -> None:
+        seen: list[DataMap] = []
+        self._start(state={"mode": "a"}, on={"hot_corner.triggered": lambda ctx, event: seen.append(event) or []})
+        self.profile_runtime.declare_root("input", {"keys": {}})
+        decoder = ConfigDecoder(node_kinds={"probe": FakeNodeKind()}, attachment_kinds={}, functions=self.functions)
+
+        with self.assertRaisesRegex(ValueError, "cannot define runtime roots: input"):
+            self.profile_runtime.start(decoder.decode_root(_root(state={"input": {}})))
+        self.dispatcher.dispatch(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
+
+        self.assertEqual(self.state.get(("mode",)), "a")
+        self.assertEqual(seen, [{"corner": "top_left"}])
+
     def test_profiles_cannot_set_runtime_state(self) -> None:
+        self.profile_runtime.declare_root("input", {"keys": {}})
         self._start()
         failed: list[object] = []
         self.dispatcher.add_raw_event_handler("action.failed", lambda event: failed.append(event) or [])
 
-        self.dispatcher.dispatch_action(state_set("input.keys.A", True))
+        self.dispatcher.dispatch(state_set("input.keys.A", True))
 
         self.assertIsNone(self.state.get(("input", "keys", "A")))
         self.assertEqual(len(failed), 1)
@@ -248,7 +338,7 @@ class ProfileRuntimeTests(unittest.TestCase):
 
         self._start(on={"hot_corner.triggered": on_corner})
 
-        self.dispatcher.dispatch_event(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
+        self.dispatcher.dispatch(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
 
         self.assertEqual(events, [{"corner": "top_left"}])
         self.assertEqual(self.state.get(("corner",)), "top_left")
@@ -262,7 +352,7 @@ class ProfileRuntimeTests(unittest.TestCase):
 
         self._start(on={"hot_corner.triggered": [broken, fine]})
 
-        self.dispatcher.dispatch_event(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
+        self.dispatcher.dispatch(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
 
         self.assertEqual([failure.message for failure in self.failures], ["boom"])
         self.assertEqual(self.state.get(("ok",)), True)
@@ -282,8 +372,8 @@ class ProfileRuntimeTests(unittest.TestCase):
             return "A" if shift else "a"
 
         self.tracker.bind(self.functions.register(legend), "node:a.label", applied.append)
-        self.dispatcher.dispatch_action(state_set("other", 1))
-        self.dispatcher.dispatch_action(state_set("shift", True))
+        self.dispatcher.dispatch(state_set("other", 1))
+        self.dispatcher.dispatch(state_set("shift", True))
 
         self.assertEqual(calls, [False, True])
         self.assertEqual(applied, ["a", "A"])
@@ -297,6 +387,19 @@ class ProfileRuntimeTests(unittest.TestCase):
 
         self.assertEqual(applied, ["Shift"])
         self.assertEqual([failure.kind for failure in self.failures], ["binding"])
+
+    def test_failed_binding_reruns_when_the_state_it_read_appears(self) -> None:
+        self._start()
+        applied: list[object] = []
+
+        def upper_mode(state: object) -> str:
+            return state.mode.upper()  # type: ignore[attr-defined]
+
+        self.tracker.bind(self.functions.register(upper_mode), "node:a.label", applied.append)
+        self.dispatcher.dispatch(state_set("mode", "abc"))
+
+        self.assertEqual(applied, ["ABC"])
+        self.assertEqual(len(self.failures), 1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,11 @@
 """Window helpers built only from ``osk`` primitives.
 
-Library state lives under ``std.ghosted.<window id>``.
+Library state lives under ``std.ghosted.<window id>``. Ghosting fades a window
+and lets clicks pass through it except on the allowed nodes; unghosting
+restores the window's configured opacity (``windows.<id>.configured_opacity``).
+Profiles route ``window.state_changed`` to ``on_window_state`` (``std.with_handlers``
+does it) so the flag clears when the engine reports the window unblocked, for
+example after the window was closed and rebuilt.
 """
 
 from __future__ import annotations
@@ -17,62 +22,73 @@ def visible(state: Any, window: str) -> bool:
     return bool(osk.read(state, ["windows", window, "visible"]))
 
 
+def minimized(state: Any, window: str) -> bool:
+    return bool(osk.read(state, ["windows", window, "minimized"]))
+
+
 def ghosted(state: Any, window: str) -> bool:
     return bool(osk.read(state, ["std", "ghosted", window]))
 
 
-def toggle(ctx: Any, window: str) -> osk.Map:
-    """Show a hidden window or hide a visible one."""
-
-    return osk.window.hide(window) if visible(ctx.state, window) else osk.window.show(window)
-
-
-def unghost(window: str, opacity: float) -> list[osk.Map]:
-    return [
-        osk.window.set_opacity(window, opacity),
-        osk.window.unblock_input(window),
-        osk.state.set(["std", "ghosted", window], None),
-    ]
-
-
 def ghost(window: str, allowed: list[str]) -> list[osk.Map]:
     return [
-        osk.window.set_opacity(window, GHOST_OPACITY),
         osk.window.block_input(window, allowed),
+        osk.window.set_opacity(window, GHOST_OPACITY),
         osk.state.set(["std", "ghosted", window], True),
     ]
 
 
-def ghost_button(window: str, opacity: float, opts: Mapping[str, Any] | None = None) -> osk.Map:
-    """A button that fades ``window`` and lets clicks pass through it, except on itself.
+def unghost(state: Any, window: str) -> list[osk.Map]:
+    actions = [osk.window.unblock_input(window), osk.state.set(["std", "ghosted", window], None)]
+    opacity = osk.read(state, ["windows", window, "configured_opacity"])
+    if opacity is not None:
+        actions.insert(0, osk.window.set_opacity(window, opacity))
+    return actions
 
-    ``opacity`` is the window's normal opacity, restored when the button is
-    pressed again.
-    """
+
+def on_window_state(ctx: Any, event: Any) -> list[osk.Map]:
+    """Clear the ghost flag of a window the engine reports as no longer blocking input."""
+
+    window = event["window"]
+    if not event["input_blocked"] and ghosted(ctx.state, window):
+        return [osk.state.set(["std", "ghosted", window], None)]
+    return []
+
+
+def reveal(state: Any, window: str) -> list[osk.Map]:
+    """Show a window, bringing it back from ghost first."""
+
+    if ghosted(state, window):
+        return [*unghost(state, window), osk.window.show(window)]
+    return [osk.window.show(window)]
+
+
+def toggle(state: Any, window: str) -> list[osk.Map]:
+    """Hide a window on screen, or reveal a hidden or minimized one."""
+
+    if visible(state, window) and not minimized(state, window):
+        return [osk.window.hide(window)]
+    return reveal(state, window)
+
+
+def ghost_button(window: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+    """A button that ghosts ``window`` except for itself, and unghosts it when pressed again."""
 
     node_id = (opts or {}).get("id", f"ghost:{window}")
 
     def on_press(ctx: Any, event: Any) -> list[osk.Map]:
         del event
         if ghosted(ctx.state, window):
-            return unghost(window, opacity)
+            return unghost(ctx.state, window)
         return ghost(window, [node_id])
 
-    defaults = {
-        "id": node_id,
-        "label": "Ghost",
-        "latched": lambda state: ghosted(state, window),
-        "on_press": on_press,
-    }
+    defaults = {"id": node_id, "label": "Ghost", "on_press": on_press}
     return osk.button(**osk.merge(defaults, opts))
 
 
-def corner_toggle(ctx: Any, window: str, opacity: float) -> list[osk.Map]:
-    """Bring a ghosted or minimized window back, otherwise toggle it."""
+def corner_toggle(state: Any, window: str) -> list[osk.Map]:
+    """Bring a ghosted window back, otherwise toggle it."""
 
-    state = ctx.state
     if ghosted(state, window):
-        return [*unghost(window, opacity), osk.window.show(window)]
-    if osk.read(state, ["windows", window, "minimized"]):
-        return [osk.window.show(window)]
-    return [toggle(ctx, window)]
+        return reveal(state, window)
+    return toggle(state, window)

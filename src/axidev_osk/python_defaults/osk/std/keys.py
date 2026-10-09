@@ -2,11 +2,19 @@
 
 Library state lives under ``std``:
 
-- ``std.latched.<node id>``: a modifier button is latched.
-- ``std.one_shot.<modifier>``: a one-shot modifier waits for the next key.
+- ``std.latched.<latch>``: the output a latched modifier holds down.
+- ``std.one_shot.<latch>``: the output a one-shot modifier adds to the next
+  key press, which holds that real modifier key down around it.
 
-Profiles should route ``keyboard.reset`` to ``on_reset`` so latches clear
-when the engine releases every held key.
+A modifier's latch is shared by the left and right keys of one modifier when
+nothing else about them differs: ``ShiftLeft`` and ``ShiftRight`` both labelled
+``Shift`` share one latch, while ``Alt`` and ``AltGr`` keep their own. Latching
+either key lights both, and tapping the other releases the original press. The
+``latch`` option names a latch explicitly to group or separate keys any other
+way.
+
+Profiles route ``keyboard.reset`` to ``on_reset`` (``std.with_handlers`` does it)
+so latches clear when the engine releases every held key.
 """
 
 from __future__ import annotations
@@ -17,24 +25,15 @@ from typing import Any
 from ... import osk
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
-_MODIFIER_NAMES = {
-    "ShiftLeft": "Shift",
-    "ShiftRight": "Shift",
-    "CtrlLeft": "Ctrl",
-    "CtrlRight": "Ctrl",
-    "AltLeft": "Alt",
-    "AltRight": "AltGr",
-    "SuperLeft": "Super",
-    "SuperRight": "Super",
-}
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
+_SIDES = ("Left", "Right")
 
 
 def shift_active(state: Any) -> bool:
-    """Whether Shift is held, physically or by a latched on-screen Shift."""
+    """Whether Shift is held, physically or by a pending one-shot Shift."""
 
-    return any(key_down(state, name) for name in _SHIFT_KEYS) or bool(
-        osk.read(state, "std.one_shot.Shift")
+    return any(key_down(state, name) for name in _SHIFT_KEYS) or any(
+        name in _SHIFT_KEYS for name in one_shot_keys(state)
     )
 
 
@@ -48,9 +47,15 @@ def caps_active(state: Any) -> bool:
     return bool(osk.read(state, "input.locks.capslock"))
 
 
-def one_shot_mods(state: Any) -> list[str]:
+def _one_shot(state: Any) -> dict[str, str]:
     pending = osk.read(state, "std.one_shot")
-    return sorted(name for name in pending if pending[name]) if pending is not None else []
+    return {latch: pending[latch] for latch in pending} if pending is not None else {}
+
+
+def one_shot_keys(state: Any) -> list[str]:
+    """Modifier keys waiting for the next key press."""
+
+    return sorted(_one_shot(state).values())
 
 
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
@@ -60,13 +65,15 @@ def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> osk.M
 
     def on_press(ctx: Any, event: Any) -> list[osk.Map]:
         del event
-        return [osk.keyboard.down(output, mods=one_shot_mods(ctx.state), repeat=repeat)]
+        held = [osk.keyboard.down(name, repeat=False) for name in one_shot_keys(ctx.state)]
+        return [*held, osk.keyboard.down(output, repeat=repeat)]
 
     def on_release(ctx: Any, event: Any) -> list[osk.Map]:
         del event
         actions = [osk.keyboard.up(output)]
-        for name in one_shot_mods(ctx.state):
-            actions.append(osk.state.set(["std", "one_shot", name], None))
+        for latch, name in sorted(_one_shot(ctx.state).items()):
+            actions.append(osk.keyboard.up(name))
+            actions.append(osk.state.set(["std", "one_shot", latch], None))
         return actions
 
     defaults = {
@@ -100,50 +107,53 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
     """A latching modifier.
 
     ``mode = "held"`` (default) holds the real key down from the first tap
-    until the second. ``mode = "one_shot"`` sends nothing itself and adds the
-    modifier to the next key press.
+    until the second. ``mode = "one_shot"`` sends nothing itself; the next key
+    press holds the real modifier key down around it. See the module docstring
+    for how keys share a latch.
     """
 
     options = dict(opts or {})
     mode = options.pop("mode", "held")
     repeat = bool(options.pop("repeat", True))
-    node_id = options.get("id", f"key:{output}")
-    latch_path = ["std", "latched", node_id]
-    modifier_name = _MODIFIER_NAMES.get(output, output)
+    latch = options.pop("latch", None) or _default_latch(label, output, mode, repeat)
+    if mode not in {"held", "one_shot"}:
+        raise ValueError(f"Unknown modifier mode {mode!r}")
+    latch_path = ["std", "one_shot" if mode == "one_shot" else "latched", latch]
+
+    def latched(state: Any) -> bool:
+        return osk.read(state, latch_path) is not None
 
     if mode == "one_shot":
-        one_shot_path = ["std", "one_shot", modifier_name]
 
         def toggle_one_shot(ctx: Any, event: Any) -> list[osk.Map]:
             del event
-            return [osk.state.set(one_shot_path, None if osk.read(ctx.state, one_shot_path) else True)]
+            return [osk.state.set(latch_path, None if latched(ctx.state) else output)]
 
         defaults: dict[str, Any] = {
-            "id": node_id,
+            "id": f"key:{output}",
             "label": label,
-            "latched": lambda state: bool(osk.read(state, one_shot_path)),
+            "latched": latched,
             "on_release": toggle_one_shot,
         }
         return osk.button(**osk.merge(defaults, options))
-    if mode != "held":
-        raise ValueError(f"Unknown modifier mode {mode!r}")
 
     def on_press(ctx: Any, event: Any) -> list[osk.Map]:
         del event
-        if osk.read(ctx.state, latch_path):
+        if latched(ctx.state):
             return []
         return [osk.keyboard.down(output, repeat=repeat)]
 
     def on_release(ctx: Any, event: Any) -> list[osk.Map]:
         del event
-        if osk.read(ctx.state, latch_path):
-            return [osk.state.set(latch_path, None), osk.keyboard.up(output)]
-        return [osk.state.set(latch_path, True)]
+        held = osk.read(ctx.state, latch_path)
+        if held is not None:
+            return [osk.state.set(latch_path, None), osk.keyboard.up(held)]
+        return [osk.state.set(latch_path, output)]
 
     defaults = {
-        "id": node_id,
+        "id": f"key:{output}",
         "label": label,
-        "latched": lambda state: bool(osk.read(state, latch_path)),
+        "latched": latched,
         "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
@@ -172,6 +182,13 @@ def on_reset(ctx: Any, event: Any) -> list[osk.Map]:
 
     del ctx, event
     return [osk.state.set("std.latched", None), osk.state.set("std.one_shot", None)]
+
+
+def _default_latch(label: str, output: str, mode: str, repeat: bool) -> str:
+    """Name the latch a key shares with its other-side twin only when everything else matches."""
+
+    side = next((side for side in _SIDES if output.endswith(side) and len(output) > len(side)), "")
+    return f"{output[: len(output) - len(side)]}|{label}|{mode}|{repeat}"
 
 
 def _without(opts: Mapping[str, Any] | None, *names: str) -> dict[str, Any]:

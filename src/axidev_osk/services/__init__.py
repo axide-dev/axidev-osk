@@ -13,6 +13,7 @@ from .keyboard import KeyboardService
 from .displays import DisplayService
 from .single_instance import WindowsSingleInstanceService
 
+
 def register_services(
     registry: ServiceRegistry,
     *,
@@ -47,4 +48,6 @@ def register_services(
         registry.register("hot_corner", HotCornerService(parent=parent))
     if include is None or "displays" in include:
         registry.register("displays", DisplayService(parent=parent))
+
+
 __all__ = ["KeyboardService", "WindowsSingleInstanceService", "register_services"]

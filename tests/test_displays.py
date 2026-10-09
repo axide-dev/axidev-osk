@@ -7,14 +7,14 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from axidev_osk.runtime.dispatcher import Dispatcher
-from axidev_osk.runtime.event_handlers import route_display_configuration_changed
-from axidev_osk.runtime.events import (
+from axidev_osk.runtime.app_messages import (
     DISPLAY_CONFIGURATION_CHANGED,
-    NoEventArguments,
     display_configuration_changed,
-    register_builtin_events,
+    register_app_events,
 )
+from axidev_osk.runtime.decoding import EmptyArguments
+from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.runtime.event_handlers import register_display_recovery
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.runtime.window_manager import WindowManager
 from axidev_osk.services.displays import DisplayService
@@ -45,7 +45,7 @@ class DisplayRecoveryTests(unittest.TestCase):
 
     def test_output_events_coalesce_and_disconnect_removed_screens(self) -> None:
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
+        register_app_events(dispatcher)
         events = []
         dispatcher.add_event_handler(
             DISPLAY_CONFIGURATION_CHANGED,
@@ -66,7 +66,7 @@ class DisplayRecoveryTests(unittest.TestCase):
                 app.primaryScreenChanged.emit(app.outputs[0])
                 self.assertEqual(events, [])
                 self.app.processEvents()
-                self.assertEqual(events, [NoEventArguments()])
+                self.assertEqual(events, [EmptyArguments()])
 
                 events.clear()
                 removed.geometryChanged.emit()
@@ -77,7 +77,7 @@ class DisplayRecoveryTests(unittest.TestCase):
                 app.outputs.append(replacement)
                 app.screenAdded.emit(replacement)
                 self.app.processEvents()
-                self.assertEqual(events, [NoEventArguments()])
+                self.assertEqual(events, [EmptyArguments()])
                 events.clear()
                 replacement.geometryChanged.emit()
                 service.stop()
@@ -96,8 +96,8 @@ class DisplayRecoveryTests(unittest.TestCase):
         unbuilt = Mock()
         manager = WindowManager(
             {
-                "keyboard": lambda parent: keyboard,
-                "other": lambda parent: other_window,
+                "keyboard": lambda: keyboard,
+                "other": lambda: other_window,
                 "unbuilt": unbuilt,
             }
         )
@@ -106,14 +106,10 @@ class DisplayRecoveryTests(unittest.TestCase):
         hot_corners = Mock()
         services = ServiceRegistry()
         services.register("hot_corner", hot_corners)
-        runtime = SimpleNamespace(_window_manager=manager, _services=services)
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
-        dispatcher.add_event_handler(
-            DISPLAY_CONFIGURATION_CHANGED,
-            lambda event: route_display_configuration_changed(event, runtime),
-        )
-        dispatcher.dispatch_event(display_configuration_changed())
+        register_app_events(dispatcher)
+        register_display_recovery(dispatcher, manager, services)
+        dispatcher.dispatch(display_configuration_changed())
         unbuilt.assert_not_called()
         keyboard.refresh_screen_configuration.assert_called_once_with()
         other_window.refresh_screen_configuration.assert_called_once_with()

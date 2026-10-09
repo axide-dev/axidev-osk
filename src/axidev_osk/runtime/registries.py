@@ -1,23 +1,12 @@
-"""Runtime registries for services and runtime-owned handlers.
-
-``EventHandlerRegistry`` collects handler factories instead of extending
-``Dispatcher`` directly.
-Application/window orchestration handlers need runtime-owned collaborators such
-as ``WindowManager`` and ``QApplication``; keeping those factories in a registry
-preserves ``Dispatcher`` as a generic action/event router rather than making it
-aware of application policy.
-"""
+"""Registry of runtime services in deterministic startup order."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
-
-from ..messages import DataMap, MessageResult
 
 if TYPE_CHECKING:
     from .context import Context
-    from .dispatcher import Dispatcher
 
 
 RuntimeT = TypeVar("RuntimeT")
@@ -31,12 +20,6 @@ class RuntimeService(Protocol):
 
     def stop(self) -> None:
         """Stop the service and release owned resources."""
-
-
-DecodedT = TypeVar("DecodedT")
-Decoder = Callable[[DataMap], DecodedT]
-MessageHandler = Callable[[DecodedT], MessageResult]
-MessageHandlerFactory = Callable[[RuntimeT], MessageHandler[DecodedT]]
 
 
 class ServiceRegistry:
@@ -81,50 +64,3 @@ class ServiceRegistry:
         """Yield services that should start with the application runtime."""
 
         return tuple(service for name, service in self._services.items() if name not in self._deferred)
-
-
-class EventHandlerRegistry:
-    """Stores default action and event handler factories for installation."""
-
-    def __init__(self) -> None:
-        """Create an empty handler registry."""
-
-        self._action_handlers: list[
-            tuple[str, Decoder[object], MessageHandlerFactory[object, object]]
-        ] = []
-        self._event_handlers: list[tuple[str, MessageHandlerFactory[object, object]]] = []
-
-    def register_action_handler(
-        self,
-        name: str,
-        decoder: Decoder[DecodedT],
-        factory: MessageHandlerFactory[RuntimeT, DecodedT],
-    ) -> None:
-        """Register an action decoder and typed handler factory."""
-
-        self._action_handlers.append(
-            (
-                name,
-                cast(Decoder[object], decoder),
-                cast(MessageHandlerFactory[object, object], factory),
-            )
-        )
-
-    def register_event_handler(
-        self,
-        name: str,
-        factory: MessageHandlerFactory[RuntimeT, DecodedT],
-    ) -> None:
-        """Register a typed event handler factory."""
-
-        self._event_handlers.append(
-            (name, cast(MessageHandlerFactory[object, object], factory))
-        )
-
-    def install(self, dispatcher: "Dispatcher", runtime: object) -> None:
-        """Install all registered handlers onto a dispatcher."""
-
-        for name, decoder, factory in self._action_handlers:
-            dispatcher.register_action(name, decoder, factory(runtime))
-        for name, factory in self._event_handlers:
-            dispatcher.add_event_handler(name, factory(runtime))

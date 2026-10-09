@@ -38,11 +38,12 @@ from ...platform.layer_shell import (
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
-    configure_wayland_layer_shell_environment,
+    attach_wayland_layer_shell,
     find_qt_platform_plugin_root,
     is_wayland_session,
     prepend_plugin_root,
     update_wayland_layer_shell_margins,
+    wayland_layer_shell_available,
 )
 from ...platform.kwin_input_panel import attach_kwin_input_panel
 
@@ -118,7 +119,7 @@ def prepare_always_on_top_window_environment(
     if os.environ.get("QT_WAYLAND_SHELL_INTEGRATION") == "layer-shell":
         return _set_overlay_backend(OverlayBackend.WAYLAND_LAYER_SHELL)
 
-    if prefer_layer_shell and configure_wayland_layer_shell_environment():
+    if prefer_layer_shell and wayland_layer_shell_available():
         return _set_overlay_backend(OverlayBackend.WAYLAND_LAYER_SHELL)
 
     if prefer_x11_bridge and _configure_x11_bridge_environment():
@@ -237,6 +238,9 @@ class AlwaysOnTopWindowController:
 
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             _set_windows_taskbar_style(int(self._window.winId()))
+
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            attach_wayland_layer_shell(self._window)
 
         if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
             screen = self._window.screen()
@@ -677,8 +681,8 @@ class AlwaysOnTopWindowController:
     def _current_screen_geometry(self, *, for_layer_shell: bool = False) -> QRect:
         screen = self._window.screen()
         if screen is None:
-            app = QGuiApplication.instance()
-            screen = app.primaryScreen() if isinstance(app, QGuiApplication) else None
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
+            screen = app.primaryScreen() if app is not None else None
         if screen is None:
             geometry = None
         elif for_layer_shell:

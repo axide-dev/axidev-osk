@@ -4,12 +4,14 @@ import sys
 import threading
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from PySide6.QtCore import QCoreApplication, QDeadlineTimer
 
 from axidev_osk.config.profile import ConfigDecoder
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
-from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.runtime.app_messages import window_close_requested
+from axidev_osk.runtime.dispatcher import ACTION_FAILED, Dispatcher
 from axidev_osk.runtime.engine import build_engine
 from axidev_osk.runtime.engine_messages import (
     KEYBOARD_PERMISSION_REQUIRED,
@@ -17,65 +19,19 @@ from axidev_osk.runtime.engine_messages import (
     PROCESS_EXITED,
     ProcessExitedArguments,
     input_key,
-    window_visibility_changed,
+    window_state_changed,
 )
-from axidev_osk.runtime.events import register_builtin_events
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.services.keyboard.io import KeyObservation
 from axidev_osk.services.keyboard.service import KeyboardService
 from axidev_osk.services.process import ProcessService
-
-
-class FakeBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = "run setup"
-
-    def __init__(self) -> None:
-        self.sent: list[tuple[object, ...]] = []
-        self.observers: list[object] = []
-
-    def initialize(self) -> bool:
-        return True
-
-    def shutdown(self) -> None:
-        pass
-
-    def add_key_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_modifier_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_observation_listener(self, listener):
-        self.observers.append(listener)
-        return lambda: self.observers.remove(listener)
-
-    def canonical_key(self, key: str) -> str:
-        return key.upper() if len(key) == 1 else key
-
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> object:
-        self.sent.append(("down", key, mods, repeat))
-        return SimpleNamespace(key_name=key)
-
-    def key_up(self, handle: object) -> None:
-        self.sent.append(("up", getattr(handle, "key_name", None)))
-
-    def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        self.sent.append(("tap", key, mods))
-
-    def type_text(self, text: str) -> None:
-        self.sent.append(("text", text))
+from support import RecordingBackend
 
 
 class Harness:
     def __init__(self, profile: dict[str, object] | None = None) -> None:
         self.dispatcher = Dispatcher()
-        register_builtin_events(self.dispatcher)
-        self.backend = FakeBackend()
+        self.backend = RecordingBackend(canonical=lambda key: key.upper() if len(key) == 1 else key)
         self.keyboard = KeyboardService(self.backend)  # type: ignore[arg-type]
         self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
         processes = SimpleNamespace(spawn=lambda argv, tag, detached: self.spawned.append((argv, tag, detached)))
@@ -92,10 +48,10 @@ class Harness:
                 }
             },
         }
-        self.engine.profile.start(decoder.decode_root(root).profile)
+        self.engine.profile.start(decoder.decode_root(root))
 
     def act(self, name: str, **arguments: object) -> None:
-        self.dispatcher.dispatch_action(RuntimeAction(name, arguments))  # type: ignore[arg-type]
+        self.dispatcher.dispatch(RuntimeAction(name, arguments))  # type: ignore[arg-type]
 
     def events(self, name: str) -> list[object]:
         seen: list[object] = []
@@ -121,13 +77,13 @@ class ObservationTests(unittest.TestCase):
 
         harness = Harness({"on": {"input.key": on_key}})
 
-        harness.dispatcher.dispatch_event(input_key("A", "A", ("Shift", "CapsLock"), True))
+        harness.dispatcher.dispatch(input_key("A", "A", ("Shift", "CapsLock"), True))
 
         self.assertEqual(
             seen,
             [(True, True, {"key": "A", "text": "A", "modifiers": ["Shift", "CapsLock"], "pressed": True})],
         )
-        self.assertIs(harness.engine.state.get(("input", "locks", "numlock")), False)
+        self.assertIs(harness.engine.profile.state.get(("input", "locks", "numlock")), False)
 
     def test_listener_thread_observations_wait_for_the_owner_thread(self) -> None:
         harness = Harness()
@@ -136,20 +92,21 @@ class ObservationTests(unittest.TestCase):
         thread.start()
         thread.join()
 
-        self.assertIsNone(harness.engine.state.get(("input", "keys", "B")))
+        self.assertIsNone(harness.engine.profile.state.get(("input", "keys", "B")))
         harness.dispatcher.process_pending()
-        self.assertIs(harness.engine.state.get(("input", "keys", "B")), True)
+        self.assertIs(harness.engine.profile.state.get(("input", "keys", "B")), True)
 
     def test_status_is_observed_and_permission_setup_is_requested(self) -> None:
         harness = Harness()
         requests = harness.events(KEYBOARD_PERMISSION_REQUIRED)
         harness.backend.ready = False
         harness.backend.needs_permission_setup = True
+        harness.backend.permission_setup_text = "run setup"
 
         harness.keyboard.publish_status()
 
         self.assertEqual(
-            harness.engine.state.get(("keyboard",)),
+            harness.engine.profile.state.get(("keyboard",)),
             {
                 "ready": False,
                 "status": "ready",
@@ -159,15 +116,43 @@ class ObservationTests(unittest.TestCase):
         )
         self.assertEqual(len(requests), 1)
 
-    def test_window_visibility_is_observed(self) -> None:
+    def test_window_state_is_observed(self) -> None:
         harness = Harness()
 
-        harness.dispatcher.dispatch_event(window_visibility_changed("pad", True, False))
+        harness.dispatcher.dispatch(
+            window_state_changed(
+                "pad",
+                visible=True,
+                minimized=False,
+                opacity=0.01,
+                configured_opacity=0.85,
+                input_blocked=True,
+            )
+        )
 
-        self.assertEqual(harness.engine.state.get(("windows", "pad")), {"visible": True, "minimized": False})
+        self.assertEqual(
+            harness.engine.profile.state.get(("windows", "pad")),
+            {"visible": True, "minimized": False, "opacity": 0.01, "configured_opacity": 0.85, "input_blocked": True},
+        )
 
 
 class KeyboardEffectTests(unittest.TestCase):
+    def test_a_failing_key_action_is_reported_to_the_profile(self) -> None:
+        harness = Harness()
+        failures = harness.events(ACTION_FAILED)
+        harness.backend.press = Mock(side_effect=RuntimeError("Keyboard output is not ready: permission denied"))  # type: ignore[method-assign]
+
+        harness.act("keyboard.down", key="a")
+
+        self.assertEqual(
+            [(failure.action, failure.message) for failure in failures],  # type: ignore[attr-defined]
+            [("keyboard.down", "Keyboard output is not ready: permission denied")],
+        )
+
+    def test_event_constructors_reject_bad_arguments_where_they_are_called(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            window_close_requested("")
+
     def test_down_up_tap_and_text_reach_the_backend(self) -> None:
         harness = Harness()
 
@@ -183,7 +168,7 @@ class KeyboardEffectTests(unittest.TestCase):
                 ("down", "A", ("Shift",), True),
                 ("up", "A"),
                 ("tap", "F5", ("Ctrl",)),
-                ("text", "moo"),
+                ("type", "moo"),
             ],
         )
 
@@ -214,7 +199,6 @@ class ProcessServiceTests(unittest.TestCase):
     def _run(self, argv: tuple[str, ...]) -> list[ProcessExitedArguments]:
         app = QCoreApplication.instance() or QCoreApplication([])
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
         service = ProcessService()
         build_engine(dispatcher, keyboard=SimpleNamespace(), processes=service)  # type: ignore[arg-type]
         exits: list[ProcessExitedArguments] = []

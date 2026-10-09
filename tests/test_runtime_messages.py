@@ -4,9 +4,8 @@ import math
 import unittest
 
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent
-from axidev_osk.runtime.actions import window_move_by, window_show
-from axidev_osk.runtime.dispatcher import Dispatcher
-from axidev_osk.runtime.events import ACTION_FAILED, ActionFailedArguments, register_builtin_events
+from axidev_osk.runtime.app_messages import window_move_by, window_show
+from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments, Dispatcher
 from axidev_osk.runtime.state import StateTree
 
 
@@ -36,7 +35,7 @@ class RuntimeMessageTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "dot-separated"):
                 RuntimeAction(name, {})
 
-    def test_duplicate_registration_requires_explicit_override(self) -> None:
+    def test_duplicate_registration_is_rejected_and_keeps_the_first_handler(self) -> None:
         dispatcher = Dispatcher()
         calls: list[str] = []
 
@@ -44,18 +43,27 @@ class RuntimeMessageTests(unittest.TestCase):
             calls.append("first")
             return []
 
-        def replacement(_arguments: DataMap) -> MessageResult:
-            calls.append("replacement")
-            return []
-
-        dispatcher.register_action("test.override", _identity, first)
+        dispatcher.register_action("test.once", _identity, first)
         with self.assertRaisesRegex(ValueError, "already registered"):
-            dispatcher.register_action("test.override", _identity, replacement)
-        dispatcher.register_action("test.override", _identity, replacement, override=True)
+            dispatcher.register_action("test.once", _identity, first)
 
-        dispatcher.dispatch_action(RuntimeAction("test.override", {}))
+        dispatcher.dispatch(RuntimeAction("test.once", {}))
 
-        self.assertEqual(calls, ["replacement"])
+        self.assertEqual(calls, ["first"])
+
+    def test_a_dispatched_batch_runs_in_order_before_follow_ups(self) -> None:
+        dispatcher = Dispatcher()
+        order: list[str] = []
+
+        def run(arguments: DataMap) -> MessageResult:
+            name = str(arguments["name"])
+            order.append(name)
+            return [RuntimeAction("test.step", {"name": f"{name}-child"})] if name in {"a", "b"} else []
+
+        dispatcher.register_action("test.step", _identity, run)
+        dispatcher.dispatch(RuntimeAction("test.step", {"name": "a"}), RuntimeAction("test.step", {"name": "b"}))
+
+        self.assertEqual(order, ["a", "b", "a-child", "b-child"])
 
     def test_handler_results_keep_fifo_order(self) -> None:
         dispatcher = Dispatcher()
@@ -79,13 +87,12 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.add_event_handler("test.first", first_handler)
         dispatcher.add_event_handler("test.second", second_handler)
 
-        dispatcher.dispatch_action(RuntimeAction("test.start", {}))
+        dispatcher.dispatch(RuntimeAction("test.start", {}))
 
         self.assertEqual(order, ["action", "first", "second", "first"])
 
     def test_action_decode_failure_emits_arguments_and_continues(self) -> None:
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
         failures: list[ActionFailedArguments] = []
 
         def decode(_arguments: DataMap) -> DataMap:
@@ -101,7 +108,7 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.register_action("test.failure", decode, unused)
         dispatcher.add_event_handler(ACTION_FAILED, record_failure)
 
-        dispatcher.dispatch_action(RuntimeAction("test.failure", {"secret": "included"}))
+        dispatcher.dispatch(RuntimeAction("test.failure", {"secret": "included"}))
 
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0].action, "test.failure")
@@ -112,7 +119,6 @@ class RuntimeMessageTests(unittest.TestCase):
 
     def test_unknown_action_emits_action_failed(self) -> None:
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
         failures: list[ActionFailedArguments] = []
 
         def record_failure(arguments: ActionFailedArguments) -> MessageResult:
@@ -121,14 +127,13 @@ class RuntimeMessageTests(unittest.TestCase):
 
         dispatcher.add_event_handler(ACTION_FAILED, record_failure)
 
-        dispatcher.dispatch_action(RuntimeAction("test.missing", {"value": 1}))
+        dispatcher.dispatch(RuntimeAction("test.missing", {"value": 1}))
 
         self.assertEqual(failures[0].stage, "lookup")
         self.assertEqual(failures[0].arguments, {"value": 1})
 
     def test_action_handler_failure_emits_action_failed(self) -> None:
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
         failures: list[ActionFailedArguments] = []
 
         def fail(_arguments: DataMap) -> MessageResult:
@@ -141,14 +146,13 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.register_action("test.execute", _identity, fail)
         dispatcher.add_event_handler(ACTION_FAILED, record_failure)
 
-        dispatcher.dispatch_action(RuntimeAction("test.execute", {"value": 2}))
+        dispatcher.dispatch(RuntimeAction("test.execute", {"value": 2}))
 
         self.assertEqual(failures[0].stage, "execute")
         self.assertEqual(failures[0].arguments, {"value": 2})
 
     def test_invalid_handler_result_does_not_enqueue_partial_results(self) -> None:
         dispatcher = Dispatcher()
-        register_builtin_events(dispatcher)
         handled: list[str] = []
         failures: list[ActionFailedArguments] = []
 
@@ -168,7 +172,7 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.add_event_handler(ACTION_FAILED, record_failure)
         dispatcher.register_action("test.partial", _identity, invalid_result)
 
-        dispatcher.dispatch_action(RuntimeAction("test.partial", {}))
+        dispatcher.dispatch(RuntimeAction("test.partial", {}))
 
         self.assertEqual(handled, [])
         self.assertEqual(failures[0].stage, "execute")
@@ -219,7 +223,7 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.add_event_handler("test.followup", followup)
 
         with self.assertLogs("axidev_osk.runtime.dispatcher", level="ERROR"):
-            dispatcher.dispatch_event(RuntimeEvent("test.source", {}))
+            dispatcher.dispatch(RuntimeEvent("test.source", {}))
 
         self.assertEqual(order, ["first", "followup"])
 
@@ -237,7 +241,7 @@ class RuntimeMessageTests(unittest.TestCase):
         dispatcher.register_action("test.repeat", _identity, repeat)
 
         with self.assertLogs("axidev_osk.runtime.dispatcher", level="WARNING") as logs:
-            dispatcher.dispatch_action(RuntimeAction("test.repeat", {}))
+            dispatcher.dispatch(RuntimeAction("test.repeat", {}))
 
         self.assertEqual(handled, 20_001)
         self.assertEqual(len(logs.output), 2)

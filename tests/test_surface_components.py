@@ -3,17 +3,12 @@ from __future__ import annotations
 import unittest
 
 from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QWidget
 
 from axidev_osk.components.pointer_locator import PointerLocator, install_pointer_locator
 from axidev_osk.config.models import PointerLocatorConfig
 from axidev_osk.windows.surface import RootSurface
-
-
-def _app() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    assert isinstance(app, QApplication)
-    return app
+from support import qt_app
 
 
 def _config() -> PointerLocatorConfig:
@@ -36,7 +31,7 @@ def _surface_with_content() -> tuple[RootSurface, QWidget]:
 
 class RootSurfaceComponentTests(unittest.TestCase):
     def setUp(self) -> None:
-        _app()
+        qt_app()
 
     def test_background_component_is_fitted_below_surface_content(self) -> None:
         surface, content = _surface_with_content()

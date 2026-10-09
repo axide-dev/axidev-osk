@@ -185,6 +185,10 @@ class HotCornerConfig:
         corner_size_px: Edge length of each hot-corner sensor region.
         indicator_size_px: Edge length of the visual dwell indicator.
         indicator_margin_px: Pixel margin between the indicator and screen edges.
+        indicator_background: Fill of the indicator disc.
+        indicator_track: Color of the ring the progress runs along.
+        indicator_progress: Color of the progress arc.
+        indicator_center: Fill of the center, which strengthens as the dwell completes.
     """
 
     dwell_ms: int = 200
@@ -192,3 +196,7 @@ class HotCornerConfig:
     corner_size_px: int = 20
     indicator_size_px: int = 52
     indicator_margin_px: int = 14
+    indicator_background: str = "#000000"
+    indicator_track: str = "#808080"
+    indicator_progress: str = "#FFFFFF"
+    indicator_center: str = "#808080"

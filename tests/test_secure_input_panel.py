@@ -5,42 +5,39 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from axidev_osk.messages import MessageResult
-from axidev_osk.runtime.actions import (
+from axidev_osk.runtime.app_messages import (
     SECURE_INPUT_PANEL_PREPARE,
     SECURE_INPUT_PANEL_RELEASE,
-    NoArguments,
-    decode_no_arguments,
-)
-from axidev_osk.runtime.dispatcher import Dispatcher
-from axidev_osk.runtime.events import (
-    register_builtin_events,
+    register_app_events,
     secure_input_panel_prepared,
     secure_input_panel_released,
 )
+from axidev_osk.runtime.decoding import EmptyArguments, decode_empty
+from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.services.secure_input_panel import SecureInputPanelWorkerService
 
 
 class SecureInputPanelWorkerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dispatcher = Dispatcher()
-        register_builtin_events(self.dispatcher)
+        register_app_events(self.dispatcher)
         self.actions: list[str] = []
         self.prepare_error: Exception | None = None
 
-        def prepare(arguments: NoArguments) -> MessageResult:
+        def prepare(arguments: EmptyArguments) -> MessageResult:
             del arguments
             self.actions.append(SECURE_INPUT_PANEL_PREPARE)
             if self.prepare_error is not None:
                 raise self.prepare_error
             return [secure_input_panel_prepared()]
 
-        def release(arguments: NoArguments) -> MessageResult:
+        def release(arguments: EmptyArguments) -> MessageResult:
             del arguments
             self.actions.append(SECURE_INPUT_PANEL_RELEASE)
             return [secure_input_panel_released()]
 
-        self.dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_no_arguments, prepare)
-        self.dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_no_arguments, release)
+        self.dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, prepare)
+        self.dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, release)
         self.service = SecureInputPanelWorkerService()
         context = SimpleNamespace(dispatcher=self.dispatcher)
         with (
@@ -80,7 +77,7 @@ class SecureInputPanelWorkerServiceTests(unittest.TestCase):
     def test_stopped_worker_ignores_late_runtime_events(self) -> None:
         with patch.object(self.service, "_respond") as respond:
             self.service.stop()
-            self.dispatcher.dispatch_event(secure_input_panel_prepared())
+            self.dispatcher.dispatch(secure_input_panel_prepared())
 
         respond.assert_not_called()
 

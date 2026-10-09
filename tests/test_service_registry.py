@@ -3,49 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication
-
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.services import register_services
 from axidev_osk.services.displays import DisplayService
 from axidev_osk.services.keyboard import KeyboardService
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
-class FakeKeyboardBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = ""
-
-    def __init__(self) -> None:
-        self.initialized = 0
-        self.listeners: list[object] = []
-
-    def initialize(self) -> bool:
-        self.initialized += 1
-        return True
-
-    def shutdown(self) -> None:
-        return None
-
-    def add_observation_listener(self, listener):
-        self.listeners.append(listener)
-        return lambda: None
-
-    def canonical_key(self, key: str) -> str:
-        return key
-
-    def key_up(self, handle) -> None:
-        del handle
+from support import RecordingBackend, qt_app
 
 
 class RecordingService:
@@ -86,9 +50,9 @@ class ServiceRegistryTests(unittest.TestCase):
             services.get("first", KeyboardService)
 
     def test_register_services_honors_the_include_filter(self) -> None:
-        _app()
+        qt_app()
         services = ServiceRegistry()
-        keyboard = KeyboardService(FakeKeyboardBackend())  # type: ignore[arg-type]
+        keyboard = KeyboardService(RecordingBackend())
 
         register_services(services, include={"keyboard", "displays"}, keyboard=keyboard)
 
@@ -98,39 +62,30 @@ class ServiceRegistryTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIsNone(services.find(name))
 
-    def test_test_context_starts_only_the_requested_services(self) -> None:
-        backend = FakeKeyboardBackend()
-
-        context = make_test_context(backend, services={"keyboard"})
-
-        self.assertEqual(backend.initialized, 1)
-        self.assertEqual(len(backend.listeners), 1)
-        context.keyboard.shutdown()
-
-    def test_test_context_without_services_binds_keyboard_without_starting_it(self) -> None:
-        backend = FakeKeyboardBackend()
+    def test_test_context_binds_keyboard_without_starting_it(self) -> None:
+        backend = RecordingBackend()
 
         make_test_context(backend)
 
         self.assertEqual(backend.initialized, 0)
-        self.assertEqual(len(backend.listeners), 1)
+        self.assertEqual(len(backend.observers), 1)
 
     def test_runtime_starts_and_stops_registered_services_in_order(self) -> None:
         calls: list[str] = []
         services = ServiceRegistry()
-        services.register("keyboard", KeyboardService(FakeKeyboardBackend()))  # type: ignore[arg-type]
+        services.register("keyboard", KeyboardService(RecordingBackend()))
         services.register("first", RecordingService("first", calls))
         services.register("deferred", RecordingService("deferred", calls), autostart=False)
         services.register("second", RecordingService("second", calls))
         runtime = ApplicationRuntime(
-            _app(),
+            qt_app(),
             services=services,
             confirm_quit=False,
             show_startup_windows=False,
         )
 
         def exec_and_quit() -> int:
-            runtime._quit_controller.request_quit()
+            runtime._quit_controller.request_quit("signal")
             return 0
 
         with (

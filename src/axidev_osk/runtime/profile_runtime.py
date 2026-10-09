@@ -13,11 +13,19 @@ from dataclasses import dataclass
 
 from ..config.profile import ProfileConfig
 from ..config.reader import Bindable
-from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent
-from .decoding import data_value, non_empty_string_value, require_keys, string_value
+from ..function_registry import FunctionRef, FunctionRegistry
+from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent, data_equal
+from .decoding import (
+    non_empty_string_value,
+    require_keys,
+    string_list_value,
+    string_value,
+    validated_action,
+    validated_event,
+)
 from .dispatcher import Dispatcher, Unsubscribe
-from .functions import FunctionRef, FunctionRegistry, call_callback, evaluate_binding
-from .state import RUNTIME_STATE_ROOTS, StatePath, StateTree, parse_state_path, paths_overlap
+from .functions import call_callback, evaluate_binding
+from .state import ReadRecorder, StatePath, StateTree, parse_state_path, paths_overlap
 
 _logger = logging.getLogger(__name__)
 
@@ -48,15 +56,15 @@ class CallbackFailedArguments:
 
 def state_set(path: str | list[str], value: DataValue) -> RuntimeAction:
     raw_path: DataValue = list(path) if isinstance(path, list) else path
-    return RuntimeAction(STATE_SET, {"path": raw_path, "value": value})
+    return validated_action(STATE_SET, {"path": raw_path, "value": value}, decode_state_set)
 
 
 def state_changed(path: StatePath) -> RuntimeEvent:
-    return RuntimeEvent(STATE_CHANGED, {"path": list(path)})
+    return validated_event(STATE_CHANGED, {"path": list(path)}, decode_state_changed)
 
 
 def callback_failed(ref: FunctionRef, kind: str, source: str, error: Exception) -> RuntimeEvent:
-    return RuntimeEvent(
+    return validated_event(
         CALLBACK_FAILED,
         {
             "function": ref.id,
@@ -65,6 +73,7 @@ def callback_failed(ref: FunctionRef, kind: str, source: str, error: Exception) 
             "exception_type": type(error).__name__,
             "message": str(error),
         },
+        decode_callback_failed,
     )
 
 
@@ -72,25 +81,16 @@ def decode_state_set(arguments: DataMap) -> StateSetArguments:
     """Decode ``state.set``; ``path`` is ``"a.b"`` or ``["a", "b"]`` for names containing dots."""
 
     require_keys(arguments, ("path",), optional=("value",))
-    raw_path = arguments["path"]
-    if isinstance(raw_path, list):
-        if not raw_path or not all(isinstance(segment, str) and segment for segment in raw_path):
-            raise ValueError("Argument 'path' must be a non-empty list of non-empty strings")
-        path: StatePath = tuple(segment for segment in raw_path if isinstance(segment, str))
+    if isinstance(arguments["path"], list):
+        path = string_list_value(arguments, "path", non_empty=True)
     else:
         path = parse_state_path(string_value(arguments, "path"))
-    return StateSetArguments(
-        path=path,
-        value=data_value(arguments, "value") if "value" in arguments else None,
-    )
+    return StateSetArguments(path=path, value=arguments.get("value"))
 
 
 def decode_state_changed(arguments: DataMap) -> StateChangedArguments:
     require_keys(arguments, ("path",))
-    value = arguments["path"]
-    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
-        raise ValueError("state.changed path must be a non-empty list of strings")
-    return StateChangedArguments(path=tuple(item for item in value if isinstance(item, str)))
+    return StateChangedArguments(path=string_list_value(arguments, "path", non_empty=True))
 
 
 def decode_callback_failed(arguments: DataMap) -> CallbackFailedArguments:
@@ -110,30 +110,49 @@ def register_profile_events(dispatcher: Dispatcher) -> None:
 
 
 class ProfileRuntime:
-    """Own profile state and run the profile ``on`` table through the queue."""
+    """Own profile state and run the profile ``on`` table through the queue.
+
+    State roots written from observations are declared by their owners with
+    ``declare_root``. Profiles can read them but not set them, and they keep
+    their values when a profile starts.
+    """
 
     def __init__(self, dispatcher: Dispatcher, functions: FunctionRegistry, state: StateTree) -> None:
         self._dispatcher = dispatcher
         self._functions = functions
         self._state = state
+        self._runtime_roots: set[str] = set()
         self._unsubscribes: list[Unsubscribe] = []
         dispatcher.register_action(STATE_SET, decode_state_set, self._handle_state_set)
+
+    def declare_root(self, root: str, initial: DataMap) -> None:
+        """Reserve a runtime-owned state root and give it its starting value."""
+
+        if root in self._runtime_roots:
+            raise ValueError(f"State root {root!r} is already declared")
+        self._runtime_roots.add(root)
+        self._state.set((root,), initial)
 
     @property
     def state(self) -> StateTree:
         return self._state
 
     def start(self, profile: ProfileConfig) -> None:
-        """Load profile state and install its ``on`` callbacks."""
+        """Load profile state and install its ``on`` callbacks.
 
-        self.stop()
+        Every check runs before anything changes, so a rejected profile leaves
+        the running one untouched.
+        """
+
+        path = f"config.profiles.{profile.id}"
         unknown = sorted(name for name in profile.on if not self._dispatcher.has_event(name))
         if unknown:
-            raise ValueError(f"Profile {profile.id!r} handles unknown events: {', '.join(unknown)}")
-        reserved = sorted(name for name in profile.state if name in RUNTIME_STATE_ROOTS)
+            raise ValueError(f"{path}.on handles unknown events: {', '.join(unknown)}")
+        reserved = sorted(name for name in profile.state if name in self._runtime_roots)
         if reserved:
-            raise ValueError(f"Profile {profile.id!r} state cannot define runtime roots: {', '.join(reserved)}")
-        runtime_state = {root: self._state.get((root,)) for root in RUNTIME_STATE_ROOTS}
+            raise ValueError(f"{path}.state cannot define runtime roots: {', '.join(reserved)}")
+        self.stop()
+        runtime_state = {root: self._state.get((root,)) for root in self._runtime_roots}
         self._state.reset(profile.state)
         for root, value in runtime_state.items():
             if value is not None:
@@ -147,8 +166,6 @@ class ProfileRuntime:
             for event_name, ref in node.callbacks.items():
                 node_callbacks.setdefault(event_name, {})[node.id] = ref
         for event_name, refs_by_node in node_callbacks.items():
-            if not self._dispatcher.has_event(event_name):
-                raise ValueError(f"Node event {event_name!r} is not registered")
             self._unsubscribes.append(
                 self._dispatcher.add_raw_event_handler(event_name, self._node_callback_runner(event_name, refs_by_node))
             )
@@ -170,7 +187,7 @@ class ProfileRuntime:
     def set_observed(self, path: StatePath, value: DataValue) -> MessageResult:
         """Write runtime-observed state, which profiles may read but not set."""
 
-        if path[0] not in RUNTIME_STATE_ROOTS:
+        if not path or path[0] not in self._runtime_roots:
             raise ValueError(f"{'.'.join(path)!r} is not a runtime state path")
         return [state_changed(path)] if self._state.set(path, value) else []
 
@@ -202,12 +219,12 @@ class ProfileRuntime:
         return run
 
     def _handle_state_set(self, arguments: StateSetArguments) -> MessageResult:
-        if arguments.path[0] in RUNTIME_STATE_ROOTS:
+        if arguments.path[0] in self._runtime_roots:
             raise ValueError(f"Profiles cannot set runtime state {'.'.join(arguments.path)!r}")
         return [state_changed(arguments.path)] if self._state.set(arguments.path, arguments.value) else []
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class _Binding:
     ref: FunctionRef
     source: str
@@ -236,7 +253,7 @@ class BindingTracker:
         binding = _Binding(ref=value, source=source, apply=apply, value=None, reads=frozenset())
         failure = self._evaluate(binding)
         if failure is not None:
-            self._dispatcher.dispatch_event(failure)
+            self._dispatcher.dispatch(failure)
         self._bindings.append(binding)
 
         def unbind() -> None:
@@ -244,9 +261,6 @@ class BindingTracker:
                 self._bindings.remove(binding)
 
         return unbind
-
-    def clear(self) -> None:
-        self._bindings.clear()
 
     def _handle_state_changed(self, event: StateChangedArguments) -> MessageResult:
         messages: MessageResult = []
@@ -258,14 +272,18 @@ class BindingTracker:
         return messages
 
     def _evaluate(self, binding: _Binding) -> RuntimeEvent | None:
+        """Run and apply one binding; a failure keeps the reads made so far so a later change retries it."""
+
+        recorder = ReadRecorder()
         try:
-            value, reads = evaluate_binding(self._functions, binding.ref, self._state)
+            value = evaluate_binding(self._functions, binding.ref, self._state, recorder)
+            if not binding.applied or not data_equal(value, binding.value):
+                binding.apply(value)
+                binding.value = value
+                binding.applied = True
         except Exception as exc:
             _logger.exception("Binding %s failed for %s", binding.ref.id, binding.source)
             return callback_failed(binding.ref, "binding", binding.source, exc)
-        binding.reads = reads
-        if not binding.applied or value != binding.value:
-            binding.value = value
-            binding.applied = True
-            binding.apply(value)
+        finally:
+            binding.reads = recorder.paths
         return None

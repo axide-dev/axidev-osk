@@ -1,57 +1,18 @@
-"""Registry and calling rules for profile callbacks and state bindings.
+"""Calling rules for profile callbacks and state bindings.
 
-Profile functions are Python callables today and Lua functions later. The
-engine only stores them behind ``FunctionRef`` IDs, calls them with plain
-data, and accepts plain data back. Queue messages carry the IDs, never the
-functions themselves.
+The engine calls profile functions with plain data and accepts plain data
+back. The functions themselves live in ``function_registry``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
-from ..messages import DataMap, DataValue, RuntimeAction, copy_data_map
+from ..function_registry import FunctionRef, FunctionRegistry
+from ..messages import DataMap, DataValue, RuntimeAction, copy_data_value
 from .decoding import runtime_action_from_data
-from .state import ReadRecorder, StatePath, StateTree, StateView
-
-ProfileFunction = Callable[..., object]
-
-
-@dataclass(frozen=True, slots=True)
-class FunctionRef:
-    """Stable ID of one registered profile function."""
-
-    id: str
-
-
-class FunctionRegistry:
-    """Hold profile functions for the lifetime of one loaded profile."""
-
-    def __init__(self) -> None:
-        self._functions: dict[str, ProfileFunction] = {}
-        self._ids_by_object: dict[int, str] = {}
-
-    def register(self, function: ProfileFunction) -> FunctionRef:
-        if not callable(function):
-            raise TypeError("Only callables can be registered as profile functions")
-        existing = self._ids_by_object.get(id(function))
-        if existing is not None and self._functions.get(existing) is function:
-            return FunctionRef(existing)
-        function_id = f"fn:{len(self._functions) + 1}"
-        self._functions[function_id] = function
-        self._ids_by_object[id(function)] = function_id
-        return FunctionRef(function_id)
-
-    def get(self, ref: FunctionRef) -> ProfileFunction:
-        function = self._functions.get(ref.id)
-        if function is None:
-            raise LookupError(f"Profile function {ref.id!r} is not registered")
-        return function
-
-    def clear(self) -> None:
-        self._functions.clear()
-        self._ids_by_object.clear()
+from .state import ReadRecorder, StateTree, StateView
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,20 +31,22 @@ def call_callback(
     """Call ``fn(ctx, event)`` and decode the returned actions.
 
     A callback may return ``None`` or a list of action maps shaped like
-    ``{"action": "window.show", "arguments": {...}}``.
+    ``{"action": "window.show", "arguments": {...}}``. ``event`` is handed over
+    as is: the dispatcher already gives each profile handler its own copy, and
+    each returned action copies its arguments when it is built.
     """
 
     function = registry.get(ref)
-    result = function(CallbackContext(state=state.view()), copy_data_map(event))
+    result = function(CallbackContext(state=state.view()), event)
     if result is None:
         return []
-    if not isinstance(result, (list, tuple)):
+    if not isinstance(result, list):
         raise TypeError(f"Callback must return a list of actions, got {type(result).__name__}")
     actions: list[RuntimeAction] = []
     for index, item in enumerate(result):
         if not isinstance(item, dict):
             raise TypeError(f"Callback result item {index} must be an action map")
-        actions.append(runtime_action_from_data(copy_data_map(item)))
+        actions.append(runtime_action_from_data(cast(DataMap, item)))
     return actions
 
 
@@ -91,12 +54,11 @@ def evaluate_binding(
     registry: FunctionRegistry,
     ref: FunctionRef,
     state: StateTree,
-) -> tuple[DataValue, frozenset[StatePath]]:
-    """Call ``fn(state)`` and return its plain value plus the paths it read."""
+    recorder: ReadRecorder,
+) -> DataValue:
+    """Call ``fn(state)`` and return its plain value; ``recorder`` collects the paths it read, even on failure."""
 
-    recorder = ReadRecorder()
     value = registry.get(ref)(state.view(recorder))
     if isinstance(value, StateView):
         value = value.to_data()
-    plain = copy_data_map({"value": value})["value"]
-    return plain, recorder.paths
+    return copy_data_value(value)

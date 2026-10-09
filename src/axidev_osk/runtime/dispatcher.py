@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Generic, TypeVar, cast
 
 from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage, copy_data_map
+from .decoding import map_value, require_keys, string_value
 
 
 DecodedT = TypeVar("DecodedT")
@@ -20,6 +21,30 @@ Wake = Callable[[], None]
 
 _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
+
+ACTION_FAILED = "action.failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionFailedArguments:
+    """What the dispatcher reports when an action cannot be looked up, decoded, or run."""
+
+    action: str
+    arguments: DataMap
+    stage: str
+    exception_type: str
+    message: str
+
+
+def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
+    require_keys(arguments, ("action", "arguments", "stage", "exception_type", "message"))
+    return ActionFailedArguments(
+        action=string_value(arguments, "action"),
+        arguments=map_value(arguments, "arguments"),
+        stage=string_value(arguments, "stage"),
+        exception_type=string_value(arguments, "exception_type"),
+        message=string_value(arguments, "message"),
+    )
 
 
 @dataclass(slots=True)
@@ -38,11 +63,13 @@ class Dispatcher:
     """Own registered message definitions and drain them in FIFO order.
 
     Handlers run only on the thread that created the dispatcher. Messages
-    sent from any other thread wait in a locked inbox, and the optional
-    ``wake`` callback asks the owner thread to call ``process_pending``.
+    sent from any other thread wait in a locked inbox, and the ``wake``
+    callback set with ``set_wake`` asks the owner thread to call
+    ``process_pending``. The dispatcher owns ``action.failed``, the event it
+    reports when an action fails.
     """
 
-    def __init__(self, *, wake: Wake | None = None) -> None:
+    def __init__(self) -> None:
         self._actions: dict[str, _ActionDefinition[object]] = {}
         self._events: dict[str, _EventDefinition[object]] = {}
         self._queue: deque[RuntimeMessage] = deque()
@@ -50,7 +77,8 @@ class Dispatcher:
         self._owner_thread = threading.get_ident()
         self._inbox: deque[RuntimeMessage] = deque()
         self._inbox_lock = threading.Lock()
-        self._wake = wake
+        self._wake: Wake | None = None
+        self.register_event(ACTION_FAILED, decode_action_failed)
 
     def set_wake(self, wake: Wake | None) -> None:
         """Set the callback that schedules ``process_pending`` on the owner thread."""
@@ -70,15 +98,11 @@ class Dispatcher:
         name: str,
         decoder: Decoder[DecodedT],
         handler: MessageHandler[DecodedT],
-        *,
-        override: bool = False,
     ) -> None:
-        """Register one action definition, optionally replacing it in full."""
+        """Register one action definition."""
 
-        if name in self._actions and not override:
-            raise ValueError(f"Action {name!r} is already registered")
         if name in self._actions:
-            _logger.warning("Overriding registered action %s", name)
+            raise ValueError(f"Action {name!r} is already registered")
         definition = _ActionDefinition(decoder=decoder, handler=handler)
         self._actions[name] = cast(_ActionDefinition[object], definition)
 
@@ -86,15 +110,11 @@ class Dispatcher:
         self,
         name: str,
         decoder: Decoder[DecodedT],
-        *,
-        override: bool = False,
     ) -> None:
-        """Register one event definition, optionally replacing it in full."""
+        """Register one event definition."""
 
-        if name in self._events and not override:
-            raise ValueError(f"Event {name!r} is already registered")
         if name in self._events:
-            _logger.warning("Overriding registered event %s", name)
+            raise ValueError(f"Event {name!r} is already registered")
         definition: _EventDefinition[DecodedT] = _EventDefinition(decoder=decoder)
         self._events[name] = cast(_EventDefinition[object], definition)
 
@@ -136,28 +156,23 @@ class Dispatcher:
 
         return unsubscribe
 
-    def dispatch_action(self, action: RuntimeAction) -> None:
-        """Append an action and drain the queue unless a drain is active."""
+    def dispatch(self, *messages: RuntimeMessage) -> None:
+        """Append messages in order, then drain the queue unless a drain is active.
 
-        self._enqueue(action)
+        From another thread, the messages wait in the inbox until the owner
+        thread drains.
+        """
 
-    def dispatch_event(self, event: RuntimeEvent) -> None:
-        """Append an event and drain the queue unless a drain is active."""
-
-        self._enqueue(event)
-
-    def _enqueue(self, message: RuntimeMessage) -> None:
         if threading.get_ident() != self._owner_thread:
             with self._inbox_lock:
-                self._inbox.append(message)
+                self._inbox.extend(messages)
             wake = self._wake
             if wake is not None:
                 wake()
             return
-        self._queue.append(message)
-        if self._draining:
-            return
-        self._drain()
+        self._queue.extend(messages)
+        if not self._draining:
+            self._drain()
 
     def _take_inbox(self) -> None:
         with self._inbox_lock:
@@ -233,7 +248,7 @@ class Dispatcher:
         )
         self._queue.append(
             RuntimeEvent(
-                event="action.failed",
+                event=ACTION_FAILED,
                 arguments={
                     "action": action.action,
                     "arguments": action.arguments,

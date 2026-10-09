@@ -70,4 +70,4 @@ class ProcessService(QObject):
         if error is not None:
             _logger.warning("Process %s failed: %s", tag, error)
         if self._context is not None:
-            self._context.dispatcher.dispatch_event(process_exited(tag, code, error))
+            self._context.dispatcher.dispatch(process_exited(tag, code, error))

@@ -9,31 +9,34 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
-from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent
+from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent
 from .decoding import (
     bool_value,
+    decode_empty,
     int_value,
     non_empty_string_value,
+    number_value,
     optional_string_value,
     require_keys,
+    string_list_value,
     string_value,
+    validated_action,
+    validated_event,
 )
 from .dispatcher import Dispatcher
 from .profile_runtime import ProfileRuntime
 
 _profile_logger = logging.getLogger("axidev_osk.profile")
 
-APP_QUIT_REQUESTED = "app.quit_requested"
 INPUT_KEY = "input.key"
 KEYBOARD_STATUS_CHANGED = "keyboard.status_changed"
 KEYBOARD_PERMISSION_REQUIRED = "keyboard.permission_required"
 KEYBOARD_RESET = "keyboard.reset"
-LINUX_PERMISSION_SETUP_OPENED = "linux.permission_setup_opened"
 PROCESS_EXITED = "process.exited"
-WINDOW_VISIBILITY_CHANGED = "window.visibility_changed"
+WINDOW_STATE_CHANGED = "window.state_changed"
 
 KEYBOARD_DOWN = "keyboard.down"
 KEYBOARD_UP = "keyboard.up"
@@ -64,21 +67,6 @@ class KeyboardStatusArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class EmptyArguments:
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class QuitRequestedArguments:
-    reason: str
-
-
-@dataclass(frozen=True, slots=True)
-class PermissionSetupOpenedArguments:
-    opened: bool
-
-
-@dataclass(frozen=True, slots=True)
 class ProcessExitedArguments:
     tag: str
     code: int
@@ -86,10 +74,13 @@ class ProcessExitedArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class WindowVisibilityArguments:
-    window: str
+class WindowStateArguments:
+    window_id: str
     visible: bool
     minimized: bool
+    opacity: float
+    configured_opacity: float
+    input_blocked: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,9 +133,10 @@ class ProcessEffects(Protocol):
 
 
 def input_key(key: str, text: str | None, modifiers: tuple[str, ...], pressed: bool) -> RuntimeEvent:
-    return RuntimeEvent(
+    return validated_event(
         INPUT_KEY,
         {"key": key, "text": text, "modifiers": list(modifiers), "pressed": pressed},
+        decode_input_key,
     )
 
 
@@ -154,7 +146,7 @@ def keyboard_status_changed(
     needs_permission_setup: bool,
     permission_setup_text: str,
 ) -> RuntimeEvent:
-    return RuntimeEvent(
+    return validated_event(
         KEYBOARD_STATUS_CHANGED,
         {
             "ready": ready,
@@ -162,42 +154,79 @@ def keyboard_status_changed(
             "needs_permission_setup": needs_permission_setup,
             "permission_setup_text": permission_setup_text,
         },
+        decode_keyboard_status,
     )
 
 
 def keyboard_permission_required() -> RuntimeEvent:
-    return RuntimeEvent(KEYBOARD_PERMISSION_REQUIRED, {})
-
-
-def app_quit_requested(reason: str) -> RuntimeEvent:
-    return RuntimeEvent(APP_QUIT_REQUESTED, {"reason": reason})
-
-
-def linux_permission_setup_opened(opened: bool) -> RuntimeEvent:
-    return RuntimeEvent(LINUX_PERMISSION_SETUP_OPENED, {"opened": opened})
+    return validated_event(KEYBOARD_PERMISSION_REQUIRED, {}, decode_empty)
 
 
 def keyboard_reset() -> RuntimeEvent:
-    return RuntimeEvent(KEYBOARD_RESET, {})
+    return validated_event(KEYBOARD_RESET, {}, decode_empty)
 
 
 def process_exited(tag: str, code: int, error: str | None = None) -> RuntimeEvent:
-    return RuntimeEvent(PROCESS_EXITED, {"tag": tag, "code": code, "error": error})
+    return validated_event(PROCESS_EXITED, {"tag": tag, "code": code, "error": error}, decode_process_exited)
 
 
-def window_visibility_changed(window: str, visible: bool, minimized: bool) -> RuntimeEvent:
-    return RuntimeEvent(
-        WINDOW_VISIBILITY_CHANGED,
-        {"window": window, "visible": visible, "minimized": minimized},
+def window_state_changed(
+    window_id: str,
+    *,
+    visible: bool,
+    minimized: bool,
+    opacity: float,
+    configured_opacity: float,
+    input_blocked: bool,
+) -> RuntimeEvent:
+    return validated_event(
+        WINDOW_STATE_CHANGED,
+        {
+            "window": window_id,
+            "visible": visible,
+            "minimized": minimized,
+            "opacity": opacity,
+            "configured_opacity": configured_opacity,
+            "input_blocked": input_blocked,
+        },
+        decode_window_state,
     )
 
 
 def keyboard_down(key: str, mods: tuple[str, ...] = (), repeat: bool = True) -> RuntimeAction:
-    return RuntimeAction(KEYBOARD_DOWN, {"key": key, "mods": list(mods), "repeat": repeat})
+    return validated_action(KEYBOARD_DOWN, {"key": key, "mods": list(mods), "repeat": repeat}, decode_keyboard_down)
 
 
 def keyboard_up(key: str) -> RuntimeAction:
-    return RuntimeAction(KEYBOARD_UP, {"key": key})
+    return validated_action(KEYBOARD_UP, {"key": key}, decode_keyboard_key)
+
+
+def keyboard_tap(key: str, mods: tuple[str, ...] = ()) -> RuntimeAction:
+    return validated_action(KEYBOARD_TAP, {"key": key, "mods": list(mods)}, decode_keyboard_tap)
+
+
+def keyboard_type_text(text: str) -> RuntimeAction:
+    return validated_action(KEYBOARD_TYPE_TEXT, {"text": text}, decode_text)
+
+
+def process_spawn(argv: tuple[str, ...], tag: str, detached: bool = False) -> RuntimeAction:
+    return validated_action(
+        PROCESS_SPAWN,
+        {"argv": list(argv), "tag": tag, "detached": detached},
+        decode_process_spawn,
+    )
+
+
+def log_info(message: str) -> RuntimeAction:
+    return validated_action(LOG_INFO, {"message": message}, decode_log)
+
+
+def log_warn(message: str) -> RuntimeAction:
+    return validated_action(LOG_WARN, {"message": message}, decode_log)
+
+
+def log_error(message: str) -> RuntimeAction:
+    return validated_action(LOG_ERROR, {"message": message}, decode_log)
 
 
 def decode_input_key(arguments: DataMap) -> InputKeyArguments:
@@ -205,7 +234,7 @@ def decode_input_key(arguments: DataMap) -> InputKeyArguments:
     return InputKeyArguments(
         key=non_empty_string_value(arguments, "key"),
         text=optional_string_value(arguments, "text"),
-        modifiers=_strings(arguments, "modifiers"),
+        modifiers=string_list_value(arguments, "modifiers"),
         pressed=bool_value(arguments, "pressed"),
     )
 
@@ -220,21 +249,6 @@ def decode_keyboard_status(arguments: DataMap) -> KeyboardStatusArguments:
     )
 
 
-def decode_empty(arguments: DataMap) -> EmptyArguments:
-    require_keys(arguments, ())
-    return EmptyArguments()
-
-
-def decode_quit_requested(arguments: DataMap) -> QuitRequestedArguments:
-    require_keys(arguments, ("reason",))
-    return QuitRequestedArguments(reason=string_value(arguments, "reason"))
-
-
-def decode_permission_setup_opened(arguments: DataMap) -> PermissionSetupOpenedArguments:
-    require_keys(arguments, ("opened",))
-    return PermissionSetupOpenedArguments(opened=bool_value(arguments, "opened"))
-
-
 def decode_process_exited(arguments: DataMap) -> ProcessExitedArguments:
     require_keys(arguments, ("tag", "code"), optional=("error",))
     return ProcessExitedArguments(
@@ -244,12 +258,15 @@ def decode_process_exited(arguments: DataMap) -> ProcessExitedArguments:
     )
 
 
-def decode_window_visibility(arguments: DataMap) -> WindowVisibilityArguments:
-    require_keys(arguments, ("window", "visible", "minimized"))
-    return WindowVisibilityArguments(
-        window=non_empty_string_value(arguments, "window"),
+def decode_window_state(arguments: DataMap) -> WindowStateArguments:
+    require_keys(arguments, ("window", "visible", "minimized", "opacity", "configured_opacity", "input_blocked"))
+    return WindowStateArguments(
+        window_id=non_empty_string_value(arguments, "window"),
         visible=bool_value(arguments, "visible"),
         minimized=bool_value(arguments, "minimized"),
+        opacity=number_value(arguments, "opacity"),
+        configured_opacity=number_value(arguments, "configured_opacity"),
+        input_blocked=bool_value(arguments, "input_blocked"),
     )
 
 
@@ -257,7 +274,7 @@ def decode_keyboard_down(arguments: DataMap) -> KeyboardDownArguments:
     require_keys(arguments, ("key",), optional=("mods", "repeat"))
     return KeyboardDownArguments(
         key=non_empty_string_value(arguments, "key"),
-        mods=_strings(arguments, "mods") if "mods" in arguments else (),
+        mods=string_list_value(arguments, "mods") if "mods" in arguments else (),
         repeat=bool_value(arguments, "repeat") if "repeat" in arguments else True,
     )
 
@@ -271,7 +288,7 @@ def decode_keyboard_tap(arguments: DataMap) -> KeyboardTapArguments:
     require_keys(arguments, ("key",), optional=("mods",))
     return KeyboardTapArguments(
         key=non_empty_string_value(arguments, "key"),
-        mods=_strings(arguments, "mods") if "mods" in arguments else (),
+        mods=string_list_value(arguments, "mods") if "mods" in arguments else (),
     )
 
 
@@ -282,7 +299,7 @@ def decode_text(arguments: DataMap) -> TextArguments:
 
 def decode_process_spawn(arguments: DataMap) -> ProcessSpawnArguments:
     require_keys(arguments, ("argv", "tag"), optional=("detached",))
-    argv = _strings(arguments, "argv")
+    argv = string_list_value(arguments, "argv")
     if not argv or not argv[0]:
         raise ValueError("Argument 'argv' must start with a program name")
     return ProcessSpawnArguments(
@@ -298,14 +315,12 @@ def decode_log(arguments: DataMap) -> LogArguments:
 
 
 def register_engine_events(dispatcher: Dispatcher) -> None:
-    dispatcher.register_event(APP_QUIT_REQUESTED, decode_quit_requested)
     dispatcher.register_event(INPUT_KEY, decode_input_key)
-    dispatcher.register_event(LINUX_PERMISSION_SETUP_OPENED, decode_permission_setup_opened)
     dispatcher.register_event(KEYBOARD_STATUS_CHANGED, decode_keyboard_status)
     dispatcher.register_event(KEYBOARD_PERMISSION_REQUIRED, decode_empty)
     dispatcher.register_event(KEYBOARD_RESET, decode_empty)
     dispatcher.register_event(PROCESS_EXITED, decode_process_exited)
-    dispatcher.register_event(WINDOW_VISIBILITY_CHANGED, decode_window_visibility)
+    dispatcher.register_event(WINDOW_STATE_CHANGED, decode_window_state)
 
 
 def install_engine_handlers(
@@ -315,11 +330,18 @@ def install_engine_handlers(
     keyboard: KeyboardEffects,
     processes: ProcessEffects,
 ) -> None:
-    """Register engine actions and the observation handlers that record state.
+    """Declare the observed roots, then register engine actions and the handlers that record state.
 
     Call this before a profile starts so observation handlers run before
     profile callbacks for the same event.
     """
+
+    profile_runtime.declare_root("input", {"keys": {}, "locks": {lock: False for lock in _LOCKS}})
+    profile_runtime.declare_root(
+        "keyboard",
+        asdict(KeyboardStatusArguments(ready=False, status="", needs_permission_setup=False, permission_setup_text="")),
+    )
+    profile_runtime.declare_root("windows", {})
 
     def record_input_key(event: InputKeyArguments) -> MessageResult:
         messages = profile_runtime.set_observed(("input", "keys", event.key), event.pressed)
@@ -329,22 +351,18 @@ def install_engine_handlers(
         return messages
 
     def record_keyboard_status(event: KeyboardStatusArguments) -> MessageResult:
-        values: dict[str, DataValue] = {
-            "ready": event.ready,
-            "status": event.status,
-            "needs_permission_setup": event.needs_permission_setup,
-            "permission_setup_text": event.permission_setup_text,
-        }
         messages: MessageResult = []
-        for name, value in values.items():
+        for name, value in asdict(event).items():
             messages.extend(profile_runtime.set_observed(("keyboard", name), value))
         return messages
 
-    def record_window_visibility(event: WindowVisibilityArguments) -> MessageResult:
-        return [
-            *profile_runtime.set_observed(("windows", event.window, "visible"), event.visible),
-            *profile_runtime.set_observed(("windows", event.window, "minimized"), event.minimized),
-        ]
+    def record_window_state(event: WindowStateArguments) -> MessageResult:
+        values = asdict(event)
+        window_id = values.pop("window_id")
+        messages: MessageResult = []
+        for name, value in values.items():
+            messages.extend(profile_runtime.set_observed(("windows", window_id, name), value))
+        return messages
 
     def press(arguments: KeyboardDownArguments) -> MessageResult:
         keyboard.press(arguments.key, arguments.mods, arguments.repeat)
@@ -375,7 +393,7 @@ def install_engine_handlers(
 
     dispatcher.add_event_handler(INPUT_KEY, record_input_key)
     dispatcher.add_event_handler(KEYBOARD_STATUS_CHANGED, record_keyboard_status)
-    dispatcher.add_event_handler(WINDOW_VISIBILITY_CHANGED, record_window_visibility)
+    dispatcher.add_event_handler(WINDOW_STATE_CHANGED, record_window_state)
     dispatcher.register_action(KEYBOARD_DOWN, decode_keyboard_down, press)
     dispatcher.register_action(KEYBOARD_UP, decode_keyboard_key, release)
     dispatcher.register_action(KEYBOARD_TAP, decode_keyboard_tap, tap)
@@ -384,10 +402,3 @@ def install_engine_handlers(
     dispatcher.register_action(LOG_INFO, decode_log, log_at(logging.INFO))
     dispatcher.register_action(LOG_WARN, decode_log, log_at(logging.WARNING))
     dispatcher.register_action(LOG_ERROR, decode_log, log_at(logging.ERROR))
-
-
-def _strings(arguments: DataMap, key: str) -> tuple[str, ...]:
-    value = arguments[key]
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise TypeError(f"Argument {key!r} must be a list of strings")
-    return tuple(item for item in value if isinstance(item, str))

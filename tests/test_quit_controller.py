@@ -4,30 +4,13 @@ import signal
 import unittest
 from unittest.mock import Mock, patch
 
-from PySide6.QtWidgets import QApplication, QWidget
-
 from axidev_osk.application.quit_controller import ApplicationQuitController
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
-class FakeWindow(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        self.managed = False
-
-    def set_quit_controller_managed(self, managed: bool) -> None:
-        self.managed = managed
+from support import qt_app
 
 
 class ApplicationQuitControllerTests(unittest.TestCase):
     def test_stdin_eof_handler_allows_windowed_executable_without_stdin(self) -> None:
-        controller = ApplicationQuitController(_app())
+        controller = ApplicationQuitController(qt_app())
 
         with patch("axidev_osk.application.quit_controller.sys.stdin", None):
             controller._install_stdin_eof_handler()
@@ -35,27 +18,40 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         self.assertIsNone(controller._stdin_notifier)
 
     def test_request_without_confirmation_runs_callbacks_and_exits(self) -> None:
-        app = _app()
+        app = qt_app()
         callback = Mock()
         controller = ApplicationQuitController(app)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
-            controller.request_quit()
+            controller.request_quit("signal")
 
         callback.assert_called_once_with()
         exit_app.assert_called_once_with(0)
 
+    def test_a_failing_shutdown_step_is_logged_and_the_app_still_exits(self) -> None:
+        app = qt_app()
+        after = Mock()
+        controller = ApplicationQuitController(app)
+        controller.register_quit_callback(Mock(side_effect=RuntimeError("stop failed")))
+        controller.register_quit_callback(after)
+
+        with patch.object(app, "exit") as exit_app, self.assertLogs("axidev_osk.application.quit_controller", "ERROR"):
+            controller.shutdown(2)
+
+        after.assert_called_once_with()
+        exit_app.assert_called_once_with(2)
+
     def test_confirmed_request_asks_and_waits_for_shutdown(self) -> None:
-        app = _app()
+        app = qt_app()
         ask = Mock()
         callback = Mock()
         controller = ApplicationQuitController(app, ask_to_quit=ask)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
-            controller.request_quit()
-            ask.assert_called_once_with()
+            controller.request_quit("signal")
+            ask.assert_called_once_with("signal")
             callback.assert_not_called()
             exit_app.assert_not_called()
 
@@ -66,7 +62,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         exit_app.assert_called_once_with(3)
 
     def test_sigterm_skips_confirmation_and_runs_callbacks(self) -> None:
-        app = _app()
+        app = qt_app()
         ask = Mock()
         callback = Mock()
         controller = ApplicationQuitController(app, ask_to_quit=ask)
@@ -84,7 +80,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         exit_app.assert_called_once_with(0)
 
     def test_sigint_keeps_confirmation(self) -> None:
-        app = _app()
+        app = qt_app()
         ask = Mock()
         controller = ApplicationQuitController(app, ask_to_quit=ask)
 
@@ -95,24 +91,8 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         with patch.object(app, "exit") as exit_app:
             scheduled_quit()
 
-        ask.assert_called_once_with()
+        ask.assert_called_once_with("signal")
         exit_app.assert_not_called()
-
-    def test_register_window_marks_window_managed_and_unmanages_on_quit(self) -> None:
-        app = _app()
-        window = FakeWindow()
-        callback = Mock()
-        controller = ApplicationQuitController(app)
-        controller.register_window(window)
-        controller.register_quit_callback(callback)
-
-        self.assertTrue(window.managed)
-
-        with patch.object(app, "exit"):
-            controller.request_quit()
-
-        self.assertFalse(window.managed)
-        callback.assert_called_once_with()
 
 
 if __name__ == "__main__":

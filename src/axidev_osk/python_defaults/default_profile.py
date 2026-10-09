@@ -10,8 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 from . import osk
+from .osk import std
 from .osk.std import keys, prompts, windows
-from .theme import DEFAULT_QSS
+from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR
 
 KEYBOARD = "keyboard"
 KEYBOARD_OPACITY = 0.85
@@ -131,7 +132,7 @@ def _key_node(entry: tuple[Any, ...], cell: dict[str, int]) -> osk.Map:
         label, output = arguments
         return keys.lock(label, output, placement)
     if kind == "ghost":
-        return windows.ghost_button(KEYBOARD, KEYBOARD_OPACITY, {"id": "ghost", **placement})
+        return windows.ghost_button(KEYBOARD, {"id": "ghost", **placement})
     if kind == "dwell":
         return _dwell_button(placement)
     raise ValueError(f"Unknown layout entry kind {kind!r}")
@@ -154,6 +155,7 @@ def keyboard_window() -> osk.Map:
         title="axidev OSK",
         opacity=KEYBOARD_OPACITY,
         show_on_start=True,
+        default_close=False,
         overlay=OVERLAY,
         chrome={"enabled": True},
         content=osk.box(
@@ -179,19 +181,18 @@ def keyboard_window() -> osk.Map:
     )
 
 
-def _hide(window: str) -> Any:
+def _hide(window: str) -> osk.Callback:
     return lambda ctx, event: [osk.window.hide(window)]
 
 
-def _notice(window: str, title: str, message: Any) -> osk.Map:
+def _notice(window: str, title: str, message: str | osk.Binding) -> osk.Map:
     return prompts.prompt_window(
         window,
         title=title,
         message=message,
         glyph="i",
-        overlay=OVERLAY,
-        minimum_size=(460, 120),
         buttons=[prompts.prompt_button(f"{window}:ok", "OK", _hide(window), accept=True)],
+        opts={"overlay": OVERLAY},
     )
 
 
@@ -201,14 +202,13 @@ def prompt_windows() -> list[osk.Map]:
             QUIT_PROMPT,
             title="Close axidev-osk?",
             message="Do you want to close axidev-osk? This will stop OSK input.",
-            glyph="!",
             danger=True,
             hint=(
                 "Tip: if you only want to hide OSK, move your cursor into "
                 "the screen corner; the hot-corner sensor will hide it without "
                 "shutting the app down."
             ),
-            overlay=OVERLAY,
+            opts={"overlay": OVERLAY},
             buttons=[
                 prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [osk.app.quit()], accept=True),
                 prompts.prompt_button(f"{QUIT_PROMPT}:no", "No", _hide(QUIT_PROMPT), accept=False),
@@ -223,8 +223,7 @@ def prompt_windows() -> list[osk.Map]:
                 "Choose Open In Terminal to run permission setup where sudo can prompt. "
                 "If you already ran setup, this session may just need a log out and back in."
             ),
-            overlay=OVERLAY,
-            minimum_size=(560, 150),
+            opts={"overlay": OVERLAY, "minimum_size": [560, 150]},
             buttons=[
                 osk.button(
                     id=f"{PERMISSION_PROMPT}:open_terminal",
@@ -272,9 +271,11 @@ def prompt_windows() -> list[osk.Map]:
 
 
 def _on_close_requested(ctx: Any, event: Any) -> list[osk.Map]:
+    """Closing the keyboard asks first; every other window keeps the engine's close rule."""
+
     if event["window"] == KEYBOARD:
         return [osk.window.show(QUIT_PROMPT)]
-    return [osk.window.hide(event["window"])]
+    return []
 
 
 def _on_permission_setup_opened(ctx: Any, event: Any) -> list[osk.Map]:
@@ -282,13 +283,13 @@ def _on_permission_setup_opened(ctx: Any, event: Any) -> list[osk.Map]:
 
 
 def build_default_config() -> osk.Map:
-    """Return the root config the app loads when no user config exists."""
+    """Return the root config of the bundled keyboard, the profile the app runs."""
 
     return osk.config(
         active_profile="default",
         profiles={
             "default": osk.profile(
-                theme={"qss": DEFAULT_QSS},
+                theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
                 windows=[keyboard_window(), *prompt_windows()],
                 attachments=[
                     osk.dwell(
@@ -313,18 +314,23 @@ def build_default_config() -> osk.Map:
                         maximum_opacity_percent=60,
                         radius_standard_deviations=3,
                     ),
-                    osk.hot_corners(id="hot-corners", corners=["top_left", "top_right", "bottom_left", "bottom_right"]),
+                    osk.hot_corners(
+                        id="hot-corners",
+                        corners=["top_left", "top_right", "bottom_left", "bottom_right"],
+                        **HOT_CORNER_INDICATOR,
+                    ),
                     osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
                 ],
-                on={
-                    "keyboard.reset": keys.on_reset,
-                    "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx, KEYBOARD, KEYBOARD_OPACITY),
-                    "window.close_requested": _on_close_requested,
-                    "app.quit_requested": lambda ctx, event: [osk.window.show(QUIT_PROMPT)],
-                    "app.activated": lambda ctx, event: [osk.window.show(KEYBOARD)],
-                    "keyboard.permission_required": lambda ctx, event: [osk.window.show(PERMISSION_PROMPT)],
-                    "linux.permission_setup_opened": _on_permission_setup_opened,
-                },
+                on=std.with_handlers(
+                    {
+                        "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
+                        "window.close_requested": _on_close_requested,
+                        "app.quit_requested": lambda ctx, event: [osk.window.show(QUIT_PROMPT)],
+                        "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
+                        "keyboard.permission_required": lambda ctx, event: [osk.window.show(PERMISSION_PROMPT)],
+                        "linux.permission_setup_opened": _on_permission_setup_opened,
+                    }
+                ),
             )
         },
     )

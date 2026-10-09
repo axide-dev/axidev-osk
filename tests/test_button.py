@@ -14,38 +14,7 @@ from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from axidev_osk.windows.builder import build_profile_window
 from axidev_osk.windows.chrome import OverlayTitleBar
-
-
-class FakeKeyboardBackend:
-    ready = True
-    status_text = ""
-    needs_permission_setup = False
-    permission_setup_text = ""
-
-    def add_observation_listener(self, listener):
-        del listener
-        return lambda: None
-
-
-class FakeOverlay:
-    uses_custom_chrome = False
-
-    def handle_show(self) -> bool:
-        return True
-
-    def move_by(self, dx: int, dy: int) -> None:
-        del dx, dy
-
-    def resize_by(self, dx: int, dy: int) -> None:
-        del dx, dy
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    assert isinstance(app, QApplication)
-    return app
+from support import FakeOverlay, RecordingBackend, qt_app
 
 
 def _find_button(parent: QWidget, node_id: str) -> Button:
@@ -54,7 +23,7 @@ def _find_button(parent: QWidget, node_id: str) -> Button:
 
 class ButtonTests(unittest.TestCase):
     def test_right_click_has_the_same_signal_cycle_as_left_click(self) -> None:
-        _app()
+        qt_app()
         button = Button("Test")
         self.addCleanup(button.close)
         button.show()
@@ -72,7 +41,7 @@ class ButtonTests(unittest.TestCase):
         self.assertEqual(events, left_events)
 
     def test_context_menu_event_is_suppressed(self) -> None:
-        _app()
+        qt_app()
         button = Button("Test")
         self.addCleanup(button.close)
         event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(1, 1), QPoint(1, 1))
@@ -83,8 +52,8 @@ class ButtonTests(unittest.TestCase):
         self.assertTrue(event.isAccepted())
 
     def test_right_click_on_a_profile_button_dispatches_press_and_release(self) -> None:
-        _app()
-        context = make_test_context(FakeKeyboardBackend())
+        qt_app()
+        context = make_test_context(RecordingBackend())
         events: list[tuple[str, DataMap]] = []
 
         def recorder(name: str):
@@ -115,7 +84,7 @@ class ButtonTests(unittest.TestCase):
         )
         with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
             window = build_profile_window(profile.window("pad"), context)
-        self.addCleanup(window.close)
+        self.addCleanup(window.deleteLater)
         window.show()
 
         QTest.mouseClick(_find_button(window, "moo"), Qt.MouseButton.RightButton)
@@ -123,7 +92,7 @@ class ButtonTests(unittest.TestCase):
         self.assertEqual(events, [(BUTTON_PRESSED, {"node": "moo"}), (BUTTON_RELEASED, {"node": "moo"})])
 
     def test_title_bar_close_control_uses_the_shared_button(self) -> None:
-        _app()
+        qt_app()
         title_bar = OverlayTitleBar("Test")
         self.addCleanup(title_bar.close)
         title_bar.show()

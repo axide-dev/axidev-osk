@@ -6,39 +6,19 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication
 
 from axidev_osk.attachments.runtime import AttachmentRuntime, dwell_set_enabled
-from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.messages import DataMap
 from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.testing import make_test_context
-from axidev_osk.windows.builder import build_profile_window
+from support import RecordingBackend, qt_app
 
 
-class FakeKeyboardBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = ""
+class FakeHotCornerOverlay:
+    """Overlay calls a hot-corner sensor window makes, all doing nothing."""
 
-    def add_observation_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_key_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_modifier_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-
-class FakeOverlay:
-    uses_custom_chrome = False
     backend = None
 
     def handle_show(self) -> bool:
@@ -54,7 +34,7 @@ class FakeOverlay:
         del position, anchors, screen_geometry
 
     def release_resources(self) -> None:
-        pass
+        return None
 
 
 class RecordingWindow:
@@ -71,12 +51,6 @@ class RecordingHotCorners:
 
     def configure(self, settings: Any, corners: frozenset[str]) -> None:
         self.configured.append((settings, corners))
-
-
-def _app() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    assert isinstance(app, QApplication)
-    return app
 
 
 def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> osk.Map:
@@ -96,8 +70,8 @@ def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> os
 
 class AttachmentHarness:
     def __init__(self, attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> None:
-        _app()
-        self.context = make_test_context(FakeKeyboardBackend())
+        qt_app()
+        self.context = make_test_context(RecordingBackend())
         self.engine = self.context.engine
         self.windows = {window: RecordingWindow() for window in windows}
         self.hot_corners = RecordingHotCorners()
@@ -107,7 +81,7 @@ class AttachmentHarness:
             window_lookup=self.windows.get,
             hot_corners=self.hot_corners,
         )
-        self.profile = self.engine.decoder().decode_root(_root(attachments, windows)).profile
+        self.profile = self.engine.decoder().decode_root(_root(attachments, windows))
         self.engine.profile.start(self.profile)
         self.failures: list[DataMap] = []
         self.context.dispatcher.add_raw_event_handler("action.failed", lambda event: self.failures.append(event) or [])
@@ -118,8 +92,8 @@ class AttachmentHarness:
 
 class DecodeTests(unittest.TestCase):
     def test_options_are_validated_with_their_config_path(self) -> None:
-        _app()
-        engine = make_test_context(FakeKeyboardBackend()).engine
+        qt_app()
+        engine = make_test_context(RecordingBackend()).engine
         cases = {
             "unknown corners: middle": osk.hot_corners(id="hc", corners=["middle"]),
             "delay": osk.dwell(id="d", window="pad", delay_ms=0),
@@ -142,10 +116,10 @@ class AttachmentRuntimeTests(unittest.TestCase):
         harness = AttachmentHarness([osk.dwell(id="d", window="pad", enabled=True, delay_ms=300)])
         harness.start()
 
-        self.assertIs(harness.engine.state.get(("dwell", "d", "enabled")), True)
-        harness.context.dispatcher.dispatch_action(dwell_set_enabled("d", False))
+        self.assertIs(harness.engine.profile.state.get(("dwell", "d", "enabled")), True)
+        harness.context.dispatcher.dispatch(dwell_set_enabled("d", False))
 
-        self.assertIs(harness.engine.state.get(("dwell", "d", "enabled")), False)
+        self.assertIs(harness.engine.profile.state.get(("dwell", "d", "enabled")), False)
         self.assertEqual(harness.windows["pad"].dwell, [False])
         installed = harness.runtime.for_window("pad").dwell
         assert installed is not None
@@ -155,7 +129,7 @@ class AttachmentRuntimeTests(unittest.TestCase):
         harness = AttachmentHarness([])
         harness.start()
 
-        harness.context.dispatcher.dispatch_action(dwell_set_enabled("nope", True))
+        harness.context.dispatcher.dispatch(dwell_set_enabled("nope", True))
 
         self.assertEqual([failure["action"] for failure in harness.failures], ["dwell.set_enabled"])
 
@@ -172,36 +146,15 @@ class AttachmentRuntimeTests(unittest.TestCase):
         self.assertEqual((settings.dwell_ms, corners), (150, frozenset({"top_left", "bottom_right"})))
         self.assertEqual(harness.runtime.secure_input_panel_window, "pad")
 
-    def test_profile_window_installs_its_dwell_and_pointer_locator(self) -> None:
-        harness = AttachmentHarness(
-            [
-                osk.dwell(id="d", window="pad", enabled=True),
-                osk.pointer_locator(id="glow", window="pad"),
-            ],
-            windows=("pad", "other"),
-        )
-        harness.start()
-
-        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
-            pad = build_profile_window(harness.profile.window("pad"), harness.context, attachments=harness.runtime.for_window("pad"))
-            other = build_profile_window(harness.profile.window("other"), harness.context, attachments=harness.runtime.for_window("other"))
-        self.addCleanup(pad.close)
-        self.addCleanup(other.close)
-
-        self.assertTrue(pad._dwell_click is not None and pad._dwell_click.enabled)
-        self.assertIsNotNone(pad.findChild(PointerLocator))
-        self.assertIsNone(other._dwell_click)
-        self.assertIsNone(other.findChild(PointerLocator))
-
 
 class HotCornerFilterTests(unittest.TestCase):
     def test_controller_creates_sensors_only_for_configured_corners(self) -> None:
-        _app()
+        qt_app()
         screen = QGuiApplication.primaryScreen()
         assert screen is not None
-        context = make_test_context(FakeKeyboardBackend())
+        context = make_test_context(RecordingBackend())
 
-        with patch("axidev_osk.hot_corner.controller.configure_hot_corner_overlay", return_value=FakeOverlay()):
+        with patch("axidev_osk.hot_corner.controller.configure_hot_corner_overlay", return_value=FakeHotCornerOverlay()):
             controller = HotCornerWindowToggleController(context.dispatcher, corners=frozenset({"top_left"}))
             handles = controller._create_sensor_handles([screen])
 
