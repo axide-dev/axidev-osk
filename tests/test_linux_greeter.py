@@ -362,13 +362,14 @@ class NativeAdapterTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "managed.conf"
             path.write_bytes(b"before\n")
+            mode = path.stat().st_mode & 0o777
             transaction = linux_greeter._FileTransaction()
             transaction.write(path, "after\n")
 
             with patch.object(linux, "_write_atomic", wraps=linux._write_atomic) as write:
                 transaction.rollback()
 
-        write.assert_called_once_with(path, "before\n", 0o644)
+        write.assert_called_once_with(path, "before\n", mode)
 
     def test_file_transaction_continues_after_atomic_restore_failure(self) -> None:
         with TemporaryDirectory() as temporary:
