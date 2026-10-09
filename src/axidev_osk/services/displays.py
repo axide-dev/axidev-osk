@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 
@@ -26,7 +28,7 @@ class DisplayService(QObject):
         if self._context is not None:
             return
         self._context = context
-        app = QGuiApplication.instance()
+        app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.connect(self._screen_added)
         app.screenRemoved.connect(self._screen_removed)
         app.primaryScreenChanged.connect(self._schedule)
@@ -38,7 +40,7 @@ class DisplayService(QObject):
 
         if self._context is None:
             return
-        app = QGuiApplication.instance()
+        app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.disconnect(self._screen_added)
         app.screenRemoved.disconnect(self._screen_removed)
         app.primaryScreenChanged.disconnect(self._schedule)

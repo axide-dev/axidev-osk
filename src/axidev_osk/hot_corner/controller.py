@@ -210,7 +210,7 @@ class HotCornerOverlayController:
     def _current_screen_geometry(self) -> QRect:
         screen = self._window.screen()
         if screen is None:
-            app = cast(QGuiApplication | None, QGuiApplication.instance())
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             return QRect(0, 0, 1920, 1080)
@@ -229,9 +229,24 @@ class ScreenCorner(str, Enum):
 class HotCornerOverlay(Protocol):
     """Overlay operations used by indicator and sensor windows."""
 
+    @property
+    def backend(self) -> OverlayBackend: ...
+
     def handle_show(self) -> bool: ...
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None: ...
+
+    def move_to_anchored(
+        self,
+        position: QPoint,
+        *,
+        anchors: int,
+        screen_geometry: QRect | None = None,
+    ) -> None: ...
+
+    def set_screen(self, screen: QScreen) -> None: ...
+
+    def release_resources(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -415,7 +430,7 @@ class HotCornerWindowToggleController(QObject):
         self._reset_corner_tracking()
         if not self._use_sensor_windows:
             return
-        app = cast(QGuiApplication | None, QGuiApplication.instance())
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         retained: list[HotCornerSensorHandle] = []
         for handle in self._sensor_handles:
@@ -499,7 +514,7 @@ class HotCornerWindowToggleController(QObject):
     def _detect_corner(self, cursor_pos: QPoint) -> ScreenCorner | None:
         screen = QGuiApplication.screenAt(cursor_pos)
         if screen is None:
-            app = cast(QGuiApplication | None, QGuiApplication.instance())
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             return None
@@ -534,7 +549,7 @@ class HotCornerWindowToggleController(QObject):
     ) -> None:
         screen = QGuiApplication.screenAt(cursor_pos)
         if screen is None:
-            app = cast(QGuiApplication | None, QGuiApplication.instance())
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             self._indicator.hide()
@@ -596,7 +611,7 @@ class HotCornerWindowToggleController(QObject):
         return ANCHOR_RIGHT | ANCHOR_BOTTOM
 
     @staticmethod
-    def _usable_geometry(screen: QScreen, overlay: object) -> QRect:
+    def _usable_geometry(screen: QScreen, overlay: HotCornerOverlay) -> QRect:
         if overlay.backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             # Edge anchors let the compositor account for other surfaces' reserved space.
             return screen.geometry()
@@ -605,7 +620,7 @@ class HotCornerWindowToggleController(QObject):
     def _create_sensor_handles(self, screens: list[QScreen] | None = None) -> list[HotCornerSensorHandle]:
         handles: list[HotCornerSensorHandle] = []
         if screens is None:
-            app = cast(QGuiApplication | None, QGuiApplication.instance())
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screens = app.screens() if app is not None else []
         for screen in screens:
             for corner in ScreenCorner:

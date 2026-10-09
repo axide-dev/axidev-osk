@@ -92,6 +92,8 @@ class _ApplicationEventRuntime(Protocol):
         event: HotCornerTriggeredArguments,
     ) -> MessageResult: ...
 
+
+class _SecureInputPanelRuntime(Protocol):
     def _prepare_secure_input_panel(self) -> MessageResult: ...
 
     def _release_secure_input_panel(self) -> MessageResult: ...
@@ -170,7 +172,7 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_action_handler(
         WINDOW_MOVE_BY,
         decode_window_move_by,
-        lambda runtime: lambda arguments: route_window_move_by(arguments, runtime),
+        _window_move_by_handler,
     )
     registry.register_action_handler(
         WINDOW_SET_DWELL_ENABLED,
@@ -180,12 +182,12 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_action_handler(
         SECURE_INPUT_PANEL_PREPARE,
         decode_no_arguments,
-        lambda runtime: lambda arguments: _secure_input_panel_prepare(runtime, arguments),
+        _secure_input_panel_prepare_handler,
     )
     registry.register_action_handler(
         SECURE_INPUT_PANEL_RELEASE,
         decode_no_arguments,
-        lambda runtime: lambda arguments: _secure_input_panel_release(runtime, arguments),
+        _secure_input_panel_release_handler,
     )
     registry.register_action_handler(
         APP_QUIT,
@@ -202,19 +204,19 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     )
     registry.register_event_handler(
         DISPLAY_CONFIGURATION_CHANGED,
-        lambda runtime: lambda event: route_display_configuration_changed(event, runtime),
+        _display_configuration_changed_handler,
     )
     registry.register_event_handler(
         WINDOW_DRAG_STARTED,
-        lambda runtime: lambda event: route_window_drag_started(event, runtime),
+        _window_drag_started_handler,
     )
     registry.register_event_handler(
         WINDOW_DRAG_ENDED,
-        lambda runtime: lambda event: route_window_drag_ended(event, runtime),
+        _window_drag_ended_handler,
     )
     registry.register_event_handler(
         POINTER_MOTION_OBSERVED,
-        lambda runtime: lambda event: route_pointer_motion_observed(event, runtime),
+        _pointer_motion_observed_handler,
     )
 
 
@@ -403,14 +405,46 @@ def _window_toggle_opacity(runtime: object, arguments: WindowToggleOpacityArgume
     return []
 
 
-def _secure_input_panel_prepare(runtime: _ApplicationEventRuntime, arguments: NoArguments) -> MessageResult:
-    del arguments
-    return runtime._prepare_secure_input_panel()  # noqa: SLF001
+def _secure_input_panel_prepare_handler(
+    runtime: _SecureInputPanelRuntime,
+) -> Callable[[NoArguments], MessageResult]:
+    return lambda arguments: runtime._prepare_secure_input_panel()  # noqa: SLF001
 
 
-def _secure_input_panel_release(runtime: _ApplicationEventRuntime, arguments: NoArguments) -> MessageResult:
-    del arguments
-    return runtime._release_secure_input_panel()  # noqa: SLF001
+def _secure_input_panel_release_handler(
+    runtime: _SecureInputPanelRuntime,
+) -> Callable[[NoArguments], MessageResult]:
+    return lambda arguments: runtime._release_secure_input_panel()  # noqa: SLF001
+
+
+def _window_move_by_handler(
+    runtime: _PointerDragRuntime,
+) -> Callable[[WindowMoveByArguments], MessageResult]:
+    return lambda arguments: route_window_move_by(arguments, runtime)
+
+
+def _display_configuration_changed_handler(
+    runtime: object,
+) -> Callable[[DisplayConfigurationChangedArguments], MessageResult]:
+    return lambda event: route_display_configuration_changed(event, runtime)
+
+
+def _window_drag_started_handler(
+    runtime: _PointerDragRuntime,
+) -> Callable[[WindowDragArguments], MessageResult]:
+    return lambda event: route_window_drag_started(event, runtime)
+
+
+def _window_drag_ended_handler(
+    runtime: _PointerDragRuntime,
+) -> Callable[[WindowDragArguments], MessageResult]:
+    return lambda event: route_window_drag_ended(event, runtime)
+
+
+def _pointer_motion_observed_handler(
+    runtime: _PointerDragRuntime,
+) -> Callable[[PointerMotionObservedArguments], MessageResult]:
+    return lambda event: route_pointer_motion_observed(event, runtime)
 
 
 def _app_quit(runtime: object, arguments: AppQuitArguments) -> MessageResult:

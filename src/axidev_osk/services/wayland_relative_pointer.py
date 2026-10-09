@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -124,8 +124,9 @@ class WaylandRelativePointerService(QObject):
 
         if self._context is not None or read_selected_overlay_backend() != OverlayBackend.WAYLAND_LAYER_SHELL:
             return
-        app = QGuiApplication.instance()
-        native = app.nativeInterface() if app is not None else None
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
+        # Qt's stubs do not describe the platform-specific native interface.
+        native: Any = app.nativeInterface() if app is not None else None
         display = native.display() if native is not None and hasattr(native, "display") else 0
         pointer = native.pointer() if native is not None and hasattr(native, "pointer") else 0
         if not display or not pointer:

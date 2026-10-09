@@ -17,10 +17,10 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtWidgets import QWidget
 
 # AlwaysOnTopWindowConfig and OverlayPlacement are pure data DTOs and live
@@ -312,7 +312,7 @@ class AlwaysOnTopWindowController:
 
         if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
             return
-        app = QGuiApplication.instance()
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         if not screens:
             return
@@ -332,7 +332,7 @@ class AlwaysOnTopWindowController:
 
         if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL or self._mapped_screen_name is None:
             return False
-        app = QGuiApplication.instance()
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         return all(screen.name() != self._mapped_screen_name for screen in screens)
 
@@ -345,8 +345,8 @@ class AlwaysOnTopWindowController:
         if screen is not None:
             self._mapped_screen_name = screen.name()
 
-    def _layer_shell_screen_changed(self, screen: object) -> None:
-        app = QGuiApplication.instance()
+    def _layer_shell_screen_changed(self, screen: QScreen | None) -> None:
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         # Retain the old identity until runtime recovery has remapped a
         # surface whose output was removed.
@@ -488,7 +488,7 @@ class AlwaysOnTopWindowController:
         platform = self._qt_platform()
         if platform == "wayland":
             selected = _read_selected_backend()
-            if selected in {
+            if selected is not None and selected in {
                 OverlayBackend.WAYLAND_INPUT_PANEL,
                 OverlayBackend.WAYLAND_LAYER_SHELL,
             }:

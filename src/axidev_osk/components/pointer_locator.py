@@ -266,7 +266,10 @@ class PointerLocator(QWidget):
             if widget.width() > 0 and widget.height() > 0
         ]
         positioned.sort(key=lambda item: (item[1].center().y(), item[1].center().x()))
-        signature = tuple((id(widget), *rect.getRect()) for widget, rect in positioned)
+        signature = tuple(
+            (id(widget), rect.x(), rect.y(), rect.width(), rect.height())
+            for widget, rect in positioned
+        )
         if signature == self._color_target_signature:
             return
         colors = build_component_palette(tuple(rect for _, rect in positioned))

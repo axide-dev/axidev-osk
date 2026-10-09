@@ -742,7 +742,7 @@ def _remove_plasma(launcher: Path, state: dict[str, Any]) -> None:
         _remove_owned_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
         linux._remove_owned_file(PLASMA_SERVICE_PATH, _plasma_service_text())
         linux._remove_owned_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-        if lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
+        if unmanaged_lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
             linux._write_atomic(
                 PLASMA_LOCK_SCREEN_UI_PATH,
                 unmanaged_lock_screen_ui,
@@ -770,7 +770,7 @@ def _remove_plasma(launcher: Path, state: dict[str, Any]) -> None:
         linux._write_atomic(KWIN_CONFIG_PATH, original_kwinrc, _state_mode(state, "kwinrc_mode"))
     else:
         linux._remove_owned_file(KWIN_CONFIG_PATH, managed_kwinrc)
-    if lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
+    if unmanaged_lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
         linux._write_atomic(
             PLASMA_LOCK_SCREEN_UI_PATH,
             unmanaged_lock_screen_ui,

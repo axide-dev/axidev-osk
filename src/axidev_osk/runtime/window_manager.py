@@ -186,7 +186,7 @@ class WindowManager:
 
         self.get_or_create(window_id).set_dwell_enabled(enabled)
 
-    def _restore_interaction(self, window_id: str, window: QWidget) -> None:
+    def _restore_interaction(self, window_id: str, window: RuntimeWindow) -> None:
         """Restore configured opacity and remove any temporary input blocker."""
 
         blocker = self._input_blockers.pop(window_id, None)

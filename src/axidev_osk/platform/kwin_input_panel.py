@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import ctypes
 import ctypes.util
 from collections.abc import Iterable
@@ -422,7 +424,7 @@ def _select_output(outputs: Iterable[_Output], output_name: str) -> _Output:
 
 
 def _bind_global(
-    marshal: object,
+    marshal: Callable[..., int],
     registry: int,
     interface: _WlInterface,
     advertised: tuple[int, int],
