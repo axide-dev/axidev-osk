@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, WindowConfig
 from ..config.profile import StyleConfig
 from ..config.profile import WindowConfig as ProfileWindowConfig
+from ..attachments.runtime import WindowAttachments
+from ..components.pointer_locator import install_pointer_locator
 from ..nodes import apply_style
 from ..runtime.context import Context
 from ..runtime.config_paths import window_source_path
@@ -280,9 +282,16 @@ def build_profile_window(
     config: ProfileWindowConfig,
     context: Context,
     *,
+    attachments: WindowAttachments | None = None,
     parent: QWidget | None = None,
 ) -> RuntimeWindow:
-    """Build a runtime window whose content is a profile node tree."""
+    """Build a runtime window whose content is a profile node tree.
+
+    ``attachments`` names the dwell settings and pointer locators this window
+    installs; the attachment runtime provides them.
+    """
+
+    installed = attachments or WindowAttachments()
 
     def build_content() -> QWidget:
         surface = RootSurface()
@@ -294,6 +303,8 @@ def build_profile_window(
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(context.engine.node_builder.build(config.content))
+        for locator in installed.pointer_locators:
+            install_pointer_locator(surface, locator)
         return surface
 
     return RuntimeWindow(
@@ -305,6 +316,7 @@ def build_profile_window(
         minimum_size=config.minimum_size,
         build_content=build_content,
         context=context,
+        dwell=installed.dwell,
         style=config.style,
         parent=parent,
     )

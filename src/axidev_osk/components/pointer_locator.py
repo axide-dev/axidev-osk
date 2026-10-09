@@ -43,6 +43,18 @@ def build_pointer_locator_component(
     return PointerLocator(config, host)
 
 
+def install_pointer_locator(host: QWidget, settings: PointerLocatorConfig) -> QWidget:
+    """Install pointer feedback behind a root surface's content.
+
+    ``host`` must offer ``install_background_component``, as ``RootSurface`` does.
+    """
+
+    host.setProperty("pointerLocatorEnabled", True)
+    locator = PointerLocator(settings, host)
+    host.install_background_component(locator)  # type: ignore[attr-defined]
+    return locator
+
+
 def _rectangle_distance_squared(first: QRect, second: QRect) -> int:
     horizontal = max(first.left() - second.right(), second.left() - first.right(), 0)
     vertical = max(first.top() - second.bottom(), second.top() - first.bottom(), 0)

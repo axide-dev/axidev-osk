@@ -376,11 +376,13 @@ class HotCornerWindowToggleController(QObject):
         dispatcher: Dispatcher,
         *,
         config: HotCornerConfig | None = None,
+        corners: frozenset[str] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._dispatcher = dispatcher
         self._config = config or HotCornerConfig()
+        self._corners = frozenset(corner for corner in ScreenCorner if corners is None or corner.value in corners)
         self._active_corner: ScreenCorner | None = None
         self._active_screen: QScreen | None = None
         self._entered_at = 0.0
@@ -624,6 +626,8 @@ class HotCornerWindowToggleController(QObject):
             screens = app.screens() if app is not None else []
         for screen in screens:
             for corner in ScreenCorner:
+                if corner not in self._corners:
+                    continue
                 sensor_window = HotCornerSensorWindow(size_px=self._config.corner_size_px)
                 overlay = configure_hot_corner_overlay(sensor_window)
                 handle = HotCornerSensorHandle(
