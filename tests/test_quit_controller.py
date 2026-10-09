@@ -27,17 +27,17 @@ class FakeWindow(QWidget):
 
 class ApplicationQuitControllerTests(unittest.TestCase):
     def test_stdin_eof_handler_allows_windowed_executable_without_stdin(self) -> None:
-        controller = ApplicationQuitController(_app(), prompt=lambda _parent: True)
+        controller = ApplicationQuitController(_app())
 
         with patch("axidev_osk.application.quit_controller.sys.stdin", None):
             controller._install_stdin_eof_handler()
 
         self.assertIsNone(controller._stdin_notifier)
 
-    def test_request_quit_runs_callbacks_after_confirmation(self) -> None:
+    def test_request_without_confirmation_runs_callbacks_and_exits(self) -> None:
         app = _app()
         callback = Mock()
-        controller = ApplicationQuitController(app, prompt=lambda _parent: True)
+        controller = ApplicationQuitController(app)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
@@ -46,23 +46,30 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         callback.assert_called_once_with()
         exit_app.assert_called_once_with(0)
 
-    def test_request_quit_does_not_run_callbacks_when_cancelled(self) -> None:
+    def test_confirmed_request_asks_and_waits_for_shutdown(self) -> None:
         app = _app()
+        ask = Mock()
         callback = Mock()
-        controller = ApplicationQuitController(app, prompt=lambda _parent: False)
+        controller = ApplicationQuitController(app, ask_to_quit=ask)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
             controller.request_quit()
+            ask.assert_called_once_with()
+            callback.assert_not_called()
+            exit_app.assert_not_called()
 
-        callback.assert_not_called()
-        exit_app.assert_not_called()
+            controller.shutdown(3)
+            controller.shutdown(4)
+
+        callback.assert_called_once_with()
+        exit_app.assert_called_once_with(3)
 
     def test_sigterm_skips_confirmation_and_runs_callbacks(self) -> None:
         app = _app()
-        prompt = Mock(return_value=False)
+        ask = Mock()
         callback = Mock()
-        controller = ApplicationQuitController(app, prompt=prompt)
+        controller = ApplicationQuitController(app, ask_to_quit=ask)
         controller.register_quit_callback(callback)
 
         with patch("axidev_osk.application.quit_controller.QTimer.singleShot") as single_shot:
@@ -72,14 +79,14 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         with patch.object(app, "exit") as exit_app:
             scheduled_quit()
 
-        prompt.assert_not_called()
+        ask.assert_not_called()
         callback.assert_called_once_with()
         exit_app.assert_called_once_with(0)
 
     def test_sigint_keeps_confirmation(self) -> None:
         app = _app()
-        prompt = Mock(return_value=False)
-        controller = ApplicationQuitController(app, prompt=prompt)
+        ask = Mock()
+        controller = ApplicationQuitController(app, ask_to_quit=ask)
 
         with patch("axidev_osk.application.quit_controller.QTimer.singleShot") as single_shot:
             controller._handle_signal(signal.SIGINT, None)
@@ -88,14 +95,14 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         with patch.object(app, "exit") as exit_app:
             scheduled_quit()
 
-        prompt.assert_called_once_with(app.activeWindow())
+        ask.assert_called_once_with()
         exit_app.assert_not_called()
 
     def test_register_window_marks_window_managed_and_unmanages_on_quit(self) -> None:
         app = _app()
         window = FakeWindow()
         callback = Mock()
-        controller = ApplicationQuitController(app, prompt=lambda _parent: True)
+        controller = ApplicationQuitController(app)
         controller.register_window(window)
         controller.register_quit_callback(callback)
 

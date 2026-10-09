@@ -97,7 +97,7 @@ def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> os
 class AttachmentHarness:
     def __init__(self, attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> None:
         _app()
-        self.context = make_test_context(FakeKeyboardBackend(), activate_behaviors=False)
+        self.context = make_test_context(FakeKeyboardBackend())
         self.engine = self.context.engine
         self.windows = {window: RecordingWindow() for window in windows}
         self.hot_corners = RecordingHotCorners()
@@ -119,7 +119,7 @@ class AttachmentHarness:
 class DecodeTests(unittest.TestCase):
     def test_options_are_validated_with_their_config_path(self) -> None:
         _app()
-        engine = make_test_context(FakeKeyboardBackend(), activate_behaviors=False).engine
+        engine = make_test_context(FakeKeyboardBackend()).engine
         cases = {
             "unknown corners: middle": osk.hot_corners(id="hc", corners=["middle"]),
             "delay": osk.dwell(id="d", window="pad", delay_ms=0),
@@ -199,7 +199,7 @@ class HotCornerFilterTests(unittest.TestCase):
         _app()
         screen = QGuiApplication.primaryScreen()
         assert screen is not None
-        context = make_test_context(FakeKeyboardBackend(), activate_behaviors=False)
+        context = make_test_context(FakeKeyboardBackend())
 
         with patch("axidev_osk.hot_corner.controller.configure_hot_corner_overlay", return_value=FakeOverlay()):
             controller = HotCornerWindowToggleController(context.dispatcher, corners=frozenset({"top_left"}))

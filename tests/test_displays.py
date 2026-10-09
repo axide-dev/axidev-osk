@@ -11,7 +11,7 @@ from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.runtime.event_handlers import route_display_configuration_changed
 from axidev_osk.runtime.events import (
     DISPLAY_CONFIGURATION_CHANGED,
-    DisplayConfigurationChangedArguments,
+    NoEventArguments,
     display_configuration_changed,
     register_builtin_events,
 )
@@ -66,7 +66,7 @@ class DisplayRecoveryTests(unittest.TestCase):
                 app.primaryScreenChanged.emit(app.outputs[0])
                 self.assertEqual(events, [])
                 self.app.processEvents()
-                self.assertEqual(events, [DisplayConfigurationChangedArguments()])
+                self.assertEqual(events, [NoEventArguments()])
 
                 events.clear()
                 removed.geometryChanged.emit()
@@ -77,7 +77,7 @@ class DisplayRecoveryTests(unittest.TestCase):
                 app.outputs.append(replacement)
                 app.screenAdded.emit(replacement)
                 self.app.processEvents()
-                self.assertEqual(events, [DisplayConfigurationChangedArguments()])
+                self.assertEqual(events, [NoEventArguments()])
                 events.clear()
                 replacement.geometryChanged.emit()
                 service.stop()
@@ -91,11 +91,18 @@ class DisplayRecoveryTests(unittest.TestCase):
                 service.stop()
 
     def test_runtime_refreshes_existing_windows_and_services_without_building_windows(self) -> None:
-        context = SimpleNamespace(config=SimpleNamespace(windows=[]))
-        manager = WindowManager(context)
         keyboard = Mock()
         other_window = Mock()
-        manager._windows = {"keyboard": keyboard, "other": other_window}
+        unbuilt = Mock()
+        manager = WindowManager(
+            {
+                "keyboard": lambda parent: keyboard,
+                "other": lambda parent: other_window,
+                "unbuilt": unbuilt,
+            }
+        )
+        manager.get_or_create("keyboard")
+        manager.get_or_create("other")
         hot_corners = Mock()
         services = ServiceRegistry()
         services.register("hot_corner", hot_corners)
@@ -106,10 +113,10 @@ class DisplayRecoveryTests(unittest.TestCase):
             DISPLAY_CONFIGURATION_CHANGED,
             lambda event: route_display_configuration_changed(event, runtime),
         )
-        with patch("axidev_osk.runtime.window_manager.build_window") as build:
-            dispatcher.dispatch_event(display_configuration_changed())
-        build.assert_not_called()
+        dispatcher.dispatch_event(display_configuration_changed())
+        unbuilt.assert_not_called()
         keyboard.refresh_screen_configuration.assert_called_once_with()
         other_window.refresh_screen_configuration.assert_called_once_with()
         hot_corners.refresh_screen_configuration.assert_called_once_with()
         self.assertIs(manager.get("keyboard"), keyboard)
+        self.assertIsNone(manager.get("unbuilt"))

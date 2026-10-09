@@ -1,9 +1,9 @@
-Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode.
+Written by inayayousfi, typed by gpt-5.6-sol running in OpenCode and by Claude Opus 5.5 running in Claude Code.
 Every call here is inayayousfi's, and no agent acted on its own.
 
 # AGENTS.md
 
-This file defines the architectural guardrails for humans and coding agents working in this repository.
+This file explains how Axidev OSK is built and how to extend it. It is written for humans and coding agents working in this repository.
 
 ## Active Work
 
@@ -11,168 +11,115 @@ The runtime is being purified into an engine of building blocks plus Python defa
 
 ## Intent
 
-Axidev OSK should evolve into a modular composition system for on-screen input surfaces.
+Axidev OSK is an engine for on-screen input surfaces. The keyboard you see when you start it is not built into the engine. It is the default profile, an ordinary configuration that happens to describe a US ISO keyboard. Anything a profile can express with the engine's building blocks should be possible without touching Python: other layouts, several windows, keys that do something other than type, small tools, odd experiments.
 
-The current app is a keyboard overlay, but that is only the first concrete surface. The architecture must stay flexible enough to support:
+Profiles are written in Python today, inside `src/axidev_osk/python_defaults/`. They will be written in Lua later. The engine does not care which language produced a profile, so nothing in it may assume Python.
 
-- multiple windows
-- multiple layouts
-- reusable grids
-- reusable buttons and controls
-- centralized application/process orchestration
-- future Lua-driven configuration
-- queue-driven runtime coordination
+## The Three Layers
 
-The Lua configuration layer is not implemented yet. That does not reduce its importance as a design constraint.
+The engine is everything under `src/axidev_osk/` except `python_defaults/`. It owns windows, widgets, the message queue, central state, platform integration, keyboard output, and process lifecycle. It knows no layout, no key behavior, and no profile policy.
 
-## Non-Negotiable Architecture Rules
+The standard library, `python_defaults/osk/std/`, holds keyboard conventions built only from engine building blocks: letter keys whose legend follows Shift and Caps Lock, latching modifiers, lock keys lit from the system, the Ghost button, window toggles, prompt windows. It is ordinary profile code that ships with the engine.
 
-1. Treat everything as a reusable component.
-2. Do not hardcode the assumption that the app will always have one window or one layout.
-3. Keep layout definition separate from widget construction.
-4. Keep widget construction separate from process orchestration and backend/input logic.
-5. Prefer composition through data and registries over special-case window subclasses.
-6. New APIs should be designed so a future Lua config can describe and assemble them.
-7. Runtime subsystems should communicate through the central event/action queue, not direct cross-subsystem calls.
-8. Durable application state belongs to the main process/runtime state store, not individual widgets, components, or Lua globals.
-9. Services, UI widgets, backend adapters, timers, and platform integrations must not call window managers, widgets, backends, Lua callbacks, or other subsystems directly when a runtime event or action can represent the interaction.
+A profile is a root config map. The default one, `python_defaults/default_profile.py`, rebuilds the bundled keyboard with the standard library. It is also the parity target for the Lua port: `tests/test_default_profile.py` checks it against measurements taken from the original built-in keyboard.
 
-## Mental Model
+When you add something, ask whether a profile author should be able to change it. If yes, it belongs in a profile or in the standard library, not in the engine.
 
-- Buttons are components.
-- Grids are components that place buttons or other controls.
-- Windows are components/surfaces that host one or more grids.
-- One main process coordinates windows, services, state, queues, and future config loading.
-- UI, backend, Lua, timers, and app controls are event and action producers/consumers connected through the queue.
+## Profiles Are Data Plus Functions
 
-This means the current `MainWindow` is an implementation detail, not the final shape of the application.
+A root config looks like this:
 
-## Desired Separation Of Concerns
+```python
+osk.config(
+    active_profile="default",
+    profiles={
+        "default": osk.profile(
+            state={"cow_text": ""},
+            theme={"qss": "..."},
+            windows=[osk.window(id="pad", title="Pad", content=osk.grid(id="keys", children=[...]))],
+            attachments=[osk.dwell(id="pad-dwell", window="pad")],
+            on={"hot_corner.triggered": on_corner},
+        )
+    },
+)
+```
 
-When adding or refactoring code, keep these boundaries clear:
+Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error.
 
-- `models/`-style concerns:
-  Structured data definitions for keys, grids, surfaces, layout metadata, and future config-backed descriptions.
-- `components/`-style concerns:
-  Reusable visual and interaction primitives. These should not own global application policy.
-- `application/`-style concerns:
-  Window orchestration, overlay behavior, lifecycle coordination, environment/platform integration.
-- backend/service concerns:
-  Keyboard emission, config loading, registries, state synchronization, and future Lua integration.
-- runtime/orchestration concerns:
-  Event queue ownership, action routing, callback scheduling, state store updates, and subsystem boundaries.
+Two kinds of function appear in a profile.
 
-## Visual And Behavior Configuration
+A binding is `fn(state) -> value`, given for a node property such as `label` or `latched`. The runtime records which state paths the binding read and re-runs it only when one of them changes, then applies the new value to the widget.
 
-Visual config describes what a component looks like and where it appears. It may contain labels, display variants, geometry, component kinds, and stable IDs. It must not contain backend keys, runtime actions, latch policy, callbacks, or durable interaction state.
+A callback is `fn(ctx, event) -> [actions]`, given for a node event (`on_press`, `on_release`) or in the profile's `on` table. It receives `ctx.state`, a read-only view of state, and the event as plain data. It returns actions as plain maps, for example `osk.window.show("pad")`. It never touches widgets, services, or backends directly. A callback that raises produces `callback.failed` and the queue continues.
 
-Behavior config is separate and belongs to the root application config. Each interactive key or generic button must have exactly one `BehaviorBinding` addressed by its full `SourcePath`. Loading must fail before window construction when a target is missing, duplicated, unresolved, attached to a non-interactive node, or uses an unknown behavior or hook kind.
+Functions are stored in a registry, and queue messages only ever carry their IDs.
 
-Components emit only raw interactions such as `component.pressed` and `component.released`. They render complete state snapshots from the central runtime store. Components must not decide keyboard policy, resolve prompt results, call backend services, or keep durable latch state.
+## Messages And The Queue
 
-Behavior handlers and hooks return queue messages. Blocking before-hooks may cancel or replace default behavior. Later before-hooks still run, and the last cancel or replace decision wins. After-hooks may extend completed behavior but cannot undo it.
+Everything that crosses a subsystem boundary goes through one first-in, first-out queue owned by `runtime/dispatcher.py`. An event reports something that happened (`input.key`, `button.pressed`, `hot_corner.triggered`). An action requests an effect (`keyboard.down`, `window.show`, `state.set`). Both carry a lowercase dot-separated name and native data only, never Qt objects, backend objects, callables, or dataclass instances.
 
-Keyboard behavior must declare an explicit output key and interaction mode. The keyboard service owns backend lifecycle, output registration, backend observations, and active press handles. It does not own visual data, latch policy, or durable component state.
+Every name is registered with a decoder before use. Built-in messages also have typed constructors so pyright checks call sites. Handlers return follow-up messages, which the dispatcher appends after the current one. A handler must not call another subsystem directly when a message can express the request.
 
-A `SourcePath` contains ordered app, profile, window, surface, component, layout, grid, and child-component segments as applicable. Queue messages carry the path as native data. Runtime state uses a collision-free encoding of the full path.
+The dispatcher only drains on the thread that created it, which is the Qt thread in the app. Producers on other threads, such as the keyboard listener, can dispatch freely: their messages wait in a locked inbox until `QtDispatcherWake` schedules a drain on the Qt thread. Handlers therefore never run on producer threads.
 
-## Preferred Direction For New Work
+An unknown action, invalid arguments, or a failing action handler is logged and produces `action.failed` with the action name, arguments, stage, exception type, and message. A failing event handler is logged and the remaining handlers for that event are skipped. The dispatcher warns every 10,000 messages processed in one drain but does not stop, so an action that keeps producing work can keep the UI busy.
 
-- Prefer data-driven builders over handwritten widget trees.
-- Prefer generic containers over layout-specific logic inside window classes.
-- Prefer registries/factories over `if` ladders tied to one known surface.
-- Prefer interfaces that allow multiple instances of the same window/surface type.
-- Prefer names that describe reusable concepts like `surface`, `grid`, `panel`, `component`, or `controller` when accurate.
-- Prefer event/action messages over direct calls between UI, backend, Lua, and application orchestration.
-- Treat runtime events and actions as the default integration boundary between subsystems; direct calls are acceptable only inside one subsystem's own implementation or when adapting an event/action in the main runtime.
-- Prefer main-owned state updates that can be reset, replayed, logged, and cleaned up during config reloads or profile switches.
+Where messages are defined:
+
+- `runtime/events.py` and `runtime/actions.py`: engine lifecycle, windows, hot corners, displays, drag, lock-screen panel, `app.quit`.
+- `runtime/engine_messages.py`: keyboard effects and observations, processes, logging, quit requests, permission setup.
+- `runtime/profile_runtime.py`: `state.set`, `state.changed`, `callback.failed`.
+- `nodes/kinds.py`: node events such as `button.pressed`.
+- `attachments/runtime.py`: `dwell.set_enabled`.
+
+## State
+
+Durable state lives in one tree, `runtime/state.py`, owned by the runtime. Profiles read it through views (`s.shift`, `s.input.keys.A`, `s["input"]["keys"]["."]` for names containing dots) and change it only with `state.set`. A missing value reads as `None`, the way Lua reads `nil`, and setting a value to `None` removes it. Paths are dot-separated strings or lists of segments when a segment comes from a name that may contain a dot.
+
+Some roots are written by the engine from observations and are read-only to profiles: `input.keys.<key>`, `input.locks.capslock` and `numlock`, `keyboard.ready` and `keyboard.status`, `windows.<id>.visible` and `minimized`, `dwell.<id>.enabled`. The standard library keeps its own state under `std`. Everything else belongs to the profile, and the profile's `state` map gives its starting values.
+
+Widgets render state; they are never its source of truth. Only purely visual, momentary details stay local to Qt, such as a button's pressed look while the mouse is down.
+
+## Building Blocks
+
+Node kinds are the curated widgets a profile composes: `window` (top level), `grid`, `box`, `stack`, `button`, `label`, `spacer`. Each kind declares its bindable properties, its callback fields and the events they map to, how its options decode, how it builds a widget, and how a property value is applied. Every built widget carries `componentType` and `componentId` properties, and profile style hooks (`object_name`, `classes`, `properties`, `qss`) are applied to it, so QSS can target any of them. Buttons never take keyboard focus, because an on-screen keyboard must not steal typing from the target app.
+
+Attachments are Python-owned features that run their own loop and are attached to a target by reference: `dwell` and `pointer_locator` on a window, `hot_corners` for the screen, `secure_input_panel` naming the window shown on the Plasma lock screen. A profile sets their options and talks to them through actions, events, and observed state. They do not call profile functions per pointer movement.
+
+Engine effects include `keyboard.down/up/tap/type_text`, window actions (`show`, `hide`, `close`, `move_by`, `set_opacity`, `block_input`, `unblock_input`), `dwell.set_enabled`, `state.set`, `process.spawn` with an argument list (never a shell string), `log.info/warn/error`, `app.quit`, and `linux.open_permission_setup`.
+
+Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other quit requests become `app.quit_requested` when the profile handles it), the lock-screen supervisor protocol, display recovery, and the background lane where spawned programs report `process.exited`.
+
+## How To Add Things
+
+A node kind. Write its build and apply functions and register a `NodeKind` in `nodes/kinds.py` (or a new module called from `register_builtin_nodes`). Declare bindable properties with `PropertySpec`, map callback fields to event names, and decode options with `ConfigReader`, which rejects unknown keys for you. The builder emits events through `builder.emit(event_name, node.id)` and never decides what a press means. Add a matching builder function in `python_defaults/osk/__init__.py`, then a test next to `tests/test_nodes.py`.
+
+An attachment. Add its options record and decoder in `attachments/__init__.py` and register it in `register_builtin_attachments`. If it acts on a window, extend `WindowAttachments` and install it in `build_profile_window`. If it owns state, write it as observed state under its own root and expose an action to change it, as dwell does. Validate its references in `AttachmentRuntime.start`. Add the `osk` builder and a test in `tests/test_attachments.py`.
+
+An action or event. Pick a lowercase dot-separated name, write an arguments record, a decoder, and a typed constructor, and register the name where the owning subsystem registers its messages. Add the `osk` action builder if profiles should send it. An event that reports an observation profiles should read later also writes runtime-owned state, and that handler is installed before profiles start so callbacks see current state.
+
+A standard-library helper. Write it in `python_defaults/osk/std/` using only `osk` builders and actions. Take an `opts` map and merge it last with `osk.merge`, so any single field can be overridden. Keep library state under `std`. Test it in `tests/test_std_library.py`.
+
+A profile change. Edit `python_defaults/default_profile.py`, or build a new root config with the same helpers. If you change the default keyboard on purpose, update the expected data in `tests/test_default_profile.py` in the same change and say so in the PR.
 
 ## Avoid
 
-- baking the US ISO keyboard into application structure
-- tying state ownership directly to one window instance
-- tying durable state ownership directly to one component, widget, layout instance, or Lua closure
-- embedding future config assumptions into ad hoc local constants
-- writing new code that makes multi-window composition harder
-- mixing backend emission logic into button rendering code
-- letting UI widgets directly invoke backend services or Lua callbacks when an event can be routed through the queue instead
-- letting services directly invoke window managers, windows, widgets, backend adapters, or other services instead of emitting a runtime event or action
-- adding hidden shared runtime state to reusable layouts; reused layouts should instantiate fresh runtime state
+- Layout, legend, latch, or prompt logic anywhere outside `python_defaults/` or a profile.
+- Services, widgets, or backends calling each other directly when a message can carry the request.
+- Callables, Qt objects, or dataclass instances inside queue messages or profile state.
+- Engine code that assumes one window, one keyboard, or one profile.
+- Shared runtime state hidden in a reusable widget, layout, or closure.
+- Compatibility shims for removed APIs; update the callers instead.
 
-## Lua Readiness
+## Checks
 
-The future Lua layer should be able to:
+Run these before pushing:
 
-- return one root config object with any number of profiles
-- declare windows/surfaces
-- choose which grids/components appear in each surface
-- define layouts and instantiate fresh layout instances inside windows
-- control placement, behavior, and composition without rewriting Python UI code
-- attach inline Lua callbacks to component interactions and state-machine events
-- cancel, replace, or extend default component behavior from callbacks
-- load bundled configs and user configs through the same parser/runtime path
-
-To preserve that path, keep Python-side structures serializable, declarative where possible, and stable enough to map from config later.
-
-Bundled layouts such as the default US ISO keyboard should eventually be ordinary Lua files. They should act as examples and parity tests for the Lua config system, not as hardcoded Python layout knowledge.
-
-## Queue And State Architecture
-
-The runtime uses one synchronous first-in, first-out queue for events and actions. Producers add messages to the queue. The dispatcher drains them in order on the thread that owns it, which is the Qt thread in the application. A message sent from another thread, such as a backend listener, waits in a locked inbox until the owner thread drains it, so handlers never run on producer threads. A handler can return more events or actions, and the dispatcher appends those messages after the handler finishes.
-
-### Message Contract
-
-An event reports something that happened:
-
-RuntimeEvent(event="component.pressed", arguments={...})
-
-An action requests an effect:
-
-RuntimeAction(action="window.show", arguments={...})
-
-The name must be lowercase and dot-separated. The arguments must contain only native data that Lua and Python can exchange without live object references: null, booleans, finite numbers, strings, lists, and string-keyed maps.
-
-Queue messages must not contain Qt objects, backend objects, Python callbacks, Lua functions, dataclass instances, or other process-local values. Use stable IDs and native data. A subsystem can resolve an ID to an object only inside the registered handler that owns that subsystem.
-
-Configured behavior uses the same RuntimeAction shape as queued behavior. Keys, buttons, menu items, hot corners, timers, profile controls, and future Lua callbacks must not introduce parallel action formats.
-
-### Registration And Typing
-
-Every event and action name must be registered before use. A registration supplies an argument decoder and, for an action, its handler. Built-in definitions also provide typed argument records and typed constructors so Pyright checks repository-owned call sites. Lua-defined names remain open-ended and receive runtime checks from their registered decoders.
-
-Duplicate registration fails by default. An explicit override replaces the whole definition, including its decoder and handler. Code that overrides a built-in name is responsible for any incompatibility with existing producers.
-
-Handlers return an ordered list of follow-up RuntimeEvent and RuntimeAction messages. They must not call another subsystem or recursively dispatch messages. The main runtime may adapt a registered action into a concrete call on the window manager, state store, backend, or another runtime-owned service.
-
-### Failures And Ordering
-
-An unknown action, invalid action arguments, or an action-handler exception is logged and produces action.failed. The failure event contains the action name, original arguments, failure stage, exception type, and message.
-
-An unknown event, invalid event arguments, or an event-handler exception is logged. The dispatcher skips the remaining handlers for that event and continues with the queue. It does not emit a second failure event, which avoids recursive failure handling.
-
-The dispatcher warns after every 10,000 messages processed without returning. It does not stop the drain. Custom actions are allowed to produce unbounded work, so a cyclic action can keep the UI thread busy and produce unlimited logs.
-
-### Lua Boundary
-
-Lua tables convert recursively to the native argument map. JSON text is not the queue format. Lua-defined actions register names, decoders, and callback references through the future Lua actor. The queue stores the reference and native arguments, never the Lua function itself.
-
-Lua callbacks are deferred by default. They receive event or action context and return events or actions to the queue. They do not mutate widgets, backend objects, or durable state directly. Cancellation, replacement, and extension of default behavior must be represented by explicit queue data rather than direct cross-subsystem calls.
-
-### State Ownership
-
-Durable state remains owned by the main runtime state store and is namespaced by app, profile, window, layout, and component identity. Components render state snapshots and emit events. Profile switches, config reloads, and runtime resets must be able to discard all non-preserved state without depending on widget or Lua closure lifetime.
-
-User configs should be loaded from standard locations such as XDG_CONFIG_HOME or ~/.config on Unix-like systems, and the usual per-user config location on Windows. Bundled configs should be fallback defaults and examples when user config is missing or invalid.
-
-For more detailed Lua config direction, refer to GitHub issue #8: Define Lua config architecture.
-
-## Practical Rule For Contributors
-
-When making a change, ask:
-
-"Does this make the app more like a reusable composition system, or more like a single hardcoded keyboard window?"
-
-If it pushes toward the second outcome, redesign it before merging.
+```text
+QT_QPA_PLATFORM=offscreen PYTHONPATH=src python -m unittest discover -s tests
+python -m flake8 --select=F,E9,W6 src
+python -m pyright
+```
 
 ## Contribution Workflow
 
@@ -183,7 +130,7 @@ The project is already in a reasonably good state, so contributors and agents sh
 PR guidance:
 
 - keep each PR focused on one problem or one cohesive improvement
-- call out architectural impact explicitly when changing windows, grids, layout models, or orchestration
+- call out architectural impact explicitly when changing the engine, node kinds, attachments, messages, or the default profile
 - avoid bundling unrelated cleanup into feature work
 - note platform-specific behavior changes clearly when Windows, X11, or Wayland behavior is affected
 

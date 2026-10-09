@@ -1,77 +1,72 @@
-"""Application runtime orchestration for Axidev OSK."""
+"""Application runtime: run one profile on the engine.
+
+The runtime owns process lifecycle, services, windows, and the queue. Every
+decision about what appears and how controls behave comes from the active
+profile.
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from collections.abc import Mapping
+from typing import Any
 
-from PySide6.QtCore import QEventLoop
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
-from ..messages import MessageResult
-from ..application.linux_permissions import LinuxPermissionController
+from ..application.linux_permissions import open_permission_setup_terminal
 from ..application.quit_controller import ApplicationQuitController
-from ..components import register_components
-from ..config.defaults import build_default_app_config
-from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
+from ..attachments.runtime import AttachmentRuntime
+from ..config.profile import ProfileConfig
+from ..hot_corner.service import HotCornerService
+from ..messages import MessageResult
+from ..python_defaults.default_profile import build_default_config
 from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..services.process import ProcessService
 from ..styles.theme import apply_theme
-from ..windows.surface import register_surfaces
+from ..windows.builder import RuntimeWindow, build_profile_window
 from .context import Context
-from .engine import build_engine
-from .behaviors import BehaviorRegistry, register_builtin_behaviors
 from .dispatcher import Dispatcher
-from .event_handlers import (
-    register_context_action_handlers,
-    register_event_handlers,
-    route_hot_corner_triggered,
-)
+from .engine import build_engine
+from .engine_messages import APP_QUIT_REQUESTED, app_quit_requested, linux_permission_setup_opened
+from .event_handlers import register_event_handlers
 from .events import (
-    HotCornerTriggeredArguments,
-    WindowCloseRequestedArguments,
+    WINDOW_CLOSE_REQUESTED,
+    WindowEventArguments,
     register_builtin_events,
     secure_input_panel_prepared,
     secure_input_panel_released,
 )
-from .prompt import PromptResolutionWaiter
 from .qt_wake import QtDispatcherWake
-from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
-from .state_store import StateStore
-from .window_manager import WindowManager
+from .registries import EventHandlerRegistry, ServiceRegistry
+from .window_manager import WindowFactory, WindowManager
 
 _logger = logging.getLogger(__name__)
 
 
 class ApplicationRuntime:
-    """Owns QApplication-facing lifecycle, services, state, and windows."""
+    """Own QApplication-facing lifecycle, services, the queue, and profile windows."""
 
     def __init__(
         self,
         app: QApplication,
         *,
-        config: AppConfig | None = None,
+        root_config: Mapping[str, Any] | None = None,
         services: ServiceRegistry | None = None,
         event_handlers: EventHandlerRegistry | None = None,
         confirm_quit: bool = True,
         show_startup_windows: bool = True,
     ) -> None:
-        """Create the main runtime.
+        """Create the runtime for one root config.
 
         Args:
             app: Existing QApplication.
-            config: Optional declarative app config.
+            root_config: Root config map; the bundled default profile when omitted.
             services: Optional pre-populated service registry for tests.
-            event_handlers: Optional pre-populated handler registry for tests.
-            confirm_quit: Whether shutdown requests require confirmation.
-            show_startup_windows: Whether to create configured startup windows immediately.
-
-        Returns:
-            None.
-
-        Side effects:
-            Creates services, registries, dispatcher, and controllers.
+            event_handlers: Optional pre-populated runtime handler registry for tests.
+            confirm_quit: Whether quit requests ask the profile before shutting down.
+            show_startup_windows: Whether to show ``show_on_start`` windows immediately.
         """
 
         self._app = app
@@ -79,7 +74,6 @@ class ApplicationRuntime:
         self._active_pointer_drag_window_id: str | None = None
         self._pointer_drag_remainder = (0.0, 0.0)
         self._secure_input_panel_prepared = False
-        self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
         self._dispatcher_wake = QtDispatcherWake(self._dispatcher, parent=app)
         register_builtin_events(self._dispatcher)
@@ -88,109 +82,105 @@ class ApplicationRuntime:
             register_services(self._services, parent=app)
         self._keyboard = self._services.get("keyboard", KeyboardService)
         self._processes = ProcessService(parent=app)
-        self._state = StateStore()
-        self._components = ComponentRegistry()
-        self._surfaces = SurfaceRegistry()
-        self._behaviors = BehaviorRegistry()
-        register_builtin_behaviors(self._behaviors)
-        self._behaviors.load(self._config)
-        self._event_handlers = event_handlers or EventHandlerRegistry()
-        if event_handlers is None:
-            register_event_handlers(self._event_handlers)
-        register_components(self._components)
-        register_surfaces(self._surfaces)
-        self.context = Context(
-            config=self._config,
-            dispatcher=self._dispatcher,
-            keyboard=self._keyboard,
-            state=self._state,
-            components=self._components,
-            surfaces=self._surfaces,
-            behaviors=self._behaviors,
-            engine=build_engine(self._dispatcher, keyboard=self._keyboard, processes=self._processes),
+        engine = build_engine(self._dispatcher, keyboard=self._keyboard, processes=self._processes)
+        self.context = Context(dispatcher=self._dispatcher, keyboard=self._keyboard, engine=engine)
+        self._profile: ProfileConfig = engine.decoder().decode_root(
+            root_config if root_config is not None else build_default_config()
+        ).profile
+        self._window_manager = WindowManager()
+        hot_corners = self._services.find("hot_corner")
+        self._attachments = AttachmentRuntime(
+            self._dispatcher,
+            engine.profile,
+            window_lookup=self._window_manager.get,
+            hot_corners=hot_corners if isinstance(hot_corners, HotCornerService) else None,
         )
-        context_handlers = EventHandlerRegistry()
-        register_context_action_handlers(context_handlers)
-        context_handlers.install(self._dispatcher, self.context)
-        self._behaviors.bind_context(self.context)
-        self._window_manager = WindowManager(self.context)
-        self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
             app,
-            prompt=self._show_quit_prompt if confirm_quit else lambda _parent: True,
+            ask_to_quit=self._ask_to_quit if confirm_quit else None,
             parent=app,
         )
-        self._linux_permissions = LinuxPermissionController(
-            config=self._config,
-            dispatcher=self._dispatcher,
-            keyboard=self._keyboard,
-            window_manager=self._window_manager,
-            build_prompt_window_config=self._build_prompt_window_config,
+        self._window_manager.set_factories(
+            {window.id: self._window_factory(window.id) for window in self._profile.windows}
         )
+        handlers = event_handlers or EventHandlerRegistry()
+        if event_handlers is None:
+            register_event_handlers(handlers)
+        handlers.install(self._dispatcher, self)
+        if WINDOW_CLOSE_REQUESTED not in self._profile.on:
+            self._dispatcher.add_event_handler(WINDOW_CLOSE_REQUESTED, self._default_close_requested)
+
+    @property
+    def profile(self) -> ProfileConfig:
+        return self._profile
 
     def start(self) -> int:
-        """Start services, windows, hot corner, and the Qt event loop.
+        """Start the profile, services, and startup windows, then run the Qt event loop."""
 
-        Args:
-            None.
-
-        Returns:
-            QApplication exit code.
-
-        Side effects:
-            Initializes keyboard output and shows startup windows.
-        """
-
-        apply_theme(self._app)
+        apply_theme(self._app, qss=self._profile.theme.qss)
+        self.context.engine.profile.start(self._profile)
+        self._attachments.start(self._profile)
         self._processes.start(self.context)
         self._quit_controller.register_quit_callback(self._processes.stop)
-        autostart_services = tuple(self._services.autostart_services())
-        for service in autostart_services:
+        for service in self._services.autostart_services():
             service.start(self.context)
-        if any(service is self._keyboard for service in autostart_services):
-            self._behaviors.activate()
         if self._show_startup_windows:
-            for window_id in self._config.startup_window_ids:
-                window = self._window_manager.show(window_id)
-                self._quit_controller.register_window(window)
+            for window in self._profile.windows:
+                if window.show_on_start:
+                    self._window_manager.show(window.id)
         for service in self._services.services():
             self._quit_controller.register_quit_callback(service.stop)
         self._quit_controller.install_signal_handlers()
-        self._linux_permissions.prompt_if_needed()
+        if self._keyboard in self._services.autostart_services():
+            QTimer.singleShot(0, self._keyboard.publish_status)
         return self._app.exec()
 
-    def _handle_window_close_requested(self, event: WindowCloseRequestedArguments) -> MessageResult:
-        """Route close-request events to the quit controller.
+    def _window_factory(self, window_id: str) -> WindowFactory:
+        window_config = self._profile.window(window_id)
 
-        Args:
-            event: Any runtime event; non-matching events are ignored.
+        def build(parent: QWidget | None) -> RuntimeWindow:
+            window = build_profile_window(
+                window_config,
+                self.context,
+                attachments=self._attachments.for_window(window_id),
+                parent=parent,
+            )
+            self._quit_controller.register_window(window)
+            return window
 
-        Returns:
-            None.
+        return build
 
-        Side effects:
-            Triggers ``ApplicationQuitController.request_quit`` when the
-            event is a ``WindowCloseRequested``.
-        """
+    def _ask_to_quit(self) -> None:
+        """Let the profile confirm a quit, or quit when it has no opinion."""
 
+        if APP_QUIT_REQUESTED in self._profile.on:
+            self._dispatcher.dispatch_event(app_quit_requested("request"))
+        else:
+            self._quit_controller.shutdown()
+
+    def _default_close_requested(self, event: WindowEventArguments) -> MessageResult:
         del event
         self._quit_controller.request_quit()
         return []
 
-    def _handle_hot_corner_triggered(self, event: HotCornerTriggeredArguments) -> MessageResult:
-        """Map hot-corner events to managed window visibility actions."""
+    def _quit(self, exit_code: int) -> MessageResult:
+        self._quit_controller.shutdown(exit_code)
+        return []
 
-        return route_hot_corner_triggered(event, self)
+    def _open_permission_setup(self) -> MessageResult:
+        return [linux_permission_setup_opened(open_permission_setup_terminal())]
 
     def _prepare_secure_input_panel(self) -> MessageResult:
-        """Create the keyboard window and backend requested by the lock-screen button."""
+        """Start keyboard output and show the profile's lock-screen window."""
 
         if self._secure_input_panel_prepared:
             return [secure_input_panel_prepared()]
-        window_id = self._config.keyboard_window_id
+        window_id = self._attachments.secure_input_panel_window
+        if window_id is None:
+            raise RuntimeError("The active profile has no secure_input_panel attachment")
         try:
             self._keyboard.start(self.context)
-            self._behaviors.activate()
+            self._keyboard.publish_status()
             window = self._window_manager.show(window_id)
             window.set_close_enabled(False)
         except Exception:
@@ -211,11 +201,13 @@ class ApplicationRuntime:
 
         if not self._secure_input_panel_prepared:
             return [secure_input_panel_released()]
+        window_id = self._attachments.secure_input_panel_window
         try:
             self._keyboard.reset_state()
         finally:
             try:
-                self._window_manager.destroy(self._config.keyboard_window_id)
+                if window_id is not None:
+                    self._window_manager.destroy(window_id)
             finally:
                 self._secure_input_panel_prepared = False
         return [secure_input_panel_released()]
@@ -242,35 +234,3 @@ class ApplicationRuntime:
                 if end_drag is not None:
                     end_drag()
 
-    def _show_quit_prompt(self, parent: QWidget | None) -> bool:
-        prompt_config = self._config.quit_prompt
-        prompt_window = self._window_manager.create_transient(
-            self._build_prompt_window_config(prompt_config),
-            parent=parent,
-        )
-        event_loop = QEventLoop(prompt_window)
-        waiter = PromptResolutionWaiter(self._dispatcher, prompt_config.id, event_loop, default="rejected")
-        waiter.start()
-        prompt_window.show()
-        event_loop.exec()
-        waiter.stop()
-        prompt_window.close()
-        return waiter.result == "accepted"
-
-    def _build_prompt_window_config(self, prompt: PromptConfig) -> WindowConfig:
-        keyboard_window = next(
-            window for window in self._config.windows if window.id == self._config.keyboard_window_id
-        )
-        return WindowConfig(
-            id=prompt.window_id,
-            title=prompt.title,
-            surface=SurfaceConfig(
-                id=prompt.surface_id,
-                components=(prompt,),
-                margins=prompt.margins,
-                spacing=prompt.spacing,
-                minimum_size=prompt.minimum_size,
-            ),
-            overlay=replace(keyboard_window.overlay, config=keyboard_window.overlay.config),
-            chrome=ChromeConfig(enabled=False),
-        )

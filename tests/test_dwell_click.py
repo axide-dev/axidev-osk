@@ -8,8 +8,10 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.attachments import DwellOptions
 from axidev_osk.config.models import DwellClickConfig
+from axidev_osk.python_defaults.default_profile import build_default_config
+from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.dwell_click import DwellClickController
 
 
@@ -18,6 +20,12 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+class FakeKeyboardBackend:
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
 
 
 class _MouseEventRecorder(QWidget):
@@ -42,7 +50,13 @@ class _MouseEventRecorder(QWidget):
 
 class DwellClickConfigTests(unittest.TestCase):
     def test_default_keyboard_starts_with_dwell_click_disabled(self) -> None:
-        config = build_default_app_config().windows[0].dwell_click
+        engine = make_test_context(FakeKeyboardBackend()).engine
+        profile = engine.decoder().decode_root(build_default_config()).profile
+        attachment = next(attachment for attachment in profile.attachments if attachment.id == "keyboard-dwell")
+        assert isinstance(attachment.options, DwellOptions)
+        self.assertEqual(attachment.kind, "dwell")
+        self.assertEqual(attachment.options.window, "keyboard")
+        config = attachment.options.settings
 
         self.assertFalse(config.enabled)
         self.assertEqual(config.delay_ms, 200)
@@ -108,10 +122,10 @@ class DwellClickControllerTests(unittest.TestCase):
         self.window = QWidget()
         self.window.setGeometry(100, 100, 240, 100)
         self.key = QPushButton("A", self.window)
-        self.key.setProperty("componentType", "key")
+        self.key.setProperty("componentType", "button")
         self.key.setGeometry(10, 10, 80, 80)
         self.other_key = QPushButton("B", self.window)
-        self.other_key.setProperty("componentType", "key")
+        self.other_key.setProperty("componentType", "button")
         self.other_key.setGeometry(110, 10, 80, 80)
         self.window.show()
         QApplication.processEvents()
@@ -462,9 +476,8 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertEqual(len(clicks), 2)
         self.assertFalse(self.controller.indicator.isVisible())
 
-    def test_activates_non_key_controls_in_the_same_window(self) -> None:
-        button = QPushButton("Not a key", self.window)
-        button.setProperty("componentType", "button")
+    def test_activates_controls_that_are_not_profile_nodes(self) -> None:
+        button = QPushButton("Plain", self.window)
         clicks: list[bool] = []
         button.clicked.connect(lambda: clicks.append(True))
         position = button.mapToGlobal(QPoint(1, 1))
@@ -557,7 +570,7 @@ class DwellClickControllerTests(unittest.TestCase):
     def test_does_not_activate_a_key_from_another_window(self) -> None:
         other_window = QWidget()
         other_key = QPushButton("Other", other_window)
-        other_key.setProperty("componentType", "key")
+        other_key.setProperty("componentType", "button")
         clicks: list[bool] = []
         other_key.clicked.connect(lambda: clicks.append(True))
         self.addCleanup(other_window.close)

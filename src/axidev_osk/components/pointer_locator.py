@@ -9,38 +9,10 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from ..config.models import ComponentConfig, PointerLocatorConfig
-from ..runtime.context import Context
-from ..runtime.registries import ComponentRegistry
-from ..runtime.source import SourcePath
+from ..config.models import PointerLocatorConfig
 
 _GRADIENT_SEGMENTS = 32
 _GAP_COLOR = QColor("#242424")
-
-
-def register(registry: ComponentRegistry) -> None:
-    """Register the pointer locator as a reusable background component."""
-
-    registry.register("pointer-locator", build_pointer_locator_component)
-
-
-def build_pointer_locator_component(
-    config: ComponentConfig,
-    context: Context,
-    *,
-    source_path: SourcePath,
-    host: QWidget | None = None,
-) -> QWidget:
-    """Build pointer feedback for a root surface background."""
-
-    del context, source_path
-    if not isinstance(config, PointerLocatorConfig):
-        raise TypeError(f"Expected PointerLocatorConfig, got {type(config).__name__}")
-    if host is None:
-        raise RuntimeError("Pointer locator components require a root surface host")
-
-    host.setProperty("pointerLocatorEnabled", True)
-    return PointerLocator(config, host)
 
 
 def install_pointer_locator(host: QWidget, settings: PointerLocatorConfig) -> QWidget:
@@ -267,7 +239,7 @@ class PointerLocator(QWidget):
         widgets = [
             widget
             for widget in self._host.findChildren(QWidget)
-            if widget.property("componentType") in {"button", "key"} and widget.isVisibleTo(self._host)
+            if widget.property("componentType") == "button" and widget.isVisibleTo(self._host)
         ]
         positioned = [
             (

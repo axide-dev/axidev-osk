@@ -9,9 +9,7 @@ from collections.abc import Callable, Mapping
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication, QWidget
 
-from ..config.models import WindowConfig
-from ..windows.builder import RuntimeWindow, build_window
-from .context import Context
+from ..windows.builder import RuntimeWindow
 
 _logger = logging.getLogger(__name__)
 
@@ -19,7 +17,7 @@ WindowFactory = Callable[[QWidget | None], RuntimeWindow]
 
 
 class _WindowInputBlocker(QObject):
-    """Swallow target-window mouse input except for one control component."""
+    """Swallow target-window mouse input except inside the allowed nodes."""
 
     _BLOCKED_EVENTS = {
         QEvent.Type.MouseButtonPress,
@@ -54,54 +52,31 @@ class _WindowInputBlocker(QObject):
 
 
 class WindowManager:
-    """Creates, stores, and controls runtime windows by ID."""
+    """Own live runtime windows keyed by profile window IDs.
 
-    def __init__(self, context: Context) -> None:
-        """Create a window manager.
+    Windows are built lazily by the factories the runtime provides for the
+    active profile.
+    """
 
-        Args:
-            context: Runtime context used to build windows.
-
-        Returns:
-            None.
-
-        Side effects:
-            None.
-        """
-
-        self._context = context
+    def __init__(self, factories: Mapping[str, WindowFactory] | None = None) -> None:
         self._windows: dict[str, RuntimeWindow] = {}
-        self._factories: dict[str, WindowFactory] = {
-            window.id: (lambda parent, config=window: build_window(config, context, parent=parent))
-            for window in context.config.windows
-        }
+        self._factories: dict[str, WindowFactory] = dict(factories or {})
         self._input_blockers: dict[str, _WindowInputBlocker] = {}
 
     def set_factories(self, factories: Mapping[str, WindowFactory]) -> None:
-        """Replace how windows are built, for example from a loaded profile."""
+        """Replace how windows are built, for example from a newly loaded profile."""
 
         self._factories = dict(factories)
 
     def get_or_create(self, window_id: str, *, parent: QWidget | None = None) -> RuntimeWindow:
-        """Return a live window, creating it from config if needed.
-
-        Args:
-            window_id: Deterministic window ID.
-            parent: Optional Qt parent used when creating the window.
-
-        Returns:
-            Live runtime window.
-
-        Side effects:
-            May build and store a new Qt window.
-        """
+        """Return a live window, building it from its factory if needed."""
 
         existing = self._windows.get(window_id)
         if existing is not None:
             return existing
         factory = self._factories.get(window_id)
         if factory is None:
-            raise ValueError(f"No window config registered for {window_id!r}")
+            raise ValueError(f"No window named {window_id!r} in the active profile")
         _logger.info("Building runtime window %s", window_id)
         window = factory(parent)
         self._windows[window_id] = window
@@ -112,39 +87,11 @@ class WindowManager:
 
         return self._windows.get(window_id)
 
-    def create_transient(self, config: WindowConfig, *, parent: QWidget | None = None) -> RuntimeWindow:
-        """Build a window that is not retained in the manager dict.
-
-        Args:
-            config: Window config to build.
-            parent: Optional Qt parent.
-
-        Returns:
-            Runtime window.
-
-        Side effects:
-            Builds Qt widgets.
-        """
-
-        _logger.info("Building transient runtime window %s with surface %s", config.id, config.surface.id)
-        return build_window(config, self._context, parent=parent)
-
     def show(self, window_id: str) -> RuntimeWindow:
-        """Show a managed window.
-
-        Args:
-            window_id: Deterministic window ID.
-
-        Returns:
-            Shown window.
-
-        Side effects:
-            Creates and shows the window if necessary.
-        """
+        """Show a window, restoring it from minimized state on Windows."""
 
         window = self.get_or_create(window_id)
         _logger.info("Showing runtime window %s", window_id)
-        self._restore_interaction(window_id, window)
         if sys.platform == "win32" and window.isMinimized():
             window.showNormal()
         else:
@@ -152,45 +99,10 @@ class WindowManager:
         return window
 
     def hide(self, window_id: str) -> None:
-        """Hide a managed window if it exists."""
-
         window = self._windows.get(window_id)
         if window is not None:
             _logger.info("Hiding runtime window %s", window_id)
             window.hide()
-
-    def is_visible(self, window_id: str) -> bool:
-        """Return whether a managed window currently exists and is visible."""
-
-        window = self._windows.get(window_id)
-        return window is not None and window.isVisible()
-
-    def is_minimized(self, window_id: str) -> bool:
-        """Return whether a managed Windows window is currently minimized."""
-
-        window = self._windows.get(window_id)
-        return sys.platform == "win32" and window is not None and window.isMinimized()
-
-    def is_opacity_reduced(self, window_id: str) -> bool:
-        """Return whether a managed window is in low-opacity input-blocking mode."""
-
-        return window_id in self._input_blockers
-
-    def toggle_opacity(self, window_id: str, *, component_id: str, opacity: float) -> None:
-        """Toggle low-opacity mode while preserving one recovery control."""
-
-        window = self.get_or_create(window_id)
-        if window_id in self._input_blockers:
-            self._restore_interaction(window_id, window)
-            return
-
-        app = QApplication.instance()
-        if app is None:
-            raise RuntimeError("Window opacity mode requires a QApplication")
-        blocker = _WindowInputBlocker(window, frozenset({component_id}))
-        app.installEventFilter(blocker)
-        self._input_blockers[window_id] = blocker
-        window.set_visual_opacity(opacity)
 
     def set_opacity(self, window_id: str, opacity: float) -> None:
         """Set one window's visible opacity, building the window if needed."""
@@ -217,32 +129,16 @@ class WindowManager:
         if blocker is not None and app is not None:
             app.removeEventFilter(blocker)
 
-    def set_dwell_enabled(self, window_id: str, enabled: bool) -> None:
-        """Set dwell activation on a managed window."""
-
-        self.get_or_create(window_id).set_dwell_enabled(enabled)
-
-    def _restore_interaction(self, window_id: str, window: RuntimeWindow) -> None:
-        """Restore configured opacity and remove any temporary input blocker."""
-
-        blocker = self._input_blockers.pop(window_id, None)
-        app = QApplication.instance()
-        if blocker is not None and app is not None:
-            app.removeEventFilter(blocker)
-        window.set_visual_opacity(window.configured_opacity)
-
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""
 
         window = self._windows.pop(window_id, None)
         if window is not None:
             _logger.info("Closing runtime window %s", window_id)
-            self._restore_interaction(window_id, window)
+            self.unblock_input(window_id)
             window.close()
 
     def move_by(self, window_id: str, dx: int, dy: int) -> None:
-        """Move an existing managed window by a relative amount."""
-
         window = self._windows.get(window_id)
         if window is not None:
             window.move_by(dx, dy)
@@ -253,14 +149,12 @@ class WindowManager:
         window = self._windows.pop(window_id, None)
         if window is not None:
             _logger.info("Destroying runtime window %s", window_id)
-            self._restore_interaction(window_id, window)
+            self.unblock_input(window_id)
             window.release_platform_resources()
             window.hide()
             window.deleteLater()
 
     def all_windows(self) -> list[RuntimeWindow]:
-        """Return all live managed windows."""
-
         return list(self._windows.values())
 
     def refresh_screen_configuration(self) -> None:

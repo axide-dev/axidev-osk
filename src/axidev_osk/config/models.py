@@ -1,16 +1,10 @@
-"""Serializable configuration DTOs for windows, surfaces, grids, and components."""
+"""Typed settings records for engine windows and attachments."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
-
-from ..messages import DataMap, RuntimeAction
-from ..models import KeyVisual, SpacerVisual
-from ..runtime.identity import validate_unique_ids
-from ..runtime.source import SourcePath
 
 
 class OverlayPlacement(str, Enum):
@@ -156,10 +150,10 @@ class DwellClickConfig:
 
 @dataclass(frozen=True, slots=True)
 class PointerLocatorConfig:
-    """Component-aware pointer feedback configured as a surface component.
+    """Pointer glow settings for one pointer_locator attachment.
 
     Attributes:
-        id: Deterministic component ID.
+        id: Attachment ID.
         radius_percent: Glow radius as a percentage of the surface's shorter side.
         maximum_opacity_percent: Glow opacity at the pointer position.
         radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
@@ -169,7 +163,6 @@ class PointerLocatorConfig:
     radius_percent: float
     maximum_opacity_percent: float
     radius_standard_deviations: float
-    kind: Literal["pointer-locator"] = "pointer-locator"
 
     def __post_init__(self) -> None:
         """Reject values that cannot define a visible glow."""
@@ -183,239 +176,8 @@ class PointerLocatorConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class KeyConfig:
-    """Declarative visual key component.
-
-    Attributes:
-        id: Deterministic component ID used by events, state, and Qt properties.
-        visual: Visible text and grid placement.
-    """
-
-    id: str
-    visual: KeyVisual
-    kind: Literal["key"] = "key"
-
-
-@dataclass(frozen=True, slots=True)
-class SpacerConfig:
-    """Declarative spacer component used to reserve grid cells.
-
-    Attributes:
-        id: Deterministic component ID used by validation and Qt properties.
-        visual: Spacer geometry stored in the same unit system as keys.
-    """
-
-    id: str
-    visual: SpacerVisual
-    kind: Literal["spacer"] = "spacer"
-
-
-@dataclass(frozen=True, slots=True)
-class ButtonConfig:
-    """Declarative push-button component for prompt actions.
-
-    Attributes:
-        id: Deterministic component ID used by events and Qt properties.
-        label: Visible text shown on the button.
-        object_name: Optional Qt object name for existing QSS/tests.
-        style_sheet: Optional local stylesheet for prompt buttons.
-    """
-
-    id: str
-    label: str
-    object_name: str | None = None
-    style_sheet: str | None = None
-    kind: Literal["button"] = "button"
-
-
-@dataclass(frozen=True, slots=True)
-class GridConfig:
-    """Declarative grid containing keys or other grid-positioned components.
-
-    Attributes:
-        id: Deterministic grid ID.
-        components: Components placed inside the grid.
-        nav_start_column: Sparse-column start for the navigation block in US ISO data.
-        body_row_count: Number of keyboard rows that should receive stretch.
-    """
-
-    id: str
-    components: tuple[KeyConfig | SpacerConfig, ...]
-    nav_start_column: int
-    body_row_count: int = 6
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the grid composition boundary."""
-
-        validate_unique_ids((component.id for component in self.components), scope=f"grid {self.id!r} components")
-
-
-@dataclass(frozen=True, slots=True)
-class LayoutConfig:
-    """Declarative layout composed from one or more grids.
-
-    Attributes:
-        id: Deterministic layout ID.
-        name: Stable layout name suitable for future config selection.
-        grids: Grid DTOs instantiated by component builders.
-    """
-
-    id: str
-    name: str
-    grids: tuple[GridConfig, ...]
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the layout composition boundary."""
-
-        validate_unique_ids((grid.id for grid in self.grids), scope=f"layout {self.id!r} grids")
-        validate_unique_ids(
-            (component.id for grid in self.grids for component in grid.components),
-            scope=f"layout {self.id!r} components",
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class PromptConfig:
-    """Declarative prompt component for confirmation windows.
-
-    Attributes:
-        id: Deterministic prompt component ID.
-        window_id: Deterministic transient window ID used when hosting this prompt.
-        surface_id: Deterministic transient surface ID used when hosting this prompt.
-        title: User-visible transient window title.
-        message: Primary prompt text.
-        buttons: Prompt action buttons.
-        prompt_glyph: Badge glyph displayed beside the message.
-        hint: Optional secondary explanatory copy.
-        danger: Whether the prompt should use danger styling.
-        margins: Qt layout margins in pixels ordered left, top, right, bottom.
-        spacing: Qt layout spacing in pixels.
-        minimum_size: Optional lower bound for startup size as ``(width, height)``.
-    """
-
-    id: str
-    window_id: str
-    surface_id: str
-    title: str
-    message: str
-    buttons: tuple[ButtonConfig, ...]
-    prompt_glyph: str = "!"
-    hint: str | None = None
-    danger: bool = False
-    margins: tuple[int, int, int, int] = (18, 18, 18, 16)
-    spacing: int = 14
-    minimum_size: tuple[int, int] = (460, 120)
-    kind: Literal["prompt"] = "prompt"
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the prompt composition boundary."""
-
-        validate_unique_ids((button.id for button in self.buttons), scope=f"prompt {self.id!r} buttons")
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardMetrics:
-    """Pixel-level dimensions for keyboard grid cells.
-
-    Attributes:
-        key_unit_px: Edge length of a single 1u key cell, in pixels.
-        grid_gap_px: Gap between adjacent cells, in pixels. Used when a
-            key spans multiple rows so the spanned cells visually merge.
-    """
-
-    key_unit_px: int = 48
-    grid_gap_px: int = 4
-
-    def span_width(self, units: float) -> int:
-        """Return pixel width for a key spanning ``units`` columns."""
-
-        return max(self.key_unit_px, round(self.key_unit_px * units))
-
-    def span_height(self, units: int) -> int:
-        """Return pixel height for a key spanning ``units`` rows including gaps."""
-
-        return (self.key_unit_px * units) + (self.grid_gap_px * (units - 1))
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardGridConfig:
-    """Declarative keyboard grid component.
-
-    Attributes:
-        id: Deterministic component ID.
-        layout: Keyboard layout data used by the grid component.
-        metrics: Pixel metrics applied to keys in this grid.
-    """
-
-    id: str
-    layout: LayoutConfig
-    metrics: KeyboardMetrics = field(default_factory=KeyboardMetrics)
-    kind: Literal["keyboard-grid"] = "keyboard-grid"
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardStatusConfig:
-    """Declarative keyboard backend status component.
-
-    Attributes:
-        id: Deterministic component ID.
-    """
-
-    id: str
-    kind: Literal["keyboard-status"] = "keyboard-status"
-
-
-ComponentConfig = (
-    KeyConfig
-    | SpacerConfig
-    | ButtonConfig
-    | PromptConfig
-    | KeyboardGridConfig
-    | KeyboardStatusConfig
-    | PointerLocatorConfig
-)
-
-
-@dataclass(frozen=True, slots=True)
-class BehaviorConfig:
-    """Registered behavior kind plus queue-safe native arguments."""
-
-    kind: str
-    arguments: DataMap
-
-    def __post_init__(self) -> None:
-        validated = RuntimeAction(self.kind, self.arguments)
-        object.__setattr__(self, "arguments", validated.arguments)
-
-
-@dataclass(frozen=True, slots=True)
-class BehaviorHook:
-    """One event-filtered hook around a component's default behavior."""
-
-    events: frozenset[str]
-    blocking: bool
-    config: BehaviorConfig
-
-    def __post_init__(self) -> None:
-        if not self.events:
-            raise ValueError("Behavior hook must match at least one event")
-        for event in self.events:
-            RuntimeAction(event, {})
-
-
-@dataclass(frozen=True, slots=True)
-class BehaviorBinding:
-    """Attach one default behavior and its hooks to an exact source path."""
-
-    target: SourcePath
-    default: BehaviorConfig
-    before_hooks: tuple[BehaviorHook, ...] = ()
-    after_hooks: tuple[BehaviorHook, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class HotCornerConfig:
-    """Hot-corner trigger behavior and runtime window bindings.
+    """Hot-corner sensor timing and size.
 
     Attributes:
         dwell_ms: Cursor dwell time required before a corner triggers.
@@ -423,7 +185,6 @@ class HotCornerConfig:
         corner_size_px: Edge length of each hot-corner sensor region.
         indicator_size_px: Edge length of the visual dwell indicator.
         indicator_margin_px: Pixel margin between the indicator and screen edges.
-        bindings: Mapping of corner ID to managed window IDs toggled by the runtime.
     """
 
     dwell_ms: int = 200
@@ -431,125 +192,3 @@ class HotCornerConfig:
     corner_size_px: int = 20
     indicator_size_px: int = 52
     indicator_margin_px: int = 14
-    bindings: dict[str, list[str]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class SurfaceConfig:
-    """Generic root content surface hosted by a window.
-
-    Attributes:
-        id: Deterministic surface ID.
-        kind: Surface builder key.
-        components: Child components mounted into the surface.
-        background_components: Components painted behind the surface content.
-        margins: Qt layout margins in pixels ordered left, top, right, bottom.
-        spacing: Qt layout spacing in pixels.
-        minimum_size: Optional lower bound for startup size as ``(width, height)``.
-    """
-
-    id: str
-    components: tuple[ComponentConfig, ...]
-    background_components: tuple[ComponentConfig, ...] = ()
-    kind: Literal["surface"] = "surface"
-    margins: tuple[int, int, int, int] = (10, 10, 10, 10)
-    spacing: int = 8
-    minimum_size: tuple[int, int] = (0, 0)
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the surface composition boundary."""
-
-        validate_unique_ids(
-            (component.id for component in (*self.background_components, *self.components)),
-            scope=f"surface {self.id!r} components",
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class WindowConfig:
-    """Window declaration consumed by the generic window builder.
-
-    Attributes:
-        id: Deterministic window ID used by the window manager.
-        title: User-visible window title.
-        surface: Root surface content declaration.
-        overlay: Overlay behavior for this window.
-        chrome: Optional custom chrome policy.
-        dwell_click: Optional pointer dwell activation policy.
-        opacity: Normal window opacity from zero through one.
-    """
-
-    id: str
-    title: str
-    surface: SurfaceConfig
-    overlay: OverlayConfig = field(default_factory=OverlayConfig)
-    chrome: ChromeConfig = field(default_factory=ChromeConfig)
-    dwell_click: DwellClickConfig = field(default_factory=DwellClickConfig)
-    opacity: float = 1.0
-
-    def __post_init__(self) -> None:
-        """Validate window presentation values."""
-
-        if not 0.0 <= self.opacity <= 1.0:
-            raise ValueError("Window opacity must be between 0.0 and 1.0")
-
-
-@dataclass(frozen=True, slots=True)
-class AppConfig:
-    """Root application configuration owned by the runtime.
-
-    Attributes:
-        app_id: Stable application identity used by paths and state.
-        active_profile_id: Active profile identity used by paths and state.
-        windows: Windows available to the runtime, keyed by deterministic IDs.
-        behaviors: Exact behavior bindings for every interactive control.
-        startup_window_ids: IDs of windows shown during startup.
-        keyboard_window_id: ID of the default keyboard surface.
-        quit_prompt: Declarative quit confirmation prompt.
-        linux_permission_prompt: Declarative Linux permission setup prompt.
-        hot_corner: Hot-corner trigger behavior and window bindings.
-    """
-
-    app_id: str
-    active_profile_id: str
-    windows: tuple[WindowConfig, ...]
-    behaviors: tuple[BehaviorBinding, ...]
-    startup_window_ids: tuple[str, ...]
-    keyboard_window_id: str
-    quit_prompt: PromptConfig
-    linux_permission_prompt: PromptConfig
-    hot_corner: HotCornerConfig = field(default_factory=HotCornerConfig)
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the root app composition boundary."""
-
-        if not self.app_id:
-            raise ValueError("App ID cannot be empty")
-        if not self.active_profile_id:
-            raise ValueError("Active profile ID cannot be empty")
-
-        validate_unique_ids((window.id for window in self.windows), scope="app windows")
-        validate_unique_ids(
-            (window.surface.id for window in self.windows),
-            scope="app window surfaces",
-        )
-        validate_unique_ids(
-            (
-                *(window.id for window in self.windows),
-                self.quit_prompt.window_id,
-                self.linux_permission_prompt.window_id,
-            ),
-            scope="app window and prompt window IDs",
-        )
-        validate_unique_ids(
-            (
-                *(window.surface.id for window in self.windows),
-                self.quit_prompt.surface_id,
-                self.linux_permission_prompt.surface_id,
-            ),
-            scope="app surface and prompt surface IDs",
-        )
-        validate_unique_ids(
-            (repr(binding.target) for binding in self.behaviors),
-            scope="app behavior targets",
-        )

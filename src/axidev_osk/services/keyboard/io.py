@@ -1,4 +1,4 @@
-"""Adapter around axidev_io keyboard output and key-state observation."""
+"""Adapter around axidev_io keyboard output and key observation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from ...runtime.behavior_models import KeyboardOutput
 from ...runtime.diagnostics import keyboard_debug_enabled
 
 _logger = logging.getLogger(__name__)
@@ -32,29 +31,7 @@ _MODIFIER_KEY_NAMES = frozenset(
     }
 )
 
-_STATE_TAGS_BY_KEY = {
-    "shift": frozenset({"shift"}),
-    "shiftleft": frozenset({"shift"}),
-    "shiftright": frozenset({"shift"}),
-    "capslock": frozenset({"caps"}),
-    "ctrl": frozenset({"ctrl"}),
-    "ctrlleft": frozenset({"ctrl"}),
-    "ctrlright": frozenset({"ctrl"}),
-    "alt": frozenset({"alt"}),
-    "altleft": frozenset({"alt"}),
-    "altright": frozenset({"altgr"}),
-    "super": frozenset({"super"}),
-    "superleft": frozenset({"super"}),
-    "superright": frozenset({"super"}),
-}
-
-_LOCK_NAMES_BY_KEY = {
-    "capslock": "capslock",
-    "numlock": "numlock",
-}
-
-KeyStateListener = Callable[[str, bool], None]
-ModifierStateListener = Callable[[frozenset[str]], None]
+Unsubscribe = Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -75,17 +52,16 @@ class KeyObservation:
 
 
 ObservationListener = Callable[[KeyObservation], None]
-Unsubscribe = Callable[[], None]
 
 
 @dataclass(frozen=True)
 class KeyPressHandle:
-    """Backend key press handle tracked until release.
+    """A held key, kept until it is released.
 
     Attributes:
         key_name: Canonical backend key name.
         mods: Optional backend modifier chord sent with the key.
-        repeats: Whether the backend should auto-repeat the press.
+        repeats: Whether the backend auto-repeats the press.
     """
 
     key_name: str
@@ -101,12 +77,9 @@ class AxidevIoKeyboardBackend:
         self._ready = False
         self._status_text = "Keyboard output is unavailable."
         self._needs_permission_setup = False
-        self._pressed_key_names: set[str] = set()
-        self._key_state_listeners: list[KeyStateListener] = []
-        self._modifier_state_listeners: list[ModifierStateListener] = []
         self._observation_listeners: list[ObservationListener] = []
         self._listener_unsubscribe: Unsubscribe | None = None
-        self._key_state_lock = RLock()
+        self._listeners_lock = RLock()
 
     @property
     def ready(self) -> bool:
@@ -133,7 +106,7 @@ class AxidevIoKeyboardBackend:
         return self._build_permission_setup_text()
 
     def initialize(self) -> bool:
-        """Initialize axidev_io keyboard output and state observation."""
+        """Initialize axidev_io keyboard output and key observation."""
 
         if self._ready:
             return True
@@ -170,66 +143,35 @@ class AxidevIoKeyboardBackend:
         self._keyboard = keyboard
         self._ready = True
         self._status_text = f"Keyboard output ready via axidev_io ({backend_name})."
-        self._start_key_state_listener()
+        self._start_listener()
         return True
 
     def shutdown(self) -> None:
-        """Release held keys and shut down the backend."""
+        """Stop observation and shut down the backend."""
 
         if self._keyboard is None:
             return
 
         try:
-            self._stop_key_state_listener()
+            self._stop_listener()
             self._keyboard.shutdown()
         except Exception as exc:
             _logger.exception("axidev_io shutdown failed: %s", exc)
         finally:
             self._keyboard = None
             self._ready = False
-            self._clear_pressed_key_names()
-
-    def add_key_state_listener(self, listener: KeyStateListener) -> Unsubscribe:
-        """Register a backend key-state listener and return an unsubscribe callback."""
-
-        with self._key_state_lock:
-            self._key_state_listeners.append(listener)
-        active = True
-
-        def unsubscribe() -> None:
-            nonlocal active
-            if not active:
-                return
-            active = False
-            with self._key_state_lock:
-                try:
-                    self._key_state_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unsubscribe
-
-    def add_modifier_state_listener(self, listener: ModifierStateListener) -> Unsubscribe:
-        """Register a listener for observed modifier names and return an unsubscribe callback."""
-
-        with self._key_state_lock:
-            self._modifier_state_listeners.append(listener)
-
-        def unsubscribe() -> None:
-            with self._key_state_lock:
-                if listener in self._modifier_state_listeners:
-                    self._modifier_state_listeners.remove(listener)
-
-        return unsubscribe
 
     def add_observation_listener(self, listener: ObservationListener) -> Unsubscribe:
-        """Register a listener for every observed key transition."""
+        """Register a listener for every observed key transition.
 
-        with self._key_state_lock:
+        Listeners are called on the backend's listener thread.
+        """
+
+        with self._listeners_lock:
             self._observation_listeners.append(listener)
 
         def unsubscribe() -> None:
-            with self._key_state_lock:
+            with self._listeners_lock:
                 if listener in self._observation_listeners:
                     self._observation_listeners.remove(listener)
 
@@ -238,7 +180,13 @@ class AxidevIoKeyboardBackend:
     def canonical_key(self, key_name: str) -> str:
         """Return the backend's canonical spelling of a key name."""
 
-        return self._canonical_key_name(key_name) or key_name
+        if self._keyboard is None:
+            return key_name
+        try:
+            formatted = self._keyboard.keys.format(self._keyboard.keys.parse(key_name))
+            return formatted or key_name
+        except Exception:
+            return key_name
 
     def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle | None:
         """Send a key down with explicit modifiers and return its release handle."""
@@ -251,12 +199,29 @@ class AxidevIoKeyboardBackend:
             repeats=repeat,
         )
         try:
-            self._send_key_down(press)
-            self._set_key_down(press.key_name, True)
+            self._debug_press("down", press)
+            if press.mods is None:
+                self._keyboard.sender.key_down(press.key_name, repeat=press.repeats)
+            else:
+                self._keyboard.sender.key_down(press.key_name, mods=press.mods, repeat=press.repeats)
             return press
         except Exception as exc:
             _logger.exception("axidev_io key down failed for %r: %s", key, exc)
             return None
+
+    def key_up(self, press: object | None) -> None:
+        """Release a key press previously returned by ``press``."""
+
+        if not self._ready or self._keyboard is None or not isinstance(press, KeyPressHandle):
+            return
+        try:
+            self._debug_press("up", press)
+            if press.mods is None:
+                self._keyboard.sender.key_up(press.key_name)
+            else:
+                self._keyboard.sender.key_up(press.key_name, mods=press.mods)
+        except Exception as exc:
+            _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
         """Send one key press and release with explicit modifiers."""
@@ -281,131 +246,16 @@ class AxidevIoKeyboardBackend:
         except Exception as exc:
             _logger.exception("axidev_io type_text failed: %s", exc)
 
-    def is_key_down(self, key_name: str) -> bool:
-        """Return whether a canonical backend key is currently pressed."""
-
-        canonical_name = self._canonical_key_name(key_name)
-        if canonical_name is None:
-            return False
-
-        with self._key_state_lock:
-            return canonical_name in self._pressed_key_names
-
-    def key_name_for_output(self, output: KeyboardOutput) -> str:
-        """Resolve keyboard output to a canonical backend key name."""
-
-        return self._canonical_key_name(output.output_key) or output.output_key
-
-    def lock_name_for_key(self, key_name: str) -> str | None:
-        """Return the observed lock modifier driven by one backend key, if any."""
-
-        canonical = self._canonical_key_name(key_name) or key_name
-        return _LOCK_NAMES_BY_KEY.get(canonical.casefold())
-
-    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
-        """Return runtime state tags published by one backend key name."""
-
-        canonical = self._canonical_key_name(output_key) or output_key
-        return _STATE_TAGS_BY_KEY.get(canonical.casefold(), frozenset())
-
-    def key_down(
-        self,
-        output: KeyboardOutput,
-        active_state_tags: frozenset[str],
-    ) -> KeyPressHandle | None:
-        """Emit keyboard output and return a handle for release."""
-
-        if not self._ready or self._keyboard is None:
-            return None
-        try:
-            press = self._resolve_key_press(output, active_state_tags)
-            if _is_modifier_key_name(press.key_name):
-                self._debug_modifier("request-down", key_id=None, press=self._describe_press(press))
-            self._send_key_down(press)
-            self._set_key_down(press.key_name, True)
-            if _is_modifier_key_name(press.key_name):
-                self._debug_modifier("press-active", key_id=None, press=self._describe_press(press))
-            return press
-        except Exception as exc:
-            _logger.exception("axidev_io key_down failed for %r: %s", output.output_key, exc)
-            return None
-
-    def key_up(self, press: object | None) -> None:
-        """Release a key press previously returned by ``key_down``."""
-
-        if not self._ready or self._keyboard is None or not isinstance(press, KeyPressHandle):
+    def _debug_press(self, action: str, press: KeyPressHandle) -> None:
+        if not keyboard_debug_enabled() or press.key_name.casefold() not in _MODIFIER_KEY_NAMES:
             return
-
-        try:
-            if _is_modifier_key_name(press.key_name):
-                self._debug_modifier("request-up", key_id=None, press=self._describe_press(press))
-            if press.mods is None:
-                self._keyboard.sender.key_up(press.key_name)
-            else:
-                self._keyboard.sender.key_up(press.key_name, mods=press.mods)
-            self._set_key_down(press.key_name, False)
-            if _is_modifier_key_name(press.key_name):
-                self._debug_modifier("press-released", key_id=None, press=self._describe_press(press))
-        except Exception as exc:
-            _logger.exception("axidev_io key_up failed for %r: %s", press.key_name, exc)
-
-    def _resolve_key_press(
-        self,
-        output: KeyboardOutput,
-        active_state_tags: frozenset[str],
-    ) -> KeyPressHandle:
-        key_name = self.key_name_for_output(output)
-        mods = self._resolve_sender_modifiers(output, active_state_tags)
-        return KeyPressHandle(key_name=key_name, mods=mods, repeats=output.repeats)
-
-    def _send_key_down(self, press: KeyPressHandle) -> None:
-        if self._keyboard is None:
-            return
-        if press.mods is None:
-            self._keyboard.sender.key_down(press.key_name, repeat=press.repeats)
-        else:
-            self._keyboard.sender.key_down(
-                press.key_name,
-                mods=press.mods,
-                repeat=press.repeats,
-            )
-
-    def _debug_modifier(self, action: str, **context: object) -> None:
-        if not keyboard_debug_enabled():
-            return
-        details = ", ".join(f"{key}={value!r}" for key, value in context.items())
-        _logger.info("keyboard modifier %s: %s", action, details)
-
-    @staticmethod
-    def _describe_press(press: KeyPressHandle | None) -> str | None:
-        if press is None:
-            return None
-        return f"{press.key_name} mods={press.mods!r} repeat={press.repeats}"
-
-    def _canonical_key_name(self, key_name: str) -> str | None:
-        if self._keyboard is None:
-            return key_name
-
-        try:
-            parsed_key = self._keyboard.keys.parse(key_name)
-            formatted_key = self._keyboard.keys.format(parsed_key)
-            return formatted_key or key_name
-        except Exception:
-            return key_name
-
-    def _resolve_sender_modifiers(
-        self,
-        output: KeyboardOutput,
-        active_state_tags: frozenset[str],
-    ) -> str | None:
-        if not output.uses_active_state_tags:
-            return None
-
-        shift = "shift" in active_state_tags
-        shift_is_held = self.is_key_down("ShiftLeft") or self.is_key_down("ShiftRight")
-        if shift and not shift_is_held:
-            return "Shift"
-        return None
+        _logger.info(
+            "keyboard modifier %s: %s mods=%r repeat=%s",
+            action,
+            press.key_name,
+            press.mods,
+            press.repeats,
+        )
 
     def _build_install_hint(self) -> str:
         repo_root = self._repo_root()
@@ -438,19 +288,17 @@ class AxidevIoKeyboardBackend:
             return False
         return "permission_denied" in str(exc).lower()
 
-    def _start_key_state_listener(self) -> None:
+    def _start_listener(self) -> None:
         if self._keyboard is None or self._listener_unsubscribe is not None:
             return
-
         try:
             self._listener_unsubscribe = self._keyboard.listener.start(self._handle_key_event)
         except Exception as exc:
             _logger.exception("axidev_io listener startup failed: %s", exc)
 
-    def _stop_key_state_listener(self) -> None:
+    def _stop_listener(self) -> None:
         if self._listener_unsubscribe is None:
             return
-
         try:
             self._listener_unsubscribe()
         except Exception as exc:
@@ -459,42 +307,6 @@ class AxidevIoKeyboardBackend:
             self._listener_unsubscribe = None
 
     def _handle_key_event(self, event: object) -> None:
-        self._notify_observation_listeners(event)
-        modifiers = getattr(event, "modifiers", None)
-        if isinstance(modifiers, tuple):
-            # Report lock state before the key so a Caps Lock press is
-            # rendered with the state it just produced.
-            self._notify_modifier_state_listeners(frozenset(str(name).lower() for name in modifiers))
-        key_name = getattr(event, "key_name", None)
-        if not isinstance(key_name, str) or not key_name:
-            return
-        self._set_key_down(key_name, bool(getattr(event, "pressed", False)))
-
-    def _set_key_down(self, key_name: str, pressed: bool) -> None:
-        canonical_name = self._canonical_key_name(key_name)
-        if canonical_name is None:
-            return
-
-        with self._key_state_lock:
-            was_pressed = canonical_name in self._pressed_key_names
-            if pressed == was_pressed:
-                return
-            if pressed:
-                self._pressed_key_names.add(canonical_name)
-            else:
-                self._pressed_key_names.discard(canonical_name)
-
-        self._notify_key_state_listeners(canonical_name, pressed)
-
-    def _clear_pressed_key_names(self) -> None:
-        with self._key_state_lock:
-            pressed_key_names = tuple(self._pressed_key_names)
-            self._pressed_key_names.clear()
-
-        for key_name in pressed_key_names:
-            self._notify_key_state_listeners(key_name, False)
-
-    def _notify_observation_listeners(self, event: object) -> None:
         key_name = getattr(event, "key_name", None)
         if not isinstance(key_name, str) or not key_name:
             return
@@ -506,34 +318,10 @@ class AxidevIoKeyboardBackend:
             modifiers=tuple(str(name) for name in modifiers) if isinstance(modifiers, tuple) else (),
             pressed=bool(getattr(event, "pressed", False)),
         )
-        with self._key_state_lock:
+        with self._listeners_lock:
             listeners = tuple(self._observation_listeners)
         for listener in listeners:
             try:
                 listener(observation)
             except Exception as exc:
                 _logger.exception("axidev_io observation listener failed: %s", exc)
-
-    def _notify_modifier_state_listeners(self, modifiers: frozenset[str]) -> None:
-        with self._key_state_lock:
-            listeners = tuple(self._modifier_state_listeners)
-
-        for listener in listeners:
-            try:
-                listener(modifiers)
-            except Exception as exc:
-                _logger.exception("axidev_io modifier state listener failed: %s", exc)
-
-    def _notify_key_state_listeners(self, key_name: str, pressed: bool) -> None:
-        with self._key_state_lock:
-            listeners = tuple(self._key_state_listeners)
-
-        for listener in listeners:
-            try:
-                listener(key_name, pressed)
-            except Exception as exc:
-                _logger.exception("axidev_io key state listener failed for %r: %s", key_name, exc)
-
-
-def _is_modifier_key_name(key_name: str) -> bool:
-    return key_name.replace("_", "").replace("-", "").lower() in _MODIFIER_KEY_NAMES

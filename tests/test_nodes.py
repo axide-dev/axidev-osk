@@ -64,7 +64,7 @@ def _button(node_id: str, **fields: object) -> dict[str, object]:
 class NodeTests(unittest.TestCase):
     def setUp(self) -> None:
         _app()
-        self.context = make_test_context(FakeKeyboardBackend(), activate_behaviors=False)
+        self.context = make_test_context(FakeKeyboardBackend())
         self.engine = self.context.engine
         self.pressed: list[DataMap] = []
 

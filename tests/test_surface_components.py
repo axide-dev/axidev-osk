@@ -1,53 +1,45 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QWidget
 
-from axidev_osk.runtime.source import SourcePath, SourcePathSegment
-from axidev_osk.components import register_components
-from axidev_osk.components.pointer_locator import PointerLocator
-from axidev_osk.config.models import PointerLocatorConfig, SurfaceConfig
-from axidev_osk.runtime.registries import ComponentRegistry
-from axidev_osk.windows.surface import RootSurface, build_surface
+from axidev_osk.components.pointer_locator import PointerLocator, install_pointer_locator
+from axidev_osk.config.models import PointerLocatorConfig
+from axidev_osk.windows.surface import RootSurface
 
 
 def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
     return app
 
 
 def _config() -> PointerLocatorConfig:
     return PointerLocatorConfig(
-        id="component:test-pointer-locator",
+        id="test-pointer-locator",
         radius_percent=30,
         maximum_opacity_percent=60,
         radius_standard_deviations=3,
     )
 
 
-class RootSurfaceComponentTests(unittest.TestCase):
-    def test_surface_rejects_duplicate_ids_across_background_and_content(self) -> None:
-        config = _config()
+def _surface_with_content() -> tuple[RootSurface, QWidget]:
+    surface = RootSurface()
+    surface.resize(300, 160)
+    content = QWidget(surface)
+    content.setGeometry(surface.rect())
+    content.show()
+    return surface, content
 
-        with self.assertRaisesRegex(ValueError, "Duplicate config IDs"):
-            SurfaceConfig(
-                id="surface:test",
-                components=(config,),
-                background_components=(config,),
-            )
+
+class RootSurfaceComponentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
 
     def test_background_component_is_fitted_below_surface_content(self) -> None:
-        _app()
-        surface = RootSurface()
-        surface.resize(300, 160)
-        content = QWidget(surface)
-        content.setGeometry(surface.rect())
-        content.show()
+        surface, content = _surface_with_content()
         background = QWidget()
         background.show()
 
@@ -57,23 +49,33 @@ class RootSurfaceComponentTests(unittest.TestCase):
         self.assertEqual(background.geometry(), surface.rect())
         self.assertIs(surface.childAt(QPoint(20, 20)), content)
 
-    def test_surface_builds_pointer_locator_through_component_registry(self) -> None:
-        registry = ComponentRegistry()
-        register_components(registry)
-        context = Mock(components=registry)
-        config = SurfaceConfig(
-            id="surface:test",
-            components=(),
-            background_components=(_config(),),
-        )
+    def test_background_components_keep_install_order_below_content(self) -> None:
+        surface, content = _surface_with_content()
+        first = QWidget()
+        second = QWidget()
 
-        surface = build_surface(
-            config,
-            context,
-            SourcePath((SourcePathSegment("surface", "surface:test"),)),
-        )
-        locator = surface.findChild(PointerLocator, "pointerLocator")
+        surface.install_background_component(first)
+        surface.install_background_component(second)
+        surface.show()
+        self.addCleanup(surface.close)
+        surface.resize(400, 220)
 
-        self.assertIsNotNone(locator)
+        self.assertEqual(surface.children(), [first, second, content])
+        self.assertEqual(first.geometry(), surface.rect())
+        self.assertEqual(second.geometry(), surface.rect())
+
+    def test_pointer_locator_installs_as_background_component(self) -> None:
+        surface, content = _surface_with_content()
+
+        locator = install_pointer_locator(surface, _config())
+
+        self.assertIsInstance(locator, PointerLocator)
+        self.assertIs(surface.findChild(PointerLocator, "pointerLocator"), locator)
         self.assertIs(locator.parentWidget(), surface)
         self.assertEqual(locator.property("componentId"), _config().id)
+        self.assertTrue(surface.property("pointerLocatorEnabled"))
+        self.assertEqual(surface.children(), [locator, content])
+
+
+if __name__ == "__main__":
+    unittest.main()

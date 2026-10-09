@@ -67,7 +67,7 @@ class StdHarness:
     def __init__(self, children: list[osk.Map], *, on: dict[str, Any] | None = None) -> None:
         _app()
         self.backend = RecordingBackend()
-        self.context = make_test_context(self.backend, activate_behaviors=False)
+        self.context = make_test_context(self.backend)
         self.engine = self.context.engine
         self.window_actions: list[tuple[str, DataMap]] = []
         for name in ("window.set_opacity", "window.block_input", "window.unblock_input", "window.show", "window.hide"):
@@ -222,7 +222,7 @@ class WindowHelperTests(unittest.TestCase):
 class PromptTests(unittest.TestCase):
     def test_prompt_window_builds_with_button_callbacks(self) -> None:
         _app()
-        context = make_test_context(RecordingBackend(), activate_behaviors=False)
+        context = make_test_context(RecordingBackend())
         engine = context.engine
         answers: list[str] = []
 

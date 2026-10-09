@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import threading
 import unittest
 from dataclasses import dataclass
 
-from axidev_osk.messages import MessageResult
-from axidev_osk.runtime.behavior_models import KeyboardOutput
-from axidev_osk.runtime.events import (
-    KEYBOARD_KEY_STATE_CHANGED,
-    KEYBOARD_LOCK_STATE_CHANGED,
-    KeyboardKeyStateChangedArguments,
-    KeyboardLockStateChangedArguments,
+from axidev_osk.messages import DataMap, MessageResult
+from axidev_osk.runtime.engine_messages import (
+    INPUT_KEY,
+    KEYBOARD_PERMISSION_REQUIRED,
+    KEYBOARD_RESET,
+    KEYBOARD_STATUS_CHANGED,
 )
-from axidev_osk.runtime.source import SourcePath, SourcePathSegment
 from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.services.keyboard.io import KeyObservation
 
 
 @dataclass(frozen=True)
@@ -29,11 +29,8 @@ class FakeKeyboardBackend:
     def __init__(self) -> None:
         self.initialize_calls = 0
         self.shutdown_calls = 0
-        self.listeners = []
-        self.modifier_listeners = []
-        self.pressed: set[str] = set()
-        self.down_calls: list[tuple[KeyboardOutput, frozenset[str]]] = []
-        self.up_calls: list[object | None] = []
+        self.listeners: list[object] = []
+        self.sent: list[tuple[object, ...]] = []
 
     def initialize(self) -> bool:
         self.initialize_calls += 1
@@ -43,233 +40,182 @@ class FakeKeyboardBackend:
         self.shutdown_calls += 1
 
     def add_observation_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def add_key_state_listener(self, listener):
         self.listeners.append(listener)
+        return lambda: self.listeners.remove(listener)
 
-        def unsubscribe() -> None:
-            self.listeners.remove(listener)
+    def canonical_key(self, key: str) -> str:
+        return key.upper() if len(key) == 1 else key
 
-        return unsubscribe
-
-    def add_modifier_state_listener(self, listener):
-        self.modifier_listeners.append(listener)
-        return lambda: self.modifier_listeners.remove(listener)
-
-    def lock_name_for_key(self, key_name: str) -> str | None:
-        return {"capslock": "capslock", "numlock": "numlock"}.get(key_name.casefold())
-
-    def emit_modifiers(self, *modifiers: str) -> None:
-        for listener in tuple(self.modifier_listeners):
-            listener(frozenset(modifiers))
-
-    def key_name_for_output(self, output: KeyboardOutput) -> str:
-        return output.output_key.casefold()
-
-    def state_tags_for_key(self, output_key: str) -> frozenset[str]:
-        return {
-            "shiftleft": frozenset({"shift"}),
-            "capslock": frozenset({"caps"}),
-        }.get(output_key.casefold(), frozenset())
-
-    def is_key_down(self, key_name: str) -> bool:
-        return key_name in self.pressed
-
-    def key_down(
-        self,
-        output: KeyboardOutput,
-        active_state_tags: frozenset[str],
-    ) -> PressHandle:
-        self.down_calls.append((output, active_state_tags))
-        key_name = self.key_name_for_output(output)
-        self.emit(key_name, True)
-        return PressHandle(key_name)
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> PressHandle:
+        self.sent.append(("down", key, mods, repeat))
+        return PressHandle(key)
 
     def key_up(self, handle: object | None) -> None:
-        self.up_calls.append(handle)
-        if isinstance(handle, PressHandle):
-            self.emit(handle.key_name, False)
+        self.sent.append(("up", handle))
 
-    def emit(self, key_name: str, pressed: bool) -> None:
-        if pressed:
-            self.pressed.add(key_name)
-        else:
-            self.pressed.discard(key_name)
+    def tap(self, key: str, mods: tuple[str, ...]) -> None:
+        self.sent.append(("tap", key, mods))
+
+    def type_text(self, text: str) -> None:
+        self.sent.append(("text", text))
+
+    def observe(self, observation: KeyObservation) -> None:
         for listener in tuple(self.listeners):
-            listener(key_name, pressed)
+            listener(observation)  # type: ignore[operator]
 
 
-def _source(component_id: str) -> SourcePath:
-    return SourcePath(
-        (
-            SourcePathSegment("app", "axidev-osk"),
-            SourcePathSegment("profile", "default"),
-            SourcePathSegment("window", "keyboard"),
-            SourcePathSegment("surface", "keyboard"),
-            SourcePathSegment("component", "keyboard-grid"),
-            SourcePathSegment("layout", "us-iso"),
-            SourcePathSegment("grid", "main"),
-            SourcePathSegment("component", component_id),
-        )
-    )
+class RefusingKeyboardBackend(FakeKeyboardBackend):
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> None:  # type: ignore[override]
+        self.sent.append(("down", key, mods, repeat))
+        return None
 
 
 class KeyboardServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.backend = FakeKeyboardBackend()
-        self.context = make_test_context(
-            self.backend,
-            activate_behaviors=False,
-        )
+        self.context = make_test_context(self.backend)
         self.service = self.context.keyboard
-        self.events: list[KeyboardKeyStateChangedArguments] = []
+        self.events: list[tuple[str, DataMap]] = []
+        for name in (INPUT_KEY, KEYBOARD_RESET, KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED):
+            self.context.dispatcher.add_raw_event_handler(name, self._recorder(name))
 
-        def record(event: KeyboardKeyStateChangedArguments) -> MessageResult:
-            self.events.append(event)
+    def _recorder(self, name: str):
+        def record(arguments: DataMap) -> MessageResult:
+            self.events.append((name, arguments))
             return []
 
-        self.context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
+        return record
 
-    def test_observed_lock_state_is_published_once_per_change(self) -> None:
-        locks: list[KeyboardLockStateChangedArguments] = []
+    def _event_names(self) -> list[str]:
+        return [name for name, _arguments in self.events]
 
-        def record(event: KeyboardLockStateChangedArguments) -> MessageResult:
-            locks.append(event)
-            return []
-
-        self.context.dispatcher.add_event_handler(KEYBOARD_LOCK_STATE_CHANGED, record)
-        caps = _source("caps")
-        self.service.register_output(caps, KeyboardOutput("CapsLock"))
-        self.service.register_output(_source("a"), KeyboardOutput("A"))
-
-        self.backend.emit_modifiers("capslock")
-        self.backend.emit_modifiers("capslock", "shift")
-        self.backend.emit_modifiers()
-
-        self.assertEqual([(event.source, event.locked) for event in locks], [(caps, True), (caps, False)])
-
-    def test_late_registration_receives_last_observed_lock_state(self) -> None:
-        locks: list[KeyboardLockStateChangedArguments] = []
-
-        def record(event: KeyboardLockStateChangedArguments) -> MessageResult:
-            locks.append(event)
-            return []
-
-        self.context.dispatcher.add_event_handler(KEYBOARD_LOCK_STATE_CHANGED, record)
-        self.service.register_output(_source("caps"), KeyboardOutput("CapsLock"))
-        self.backend.emit_modifiers("capslock")
-        self.service.reset_state()
-
-        caps = _source("caps-again")
-        self.service.register_output(caps, KeyboardOutput("CapsLock"))
-
-        self.assertEqual(locks[-1].source, caps)
-        self.assertTrue(locks[-1].locked)
-
-    def test_start_initializes_backend_and_listener_once(self) -> None:
+    def test_start_initializes_backend_and_listener_once_without_publishing_status(self) -> None:
         self.service.start(self.context)
         self.service.bind_context(self.context)
 
         self.assertEqual(self.backend.initialize_calls, 1)
         self.assertEqual(len(self.backend.listeners), 1)
+        self.assertEqual(self.events, [])
 
-    def test_register_output_returns_canonical_name_and_state_tags(self) -> None:
-        source = _source("shift-left")
-
-        metadata = self.service.register_output(
-            source,
-            KeyboardOutput("ShiftLeft", repeats=False),
-        )
-
-        self.assertEqual(metadata, ("shiftleft", frozenset({"shift"})))
-
-    def test_register_output_publishes_existing_backend_state(self) -> None:
-        source = _source("caps-lock")
-        self.backend.pressed.add("capslock")
-
-        self.service.register_output(source, KeyboardOutput("CapsLock"))
+    def test_press_and_release_send_canonical_key_with_explicit_mods_and_repeat(self) -> None:
+        self.service.press("a", ("Shift",), False)
+        self.service.release("a")
 
         self.assertEqual(
-            self.events,
-            [KeyboardKeyStateChangedArguments(source, True, frozenset({"caps"}))],
+            self.backend.sent,
+            [("down", "A", ("Shift",), False), ("up", PressHandle("A"))],
         )
 
-    def test_backend_update_is_published_for_every_exact_registered_source(self) -> None:
-        first = _source("shift-left-first")
-        second = _source("shift-left-second")
-        output = KeyboardOutput("ShiftLeft")
-        self.service.register_output(first, output)
-        self.service.register_output(second, output)
+    def test_releasing_an_unheld_key_does_nothing(self) -> None:
+        self.service.release("a")
+        self.service.press("a", (), True)
+        self.service.release("a")
+        self.service.release("a")
 
-        self.backend.emit("shiftleft", True)
+        self.assertEqual(self.backend.sent, [("down", "A", (), True), ("up", PressHandle("A"))])
+
+    def test_pressing_a_held_key_again_releases_the_previous_press(self) -> None:
+        self.service.press("a", (), True)
+        self.service.press("A", ("Shift",), True)
+        self.service.release("a")
+
+        self.assertEqual(
+            self.backend.sent,
+            [
+                ("down", "A", (), True),
+                ("down", "A", ("Shift",), True),
+                ("up", PressHandle("A")),
+                ("up", PressHandle("A")),
+            ],
+        )
+
+    def test_refused_press_holds_nothing(self) -> None:
+        backend = RefusingKeyboardBackend()
+        service = make_test_context(backend).keyboard
+
+        service.press("a", (), True)
+        service.release("a")
+
+        self.assertEqual(backend.sent, [("down", "A", (), True)])
+
+    def test_tap_and_type_text_pass_through_to_the_backend(self) -> None:
+        self.service.tap("Enter", ("Ctrl",))
+        self.service.type_text("moo")
+
+        self.assertEqual(self.backend.sent, [("tap", "Enter", ("Ctrl",)), ("text", "moo")])
+
+    def test_reset_releases_held_keys_and_reports_reset(self) -> None:
+        self.service.press("a", (), True)
+        self.service.press("ShiftLeft", (), False)
+
+        self.service.reset_state()
+        self.service.release("a")
+
+        self.assertEqual(self.backend.sent[2:], [("up", PressHandle("A")), ("up", PressHandle("ShiftLeft"))])
+        self.assertEqual(self._event_names(), [KEYBOARD_RESET])
+
+    def test_shutdown_releases_held_keys_and_runs_once(self) -> None:
+        self.service.press("a", (), True)
+
+        self.service.shutdown()
+        self.service.shutdown()
+
+        self.assertEqual(self.backend.sent[1:], [("up", PressHandle("A"))])
+        self.assertEqual(self.backend.shutdown_calls, 1)
+        self.assertEqual(self._event_names(), [KEYBOARD_RESET])
+
+    def test_initialize_after_shutdown_allows_another_shutdown(self) -> None:
+        self.service.shutdown()
+        self.service.initialize()
+        self.service.shutdown()
+
+        self.assertEqual(self.backend.shutdown_calls, 2)
+
+    def test_publish_status_reports_readiness(self) -> None:
+        self.service.publish_status()
 
         self.assertEqual(
             self.events,
             [
-                KeyboardKeyStateChangedArguments(first, True, frozenset({"shift"})),
-                KeyboardKeyStateChangedArguments(second, True, frozenset({"shift"})),
+                (
+                    KEYBOARD_STATUS_CHANGED,
+                    {"ready": True, "status": "ready", "needs_permission_setup": False, "permission_setup_text": ""},
+                )
             ],
         )
 
-    def test_key_down_passes_runtime_state_tags_and_publishes_once(self) -> None:
-        source = _source("a")
-        output = KeyboardOutput("A")
-        self.service.register_output(source, output)
+    def test_publish_status_requests_permission_setup_when_needed(self) -> None:
+        self.backend.ready = False
+        self.backend.status_text = "blocked"
+        self.backend.needs_permission_setup = True
+        self.backend.permission_setup_text = "run setup"
 
-        self.service.key_down(source, frozenset({"shift", "caps"}))
+        self.service.publish_status()
 
-        self.assertEqual(
-            self.backend.down_calls,
-            [(output, frozenset({"shift", "caps"}))],
-        )
-        self.assertEqual(
-            self.events,
-            [KeyboardKeyStateChangedArguments(source, True, frozenset())],
-        )
+        self.assertEqual(self._event_names(), [KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED])
+        self.assertEqual(self.context.engine.state.get(("keyboard", "ready")), False)
 
-    def test_key_up_releases_matching_handle_and_publishes_once(self) -> None:
-        source = _source("a")
-        self.service.register_output(source, KeyboardOutput("A"))
-        self.service.key_down(source, frozenset())
-        self.events.clear()
+    def test_observations_are_forwarded_as_input_key_events(self) -> None:
+        self.backend.observe(KeyObservation("A", "a", ("CapsLock",), True))
 
-        self.service.key_up(source)
-
-        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
         self.assertEqual(
             self.events,
-            [KeyboardKeyStateChangedArguments(source, False, frozenset())],
+            [(INPUT_KEY, {"key": "A", "text": "a", "modifiers": ["CapsLock"], "pressed": True})],
         )
 
-    def test_unregistered_output_fails_before_backend_call(self) -> None:
-        with self.assertRaisesRegex(ValueError, "No keyboard output registered"):
-            self.service.key_down(_source("missing"), frozenset())
+    def test_observations_from_another_thread_wait_for_the_owner_thread(self) -> None:
+        listener = threading.Thread(
+            target=self.backend.observe,
+            args=(KeyObservation("B", None, (), False),),
+        )
+        listener.start()
+        listener.join()
 
-        self.assertEqual(self.backend.down_calls, [])
+        self.assertEqual(self.events, [])
+        self.context.dispatcher.process_pending()
 
-    def test_reset_releases_active_handles_and_discards_outputs(self) -> None:
-        source = _source("a")
-        self.service.register_output(source, KeyboardOutput("A"))
-        self.service.key_down(source, frozenset())
-
-        self.service.reset_state()
-
-        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
-        with self.assertRaisesRegex(ValueError, "No keyboard output registered"):
-            self.service.key_down(source, frozenset())
-
-    def test_shutdown_releases_active_handles_and_runs_once(self) -> None:
-        source = _source("a")
-        self.service.register_output(source, KeyboardOutput("A"))
-        self.service.key_down(source, frozenset())
-
-        self.service.shutdown()
-        self.service.shutdown()
-
-        self.assertEqual(self.backend.up_calls, [PressHandle("a")])
-        self.assertEqual(self.backend.shutdown_calls, 1)
+        self.assertEqual(self._event_names(), [INPUT_KEY])
+        self.assertEqual(self.events[0][1]["key"], "B")
 
 
 if __name__ == "__main__":

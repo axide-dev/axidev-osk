@@ -8,17 +8,14 @@ from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
-from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, WindowConfig
-from ..config.profile import StyleConfig
-from ..config.profile import WindowConfig as ProfileWindowConfig
+from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig
+from ..config.profile import StyleConfig, WindowConfig
 from ..attachments.runtime import WindowAttachments
 from ..components.pointer_locator import install_pointer_locator
 from ..nodes import apply_style
 from ..runtime.context import Context
-from ..runtime.config_paths import window_source_path
 from ..runtime.engine_messages import window_visibility_changed
 from ..runtime.events import window_close_requested, window_drag_ended, window_drag_started
-from ..runtime.source import source_state_namespace
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
@@ -246,40 +243,8 @@ class RuntimeWindow(QMainWindow):
         )
 
 
-def build_window(config: WindowConfig, context: Context, *, parent: QWidget | None = None) -> RuntimeWindow:
-    """Build a runtime window from a legacy surface-based window config."""
-
-    window_path = window_source_path(context.config, config.id)
-    window = RuntimeWindow(
-        window_id=config.id,
-        title=config.title,
-        overlay=config.overlay,
-        chrome=config.chrome,
-        opacity=config.opacity,
-        minimum_size=config.surface.minimum_size,
-        build_content=lambda: context.surfaces.build(
-            config.surface,
-            context,
-            window_path.child("surface", config.surface.id),
-        ),
-        context=context,
-        dwell=config.dwell_click,
-        parent=parent,
-    )
-    window.set_dwell_enabled(
-        bool(
-            context.state.get(
-                source_state_namespace(window_path),
-                "dwell_enabled",
-                config.dwell_click.enabled,
-            )
-        )
-    )
-    return window
-
-
 def build_profile_window(
-    config: ProfileWindowConfig,
+    config: WindowConfig,
     context: Context,
     *,
     attachments: WindowAttachments | None = None,

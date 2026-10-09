@@ -5,14 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..config.models import AppConfig
-from .registries import ComponentRegistry, SurfaceRegistry
-from .state_store import StateStore
-
 if TYPE_CHECKING:
-    from .dispatcher import Dispatcher
-    from .behaviors import BehaviorRegistry
     from ..services.keyboard import KeyboardService
+    from .dispatcher import Dispatcher
     from .engine import Engine
 
 
@@ -21,21 +16,11 @@ class Context:
     """Main-owned object exposing runtime boundaries to subsystems.
 
     Attributes:
-        config: Loaded declarative app config.
-        dispatcher: Synchronous dispatcher with queue-ready action/event shape.
+        dispatcher: Queue that carries every event and action.
         keyboard: Keyboard service wrapping backend access.
-        state: Central state store.
-        components: Component builder registry.
-        surfaces: Surface builder registry.
-        behaviors: Runtime component behavior registry.
-        engine: Profile state, functions, and bindings.
+        engine: Profile state, functions, node kinds, and bindings.
     """
 
-    config: AppConfig
     dispatcher: "Dispatcher"
     keyboard: "KeyboardService"
-    state: StateStore
-    components: ComponentRegistry
-    surfaces: SurfaceRegistry
-    behaviors: "BehaviorRegistry"
     engine: "Engine"

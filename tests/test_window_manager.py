@@ -16,9 +16,8 @@ class WindowManagerVisibilityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.window = Mock(configured_opacity=0.85)
-        self.manager = WindowManager.__new__(WindowManager)
-        self.manager._windows = {"window:keyboard": self.window}
-        self.manager._input_blockers = {}
+        self.manager = WindowManager({"window:keyboard": lambda parent: self.window})
+        self.manager.get_or_create("window:keyboard")
 
     def test_windows_hide_hides_window(self) -> None:
         with patch("axidev_osk.runtime.window_manager.sys.platform", "win32"):
@@ -45,14 +44,6 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.window.show.assert_called_once_with()
         self.window.showNormal.assert_not_called()
 
-    def test_windows_minimized_window_remains_visible(self) -> None:
-        self.window.isVisible.return_value = True
-        self.window.isMinimized.return_value = True
-
-        with patch("axidev_osk.runtime.window_manager.sys.platform", "win32"):
-            self.assertTrue(self.manager.is_visible("window:keyboard"))
-            self.assertTrue(self.manager.is_minimized("window:keyboard"))
-
     def test_linux_hide_still_hides_window(self) -> None:
         with patch("axidev_osk.runtime.window_manager.sys.platform", "linux"):
             self.manager.hide("window:keyboard")
@@ -73,42 +64,41 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.assertTrue(blocker.eventFilter(normal_key, event))
         self.assertTrue(blocker.eventFilter(window, event))
 
-    def test_toggle_opacity_restores_configured_opacity_on_second_call(self) -> None:
-        window = Mock(configured_opacity=0.85)
-        self.manager._windows = {"window:keyboard": window}
+    def test_windows_are_built_lazily_from_factories(self) -> None:
+        built: list[object] = []
+        manager = WindowManager({"pad": lambda parent: built.append(parent) or self.window})
 
-        self.manager.toggle_opacity(
-            "window:keyboard",
-            component_id="key:ghost",
-            opacity=0.01,
-        )
+        self.assertIsNone(manager.get("pad"))
+        self.assertIs(manager.get_or_create("pad"), self.window)
+        self.assertIs(manager.get_or_create("pad"), self.window)
+        self.assertEqual(built, [None])
+        with self.assertRaisesRegex(ValueError, "No window named 'nope'"):
+            manager.get_or_create("nope")
 
-        window.set_visual_opacity.assert_called_once_with(0.01)
-        self.assertIn("window:keyboard", self.manager._input_blockers)
-
-        self.manager.toggle_opacity(
-            "window:keyboard",
-            component_id="key:ghost",
-            opacity=0.01,
-        )
-
-        self.assertEqual(
-            window.set_visual_opacity.call_args_list,
-            [unittest.mock.call(0.01), unittest.mock.call(0.85)],
-        )
-        self.assertNotIn("window:keyboard", self.manager._input_blockers)
-
-    def test_show_restores_configured_opacity_and_removes_input_blocker(self) -> None:
-        window = Mock(configured_opacity=0.85)
-        blocker = _WindowInputBlocker(window, frozenset({"key:ghost"}))
-        self.app.installEventFilter(blocker)
-        self.manager._windows = {"window:keyboard": window}
-        self.manager._input_blockers = {"window:keyboard": blocker}
-
+    def test_opacity_and_input_blocking_are_separate_effects(self) -> None:
+        self.manager.set_opacity("window:keyboard", 0.01)
+        self.manager.block_input("window:keyboard", frozenset({"ghost"}))
         self.manager.show("window:keyboard")
 
-        window.set_visual_opacity.assert_called_once_with(0.85)
+        self.window.set_visual_opacity.assert_called_once_with(0.01)
+        self.assertIn("window:keyboard", self.manager._input_blockers)
+
+        self.manager.unblock_input("window:keyboard")
+        self.manager.unblock_input("window:keyboard")
         self.assertNotIn("window:keyboard", self.manager._input_blockers)
+
+    def test_close_and_destroy_remove_input_blocks(self) -> None:
+        self.manager.get_or_create("window:keyboard")
+        self.manager.block_input("window:keyboard", frozenset())
+        self.manager.close("window:keyboard")
+        self.assertEqual(self.manager._input_blockers, {})
+
+        self.manager.get_or_create("window:keyboard")
+        self.manager.block_input("window:keyboard", frozenset())
+        self.manager.destroy("window:keyboard")
+        self.assertEqual(self.manager._input_blockers, {})
+        self.window.release_platform_resources.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

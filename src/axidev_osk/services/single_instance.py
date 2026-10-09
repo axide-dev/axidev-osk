@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QLockFile, QObject
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
-from ..runtime.actions import window_show
+from ..runtime.events import app_activated
 from ..runtime.context import Context
 
 
@@ -102,4 +102,4 @@ class WindowsSingleInstanceService(QObject):
             connection.deleteLater()
             received_request = True
         if received_request:
-            context.dispatcher.dispatch_action(window_show(context.config.keyboard_window_id))
+            context.dispatcher.dispatch_event(app_activated())

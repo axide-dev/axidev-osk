@@ -28,12 +28,13 @@ class HotCornerService:
         self._corners = corners
 
     def start(self, context: Context) -> None:
-        """Create and start the controller from the configured attachment."""
+        """Start corner sensors when the profile configured a hot_corners attachment."""
 
-        settings = self._settings if self._settings is not None else context.config.hot_corner
+        if self._settings is None:
+            return
         self._controller = HotCornerWindowToggleController(
             context.dispatcher,
-            config=settings,
+            config=self._settings,
             corners=self._corners,
             parent=self._parent,
         )

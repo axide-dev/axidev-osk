@@ -79,7 +79,7 @@ class DefaultProfileHarness:
         if QApplication.instance() is None:
             QApplication([])
         self.backend = RecordingBackend()
-        self.context = make_test_context(self.backend, activate_behaviors=False)
+        self.context = make_test_context(self.backend)
         self.engine = self.context.engine
         self.actions: list[tuple[str, DataMap]] = []
         for name in _RECORDED_ACTIONS:

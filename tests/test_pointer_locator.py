@@ -13,8 +13,10 @@ from axidev_osk.components.pointer_locator import (
     build_component_palette,
     gaussian_opacity,
 )
-from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.attachments import PointerLocatorOptions
 from axidev_osk.config.models import PointerLocatorConfig
+from axidev_osk.python_defaults.default_profile import build_default_config
+from axidev_osk.runtime.testing import make_test_context
 
 
 def _app() -> QApplication:
@@ -22,6 +24,12 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+class FakeKeyboardBackend:
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
 
 
 def _locator_config(**overrides: object) -> PointerLocatorConfig:
@@ -37,11 +45,15 @@ def _locator_config(**overrides: object) -> PointerLocatorConfig:
 
 class PointerLocatorPaletteTests(unittest.TestCase):
     def test_default_keyboard_uses_component_aware_locator(self) -> None:
-        background_components = build_default_app_config().windows[0].surface.background_components
+        engine = make_test_context(FakeKeyboardBackend()).engine
+        profile = engine.decoder().decode_root(build_default_config()).profile
 
-        self.assertEqual(len(background_components), 1)
-        config = background_components[0]
-        self.assertIsInstance(config, PointerLocatorConfig)
+        locators = [attachment for attachment in profile.attachments if attachment.kind == "pointer_locator"]
+        self.assertEqual([attachment.id for attachment in locators], ["keyboard-locator"])
+        options = locators[0].options
+        assert isinstance(options, PointerLocatorOptions)
+        self.assertEqual(options.window, "keyboard")
+        config = options.settings
         self.assertEqual(config.radius_percent, 30)
         self.assertEqual(config.maximum_opacity_percent, 60)
         self.assertEqual(config.radius_standard_deviations, 3)
@@ -170,10 +182,10 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         host = QWidget()
         host.resize(220, 80)
         left = QPushButton("Left", host)
-        left.setProperty("componentType", "key")
+        left.setProperty("componentType", "button")
         left.setGeometry(10, 10, 90, 60)
         right = QPushButton("Right", host)
-        right.setProperty("componentType", "key")
+        right.setProperty("componentType", "button")
         right.setGeometry(120, 10, 90, 60)
         host.show()
         app.processEvents()
