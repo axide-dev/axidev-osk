@@ -5,6 +5,10 @@ Every call here is inayayousfi's, and no agent acted on its own.
 
 This file defines the architectural guardrails for humans and coding agents working in this repository.
 
+## Active Work
+
+The runtime is being purified into an engine of building blocks plus Python defaults that a Lua layer will later replace. `PURIFICATION_PLAN.md` at the repository root holds the settled decisions, the target architecture, and step progress. Read it before changing runtime, config, components, windows, services, or bundled defaults, and do not reopen its settled decisions without a new reason.
+
 ## Intent
 
 Axidev OSK should evolve into a modular composition system for on-screen input surfaces.
