@@ -220,15 +220,15 @@ def state_changed(source: SourcePath, state: DataMap) -> RuntimeEvent:
 
 
 def window_close_requested(window_id: str) -> RuntimeEvent:
-    return RuntimeEvent(WINDOW_CLOSE_REQUESTED, {"window_id": window_id})
+    return RuntimeEvent(WINDOW_CLOSE_REQUESTED, {"window": window_id})
 
 
 def window_drag_started(window_id: str) -> RuntimeEvent:
-    return RuntimeEvent(WINDOW_DRAG_STARTED, {"window_id": window_id})
+    return RuntimeEvent(WINDOW_DRAG_STARTED, {"window": window_id})
 
 
 def window_drag_ended(window_id: str) -> RuntimeEvent:
-    return RuntimeEvent(WINDOW_DRAG_ENDED, {"window_id": window_id})
+    return RuntimeEvent(WINDOW_DRAG_ENDED, {"window": window_id})
 
 
 def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
@@ -330,13 +330,13 @@ def decode_state_changed(arguments: DataMap) -> StateChangedArguments:
 
 
 def decode_window_close_requested(arguments: DataMap) -> WindowCloseRequestedArguments:
-    require_keys(arguments, ("window_id",))
-    return WindowCloseRequestedArguments(window_id=string_value(arguments, "window_id"))
+    require_keys(arguments, ("window",))
+    return WindowCloseRequestedArguments(window_id=string_value(arguments, "window"))
 
 
 def decode_window_drag(arguments: DataMap) -> WindowDragArguments:
-    require_keys(arguments, ("window_id",))
-    return WindowDragArguments(window_id=non_empty_string_value(arguments, "window_id"))
+    require_keys(arguments, ("window",))
+    return WindowDragArguments(window_id=non_empty_string_value(arguments, "window"))
 
 
 def register_builtin_events(dispatcher: "Dispatcher") -> None:

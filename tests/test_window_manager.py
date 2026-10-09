@@ -66,7 +66,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         ghost.setProperty("componentId", "key:ghost")
         normal_key = QPushButton(window)
         normal_key.setProperty("componentId", "key:a")
-        blocker = _WindowInputBlocker(window, "key:ghost")
+        blocker = _WindowInputBlocker(window, frozenset({"key:ghost"}))
         event = QEvent(QEvent.Type.MouseButtonPress)
 
         self.assertFalse(blocker.eventFilter(ghost, event))
@@ -100,7 +100,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
 
     def test_show_restores_configured_opacity_and_removes_input_blocker(self) -> None:
         window = Mock(configured_opacity=0.85)
-        blocker = _WindowInputBlocker(window, "key:ghost")
+        blocker = _WindowInputBlocker(window, frozenset({"key:ghost"}))
         self.app.installEventFilter(blocker)
         self.manager._windows = {"window:keyboard": window}
         self.manager._input_blockers = {"window:keyboard": blocker}

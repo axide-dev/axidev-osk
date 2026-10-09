@@ -30,7 +30,10 @@ STATE_REPLACE = "legacy.state_replace"
 STATE_SET = "legacy.state_set"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
+WINDOW_BLOCK_INPUT = "window.block_input"
 WINDOW_MOVE_BY = "window.move_by"
+WINDOW_SET_OPACITY = "window.set_opacity"
+WINDOW_UNBLOCK_INPUT = "window.unblock_input"
 WINDOW_SET_DWELL_ENABLED = "window.set_dwell_enabled"
 WINDOW_SHOW = "window.show"
 WINDOW_TOGGLE_OPACITY = "window.toggle_opacity"
@@ -80,6 +83,18 @@ class WindowArguments:
 @dataclass(frozen=True, slots=True)
 class NoArguments:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class WindowOpacityArguments:
+    window_id: str
+    opacity: float
+
+
+@dataclass(frozen=True, slots=True)
+class WindowBlockInputArguments:
+    window_id: str
+    allowed_node_ids: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,21 +162,21 @@ def state_set(namespace: str, key: str, value: DataValue) -> RuntimeAction:
 
 
 def window_show(window_id: str) -> RuntimeAction:
-    return _validated_action(WINDOW_SHOW, {"window_id": window_id}, decode_window)
+    return _validated_action(WINDOW_SHOW, {"window": window_id}, decode_window)
 
 
 def window_hide(window_id: str) -> RuntimeAction:
-    return _validated_action(WINDOW_HIDE, {"window_id": window_id}, decode_window)
+    return _validated_action(WINDOW_HIDE, {"window": window_id}, decode_window)
 
 
 def window_close(window_id: str) -> RuntimeAction:
-    return _validated_action(WINDOW_CLOSE, {"window_id": window_id}, decode_window)
+    return _validated_action(WINDOW_CLOSE, {"window": window_id}, decode_window)
 
 
 def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
     return _validated_action(
         WINDOW_MOVE_BY,
-        {"window_id": window_id, "dx": dx, "dy": dy},
+        {"window": window_id, "dx": dx, "dy": dy},
         decode_window_move_by,
     )
 
@@ -169,7 +184,7 @@ def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
 def window_set_dwell_enabled(window_id: str, enabled: bool) -> RuntimeAction:
     return _validated_action(
         WINDOW_SET_DWELL_ENABLED,
-        {"window_id": window_id, "enabled": enabled},
+        {"window": window_id, "enabled": enabled},
         decode_window_set_dwell_enabled,
     )
 
@@ -185,7 +200,7 @@ def secure_input_panel_release() -> RuntimeAction:
 def window_toggle_opacity(window_id: str, component_id: str, opacity: float) -> RuntimeAction:
     return _validated_action(
         WINDOW_TOGGLE_OPACITY,
-        {"window_id": window_id, "component_id": component_id, "opacity": opacity},
+        {"window": window_id, "component_id": component_id, "opacity": opacity},
         decode_window_toggle_opacity,
     )
 
@@ -254,8 +269,8 @@ def decode_state_set(arguments: DataMap) -> StateSetArguments:
 
 
 def decode_window(arguments: DataMap) -> WindowArguments:
-    require_keys(arguments, ("window_id",))
-    return WindowArguments(window_id=non_empty_string_value(arguments, "window_id"))
+    require_keys(arguments, ("window",))
+    return WindowArguments(window_id=non_empty_string_value(arguments, "window"))
 
 
 def decode_no_arguments(arguments: DataMap) -> NoArguments:
@@ -263,30 +278,46 @@ def decode_no_arguments(arguments: DataMap) -> NoArguments:
     return NoArguments()
 
 
+def decode_window_set_opacity(arguments: DataMap) -> WindowOpacityArguments:
+    require_keys(arguments, ("window", "opacity"))
+    opacity = number_value(arguments, "opacity")
+    if not 0.0 <= opacity <= 1.0:
+        raise ValueError("Argument 'opacity' must be between 0.0 and 1.0")
+    return WindowOpacityArguments(window_id=non_empty_string_value(arguments, "window"), opacity=opacity)
+
+
+def decode_window_block_input(arguments: DataMap) -> WindowBlockInputArguments:
+    require_keys(arguments, ("window",), optional=("except",))
+    return WindowBlockInputArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        allowed_node_ids=string_set_value(arguments, "except") if "except" in arguments else frozenset(),
+    )
+
+
 def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:
-    require_keys(arguments, ("window_id", "dx", "dy"))
+    require_keys(arguments, ("window", "dx", "dy"))
     return WindowMoveByArguments(
-        window_id=non_empty_string_value(arguments, "window_id"),
+        window_id=non_empty_string_value(arguments, "window"),
         dx=int_value(arguments, "dx"),
         dy=int_value(arguments, "dy"),
     )
 
 
 def decode_window_set_dwell_enabled(arguments: DataMap) -> WindowSetDwellEnabledArguments:
-    require_keys(arguments, ("window_id", "enabled"))
+    require_keys(arguments, ("window", "enabled"))
     return WindowSetDwellEnabledArguments(
-        window_id=non_empty_string_value(arguments, "window_id"),
+        window_id=non_empty_string_value(arguments, "window"),
         enabled=bool_value(arguments, "enabled"),
     )
 
 
 def decode_window_toggle_opacity(arguments: DataMap) -> WindowToggleOpacityArguments:
-    require_keys(arguments, ("window_id", "component_id", "opacity"))
+    require_keys(arguments, ("window", "component_id", "opacity"))
     opacity = number_value(arguments, "opacity")
     if not 0.0 <= opacity < 1.0:
         raise ValueError("Argument 'opacity' must be at least 0.0 and less than 1.0")
     return WindowToggleOpacityArguments(
-        window_id=non_empty_string_value(arguments, "window_id"),
+        window_id=non_empty_string_value(arguments, "window"),
         component_id=non_empty_string_value(arguments, "component_id"),
         opacity=opacity,
     )

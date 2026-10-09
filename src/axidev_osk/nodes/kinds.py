@@ -28,10 +28,27 @@ BUTTON_RELEASED = "button.released"
 _VISIBLE = {"visible": PropertySpec(bool, True)}
 
 
+_QT_MAX_SIZE = 16_777_215
+_ALIGNMENTS = {
+    "left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    "center": Qt.AlignmentFlag.AlignCenter,
+    "right": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+    "top_left": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class SizeOptions:
+    """Pixel size limits; a maximum of 0 means unlimited."""
+
     min_width: int = 0
     min_height: int = 0
+    max_width: int = 0
+    max_height: int = 0
+
+    def apply(self, widget: QWidget) -> None:
+        widget.setMinimumSize(self.min_width, self.min_height)
+        widget.setMaximumSize(self.max_width or _QT_MAX_SIZE, self.max_height or _QT_MAX_SIZE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +61,8 @@ class LayoutOptions:
 @dataclass(frozen=True, slots=True)
 class LabelOptions:
     word_wrap: bool = False
+    align: str = "left"
+    size: SizeOptions = SizeOptions()
 
 
 def register_builtin_nodes(registry: NodeKindRegistry) -> None:
@@ -69,7 +88,7 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             build=_build_label,
             apply=_apply_label,
             properties={"text": PropertySpec(str, ""), **_VISIBLE},
-            decode_options=lambda reader: LabelOptions(word_wrap=reader.boolean("word_wrap", False)),
+            decode_options=_decode_label,
         )
     )
     registry.register(NodeKind(name="spacer", build=_build_spacer, apply=_apply_common, decode_options=_decode_size))
@@ -108,6 +127,16 @@ def _decode_size(reader: ConfigReader) -> SizeOptions:
     return SizeOptions(
         min_width=reader.integer("min_width", 0, minimum=0),
         min_height=reader.integer("min_height", 0, minimum=0),
+        max_width=reader.integer("max_width", 0, minimum=0),
+        max_height=reader.integer("max_height", 0, minimum=0),
+    )
+
+
+def _decode_label(reader: ConfigReader) -> LabelOptions:
+    return LabelOptions(
+        word_wrap=reader.boolean("word_wrap", False),
+        align=reader.choice("align", frozenset(_ALIGNMENTS), "left"),
+        size=_decode_size(reader),
     )
 
 
@@ -137,7 +166,7 @@ def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     button = Button()
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    button.setMinimumSize(options.min_width, options.min_height)
+    options.apply(button)
     button.setProperty("pressed", False)
     button.setProperty("latched", False)
     button.setProperty("interactionState", "idle")
@@ -177,7 +206,10 @@ def _build_label(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     options = node.options
     assert isinstance(options, LabelOptions)
     label = QLabel()
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(options.word_wrap)
+    label.setAlignment(_ALIGNMENTS[options.align])
+    options.size.apply(label)
     return label
 
 
@@ -195,7 +227,7 @@ def _build_spacer(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     assert isinstance(options, SizeOptions)
     spacer = QWidget()
     spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-    spacer.setMinimumSize(options.min_width, options.min_height)
+    options.apply(spacer)
     spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     return spacer
 

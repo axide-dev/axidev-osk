@@ -360,7 +360,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
             "dwell_enabled",
             True,
         )
-        self.assertEqual(requested, [{"window_id": window_config.id, "enabled": True}])
+        self.assertEqual(requested, [{"window": window_config.id, "enabled": True}])
 
         with patch(
             "axidev_osk.windows.builder.configure_always_on_top_window",

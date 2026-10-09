@@ -30,10 +30,10 @@ class _WindowInputBlocker(QObject):
         QEvent.Type.ContextMenu,
     }
 
-    def __init__(self, window: QWidget, allowed_component_id: str) -> None:
+    def __init__(self, window: QWidget, allowed_component_ids: frozenset[str]) -> None:
         super().__init__()
         self._window = window
-        self._allowed_component_id = allowed_component_id
+        self._allowed_component_ids = allowed_component_ids
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Return true for blocked mouse events within the target window."""
@@ -45,7 +45,7 @@ class _WindowInputBlocker(QObject):
 
         current: QWidget | None = watched
         while current is not None:
-            if current.property("componentId") == self._allowed_component_id:
+            if current.property("componentId") in self._allowed_component_ids:
                 return False
             if current is self._window:
                 break
@@ -187,10 +187,35 @@ class WindowManager:
         app = QApplication.instance()
         if app is None:
             raise RuntimeError("Window opacity mode requires a QApplication")
-        blocker = _WindowInputBlocker(window, component_id)
+        blocker = _WindowInputBlocker(window, frozenset({component_id}))
         app.installEventFilter(blocker)
         self._input_blockers[window_id] = blocker
         window.set_visual_opacity(opacity)
+
+    def set_opacity(self, window_id: str, opacity: float) -> None:
+        """Set one window's visible opacity, building the window if needed."""
+
+        self.get_or_create(window_id).set_visual_opacity(opacity)
+
+    def block_input(self, window_id: str, allowed_node_ids: frozenset[str]) -> None:
+        """Ignore pointer input on a window except inside the allowed nodes."""
+
+        window = self.get_or_create(window_id)
+        app = QApplication.instance()
+        if app is None:
+            raise RuntimeError("Blocking window input requires a QApplication")
+        self.unblock_input(window_id)
+        blocker = _WindowInputBlocker(window, allowed_node_ids)
+        app.installEventFilter(blocker)
+        self._input_blockers[window_id] = blocker
+
+    def unblock_input(self, window_id: str) -> None:
+        """Remove a pointer-input block installed by ``block_input``."""
+
+        blocker = self._input_blockers.pop(window_id, None)
+        app = QApplication.instance()
+        if blocker is not None and app is not None:
+            app.removeEventFilter(blocker)
 
     def set_dwell_enabled(self, window_id: str, enabled: bool) -> None:
         """Set dwell activation on a managed window."""

@@ -39,7 +39,14 @@ def build_engine(
     register_profile_events(dispatcher)
     register_engine_events(dispatcher)
     functions = FunctionRegistry()
-    state = StateTree()
+    state = StateTree(
+        {
+            "input": {"keys": {}, "locks": {"capslock": False, "numlock": False}},
+            "keyboard": {"ready": False, "status": "", "needs_permission_setup": False, "permission_setup_text": ""},
+            "windows": {},
+            "dwell": {},
+        }
+    )
     profile = ProfileRuntime(dispatcher, functions, state)
     install_engine_handlers(dispatcher, profile_runtime=profile, keyboard=keyboard, processes=processes)
     bindings = BindingTracker(dispatcher, functions, state)

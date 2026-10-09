@@ -20,8 +20,11 @@ from .actions import (
     STATE_SET,
     WINDOW_CLOSE,
     WINDOW_HIDE,
+    WINDOW_BLOCK_INPUT,
     WINDOW_MOVE_BY,
     WINDOW_SET_DWELL_ENABLED,
+    WINDOW_SET_OPACITY,
+    WINDOW_UNBLOCK_INPUT,
     WINDOW_SHOW,
     WINDOW_TOGGLE_OPACITY,
     AppQuitArguments,
@@ -32,7 +35,9 @@ from .actions import (
     StateReplaceArguments,
     StateSetArguments,
     WindowArguments,
+    WindowBlockInputArguments,
     WindowMoveByArguments,
+    WindowOpacityArguments,
     WindowSetDwellEnabledArguments,
     WindowToggleOpacityArguments,
     decode_app_quit,
@@ -43,8 +48,10 @@ from .actions import (
     decode_state_replace,
     decode_state_set,
     decode_window,
+    decode_window_block_input,
     decode_window_move_by,
     decode_window_set_dwell_enabled,
+    decode_window_set_opacity,
     decode_window_toggle_opacity,
     state_set,
     window_hide,
@@ -168,6 +175,21 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         WINDOW_TOGGLE_OPACITY,
         decode_window_toggle_opacity,
         lambda runtime: lambda arguments: _window_toggle_opacity(runtime, arguments),
+    )
+    registry.register_action_handler(
+        WINDOW_SET_OPACITY,
+        decode_window_set_opacity,
+        lambda runtime: lambda arguments: _window_set_opacity(runtime, arguments),
+    )
+    registry.register_action_handler(
+        WINDOW_BLOCK_INPUT,
+        decode_window_block_input,
+        lambda runtime: lambda arguments: _window_block_input(runtime, arguments),
+    )
+    registry.register_action_handler(
+        WINDOW_UNBLOCK_INPUT,
+        decode_window,
+        lambda runtime: lambda arguments: _window_unblock_input(runtime, arguments),
     )
     registry.register_action_handler(
         WINDOW_MOVE_BY,
@@ -445,6 +467,21 @@ def _pointer_motion_observed_handler(
     runtime: _PointerDragRuntime,
 ) -> Callable[[PointerMotionObservedArguments], MessageResult]:
     return lambda event: route_pointer_motion_observed(event, runtime)
+
+
+def _window_set_opacity(runtime: object, arguments: WindowOpacityArguments) -> MessageResult:
+    runtime._window_manager.set_opacity(arguments.window_id, arguments.opacity)  # type: ignore[attr-defined]  # noqa: SLF001
+    return []
+
+
+def _window_block_input(runtime: object, arguments: WindowBlockInputArguments) -> MessageResult:
+    runtime._window_manager.block_input(arguments.window_id, arguments.allowed_node_ids)  # type: ignore[attr-defined]  # noqa: SLF001
+    return []
+
+
+def _window_unblock_input(runtime: object, arguments: WindowArguments) -> MessageResult:
+    runtime._window_manager.unblock_input(arguments.window_id)  # type: ignore[attr-defined]  # noqa: SLF001
+    return []
 
 
 def _app_quit(runtime: object, arguments: AppQuitArguments) -> MessageResult:

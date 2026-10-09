@@ -176,7 +176,7 @@ class UsIsoLayoutTests(unittest.TestCase):
         self.assertNotIn(ghost.id, build_us_iso_behavior_configs())
         self.assertIsInstance(actions, list)
         self.assertEqual(actions[0]["action"], "window.toggle_opacity")
-        self.assertEqual(actions[0]["arguments"]["window_id"], "window:keyboard")
+        self.assertEqual(actions[0]["arguments"]["window"], "window:keyboard")
         self.assertEqual(actions[0]["arguments"]["component_id"], ghost.id)
 
     def test_function_keys_declare_matching_outputs(self) -> None:
@@ -225,11 +225,11 @@ class UsIsoLayoutTests(unittest.TestCase):
         self.assertIs(arguments["initially_latched"], False)
         self.assertEqual(
             [action["arguments"] for action in arguments["latched_actions"]],
-            [{"window_id": "window:keyboard", "enabled": True}],
+            [{"window": "window:keyboard", "enabled": True}],
         )
         self.assertEqual(
             [action["arguments"] for action in arguments["unlatched_actions"]],
-            [{"window_id": "window:keyboard", "enabled": False}],
+            [{"window": "window:keyboard", "enabled": False}],
         )
 
 

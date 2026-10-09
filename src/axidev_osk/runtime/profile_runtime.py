@@ -46,8 +46,9 @@ class CallbackFailedArguments:
     message: str
 
 
-def state_set(path: str, value: DataValue) -> RuntimeAction:
-    return RuntimeAction(STATE_SET, {"path": path, "value": value})
+def state_set(path: str | list[str], value: DataValue) -> RuntimeAction:
+    raw_path: DataValue = list(path) if isinstance(path, list) else path
+    return RuntimeAction(STATE_SET, {"path": raw_path, "value": value})
 
 
 def state_changed(path: StatePath) -> RuntimeEvent:
@@ -68,9 +69,18 @@ def callback_failed(ref: FunctionRef, kind: str, source: str, error: Exception) 
 
 
 def decode_state_set(arguments: DataMap) -> StateSetArguments:
+    """Decode ``state.set``; ``path`` is ``"a.b"`` or ``["a", "b"]`` for names containing dots."""
+
     require_keys(arguments, ("path",), optional=("value",))
+    raw_path = arguments["path"]
+    if isinstance(raw_path, list):
+        if not raw_path or not all(isinstance(segment, str) and segment for segment in raw_path):
+            raise ValueError("Argument 'path' must be a non-empty list of non-empty strings")
+        path: StatePath = tuple(segment for segment in raw_path if isinstance(segment, str))
+    else:
+        path = parse_state_path(string_value(arguments, "path"))
     return StateSetArguments(
-        path=parse_state_path(string_value(arguments, "path")),
+        path=path,
         value=data_value(arguments, "value") if "value" in arguments else None,
     )
 
