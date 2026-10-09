@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QGridLayout, QPushButton, QWidget
@@ -243,6 +242,12 @@ class BehaviorParityTests(unittest.TestCase):
                 ("app.quit", {"exit_code": 0}),
             ],
         )
+
+    def test_second_launch_shows_the_keyboard(self) -> None:
+        harness = self.harness
+        harness.emit(RuntimeEvent("app.activated", {}))
+
+        self.assertEqual(harness.actions, [("window.show", {"window": "keyboard"})])
 
     def test_permission_flow_offers_terminal_setup(self) -> None:
         harness = self.harness

@@ -321,6 +321,7 @@ def build_default_config() -> osk.Map:
                     "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx, KEYBOARD, KEYBOARD_OPACITY),
                     "window.close_requested": _on_close_requested,
                     "app.quit_requested": lambda ctx, event: [osk.window.show(QUIT_PROMPT)],
+                    "app.activated": lambda ctx, event: [osk.window.show(KEYBOARD)],
                     "keyboard.permission_required": lambda ctx, event: [osk.window.show(PERMISSION_PROMPT)],
                     "linux.permission_setup_opened": _on_permission_setup_opened,
                 },
