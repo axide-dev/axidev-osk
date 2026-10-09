@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..attachments import AttachmentKindRegistry, register_builtin_attachments
+from ..config.profile import ConfigDecoder
 from ..nodes import NodeBuilder, NodeKindRegistry, register_builtin_nodes
 from .dispatcher import Dispatcher
 from .engine_messages import KeyboardEffects, ProcessEffects, install_engine_handlers, register_engine_events
@@ -22,6 +24,12 @@ class Engine:
     bindings: BindingTracker
     nodes: NodeKindRegistry
     node_builder: NodeBuilder
+    attachments: AttachmentKindRegistry
+
+    def decoder(self) -> ConfigDecoder:
+        """Return a decoder for root configs using this engine's registered kinds."""
+
+        return ConfigDecoder(node_kinds=self.nodes, attachment_kinds=self.attachments, functions=self.functions)
 
 
 def build_engine(
@@ -53,6 +61,8 @@ def build_engine(
     nodes = NodeKindRegistry()
     register_builtin_nodes(nodes)
     nodes.register_events(dispatcher)
+    attachments = AttachmentKindRegistry()
+    register_builtin_attachments(attachments)
     return Engine(
         functions=functions,
         state=state,
@@ -60,4 +70,5 @@ def build_engine(
         bindings=bindings,
         nodes=nodes,
         node_builder=NodeBuilder(nodes, dispatcher, bindings),
+        attachments=attachments,
     )

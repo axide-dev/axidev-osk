@@ -140,9 +140,9 @@ Each step keeps the full test suite, flake8, and pyright passing.
 - [x] 2. Observed state, `input.key`, keyboard actions, `process.spawn` with its background lane, log actions.
 - [x] 3. Generic nodes and profile windows, built alongside the old keyboard grid. The app switches to them in step 5, and step 7 deletes the old grid and key components.
 - [x] 4. `osk.std` library in `python_defaults/` with its own tests.
-- [ ] 5. Default profile on `osk.std` with parity tests.
-- [ ] 6. Attachments take references and options.
-- [ ] 7. Prompts and quit flow move to the profile. Delete dead engine code. Rewrite `AGENTS.md` to explain the architecture with practical guides for adding node kinds, attachments, actions, events, library helpers, and profiles.
+- [x] 5. Default profile on `osk.std` with parity tests. The app does not load it yet.
+- [ ] 6. Attachments (dwell, pointer locator, hot corners, secure input panel) take references and options, each tested on its own.
+- [ ] 7. Switch the app to the default profile in one step: quit flow, prompts, permission flow, and lock-screen panel. Delete dead engine code. Rewrite `AGENTS.md` to explain the architecture with practical guides for adding node kinds, attachments, actions, events, library helpers, and profiles.
 
 ## After This PR
 

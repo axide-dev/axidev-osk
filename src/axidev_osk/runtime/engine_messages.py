@@ -26,10 +26,12 @@ from .profile_runtime import ProfileRuntime
 
 _profile_logger = logging.getLogger("axidev_osk.profile")
 
+APP_QUIT_REQUESTED = "app.quit_requested"
 INPUT_KEY = "input.key"
 KEYBOARD_STATUS_CHANGED = "keyboard.status_changed"
 KEYBOARD_PERMISSION_REQUIRED = "keyboard.permission_required"
 KEYBOARD_RESET = "keyboard.reset"
+LINUX_PERMISSION_SETUP_OPENED = "linux.permission_setup_opened"
 PROCESS_EXITED = "process.exited"
 WINDOW_VISIBILITY_CHANGED = "window.visibility_changed"
 
@@ -64,6 +66,16 @@ class KeyboardStatusArguments:
 @dataclass(frozen=True, slots=True)
 class EmptyArguments:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class QuitRequestedArguments:
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class PermissionSetupOpenedArguments:
+    opened: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +169,14 @@ def keyboard_permission_required() -> RuntimeEvent:
     return RuntimeEvent(KEYBOARD_PERMISSION_REQUIRED, {})
 
 
+def app_quit_requested(reason: str) -> RuntimeEvent:
+    return RuntimeEvent(APP_QUIT_REQUESTED, {"reason": reason})
+
+
+def linux_permission_setup_opened(opened: bool) -> RuntimeEvent:
+    return RuntimeEvent(LINUX_PERMISSION_SETUP_OPENED, {"opened": opened})
+
+
 def keyboard_reset() -> RuntimeEvent:
     return RuntimeEvent(KEYBOARD_RESET, {})
 
@@ -203,6 +223,16 @@ def decode_keyboard_status(arguments: DataMap) -> KeyboardStatusArguments:
 def decode_empty(arguments: DataMap) -> EmptyArguments:
     require_keys(arguments, ())
     return EmptyArguments()
+
+
+def decode_quit_requested(arguments: DataMap) -> QuitRequestedArguments:
+    require_keys(arguments, ("reason",))
+    return QuitRequestedArguments(reason=string_value(arguments, "reason"))
+
+
+def decode_permission_setup_opened(arguments: DataMap) -> PermissionSetupOpenedArguments:
+    require_keys(arguments, ("opened",))
+    return PermissionSetupOpenedArguments(opened=bool_value(arguments, "opened"))
 
 
 def decode_process_exited(arguments: DataMap) -> ProcessExitedArguments:
@@ -268,7 +298,9 @@ def decode_log(arguments: DataMap) -> LogArguments:
 
 
 def register_engine_events(dispatcher: Dispatcher) -> None:
+    dispatcher.register_event(APP_QUIT_REQUESTED, decode_quit_requested)
     dispatcher.register_event(INPUT_KEY, decode_input_key)
+    dispatcher.register_event(LINUX_PERMISSION_SETUP_OPENED, decode_permission_setup_opened)
     dispatcher.register_event(KEYBOARD_STATUS_CHANGED, decode_keyboard_status)
     dispatcher.register_event(KEYBOARD_PERMISSION_REQUIRED, decode_empty)
     dispatcher.register_event(KEYBOARD_RESET, decode_empty)
