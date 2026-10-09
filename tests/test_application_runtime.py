@@ -40,6 +40,11 @@ def _keyboard_backend() -> Mock:
     backend.state_tags_for_key.return_value = frozenset()
     backend.lock_name_for_key.return_value = None
     backend.is_key_down.return_value = False
+    backend.add_observation_listener.return_value = lambda: None
+    backend.ready = True
+    backend.status_text = "ready"
+    backend.needs_permission_setup = False
+    backend.permission_setup_text = ""
     return backend
 
 

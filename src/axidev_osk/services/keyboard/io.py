@@ -55,6 +55,26 @@ _LOCK_NAMES_BY_KEY = {
 
 KeyStateListener = Callable[[str, bool], None]
 ModifierStateListener = Callable[[frozenset[str]], None]
+
+
+@dataclass(frozen=True)
+class KeyObservation:
+    """One observed key transition, as reported by the input listener.
+
+    Attributes:
+        key: Canonical key name, such as ``A``, ``ShiftLeft``, or ``.``.
+        text: Text the key produced in the active layout, if any.
+        modifiers: Active modifier and lock names, such as ``Shift`` or ``CapsLock``.
+        pressed: Whether the key went down.
+    """
+
+    key: str
+    text: str | None
+    modifiers: tuple[str, ...]
+    pressed: bool
+
+
+ObservationListener = Callable[[KeyObservation], None]
 Unsubscribe = Callable[[], None]
 
 
@@ -84,6 +104,7 @@ class AxidevIoKeyboardBackend:
         self._pressed_key_names: set[str] = set()
         self._key_state_listeners: list[KeyStateListener] = []
         self._modifier_state_listeners: list[ModifierStateListener] = []
+        self._observation_listeners: list[ObservationListener] = []
         self._listener_unsubscribe: Unsubscribe | None = None
         self._key_state_lock = RLock()
 
@@ -200,6 +221,65 @@ class AxidevIoKeyboardBackend:
                     self._modifier_state_listeners.remove(listener)
 
         return unsubscribe
+
+    def add_observation_listener(self, listener: ObservationListener) -> Unsubscribe:
+        """Register a listener for every observed key transition."""
+
+        with self._key_state_lock:
+            self._observation_listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._key_state_lock:
+                if listener in self._observation_listeners:
+                    self._observation_listeners.remove(listener)
+
+        return unsubscribe
+
+    def canonical_key(self, key_name: str) -> str:
+        """Return the backend's canonical spelling of a key name."""
+
+        return self._canonical_key_name(key_name) or key_name
+
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle | None:
+        """Send a key down with explicit modifiers and return its release handle."""
+
+        if not self._ready or self._keyboard is None:
+            return None
+        press = KeyPressHandle(
+            key_name=self.canonical_key(key),
+            mods="+".join(mods) if mods else None,
+            repeats=repeat,
+        )
+        try:
+            self._send_key_down(press)
+            self._set_key_down(press.key_name, True)
+            return press
+        except Exception as exc:
+            _logger.exception("axidev_io key down failed for %r: %s", key, exc)
+            return None
+
+    def tap(self, key: str, mods: tuple[str, ...]) -> None:
+        """Send one key press and release with explicit modifiers."""
+
+        if not self._ready or self._keyboard is None:
+            return
+        try:
+            if mods:
+                self._keyboard.sender.tap(self.canonical_key(key), mods=list(mods))
+            else:
+                self._keyboard.sender.tap(self.canonical_key(key))
+        except Exception as exc:
+            _logger.exception("axidev_io tap failed for %r: %s", key, exc)
+
+    def type_text(self, text: str) -> None:
+        """Type text through the backend's layout-aware text output."""
+
+        if not self._ready or self._keyboard is None:
+            return
+        try:
+            self._keyboard.sender.type_text(text)
+        except Exception as exc:
+            _logger.exception("axidev_io type_text failed: %s", exc)
 
     def is_key_down(self, key_name: str) -> bool:
         """Return whether a canonical backend key is currently pressed."""
@@ -379,6 +459,7 @@ class AxidevIoKeyboardBackend:
             self._listener_unsubscribe = None
 
     def _handle_key_event(self, event: object) -> None:
+        self._notify_observation_listeners(event)
         modifiers = getattr(event, "modifiers", None)
         if isinstance(modifiers, tuple):
             # Report lock state before the key so a Caps Lock press is
@@ -412,6 +493,26 @@ class AxidevIoKeyboardBackend:
 
         for key_name in pressed_key_names:
             self._notify_key_state_listeners(key_name, False)
+
+    def _notify_observation_listeners(self, event: object) -> None:
+        key_name = getattr(event, "key_name", None)
+        if not isinstance(key_name, str) or not key_name:
+            return
+        text = getattr(event, "text", None)
+        modifiers = getattr(event, "modifiers", ())
+        observation = KeyObservation(
+            key=key_name,
+            text=text if isinstance(text, str) and text else None,
+            modifiers=tuple(str(name) for name in modifiers) if isinstance(modifiers, tuple) else (),
+            pressed=bool(getattr(event, "pressed", False)),
+        )
+        with self._key_state_lock:
+            listeners = tuple(self._observation_listeners)
+        for listener in listeners:
+            try:
+                listener(observation)
+            except Exception as exc:
+                _logger.exception("axidev_io observation listener failed: %s", exc)
 
     def _notify_modifier_state_listeners(self, modifiers: frozenset[str]) -> None:
         with self._key_state_lock:

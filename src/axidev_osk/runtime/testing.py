@@ -23,6 +23,7 @@ from ..messages import MessageResult
 from .actions import app_quit
 from .behaviors import BehaviorRegistry, register_builtin_behaviors
 from .context import Context
+from .engine import build_engine
 from .dispatcher import Dispatcher
 from .event_handlers import (
     register_context_action_handlers,
@@ -54,6 +55,16 @@ class _TestApplication:
         """Record the requested application exit code."""
 
         self.exit_code = exit_code
+
+
+class _RecordingProcesses:
+    """Process effects that record spawn requests instead of starting programs."""
+
+    def __init__(self) -> None:
+        self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
+
+    def spawn(self, argv: tuple[str, ...], tag: str, detached: bool) -> None:
+        self.spawned.append((argv, tag, detached))
 
 
 class _TestRuntime:
@@ -161,6 +172,7 @@ def make_test_context(
         components=components,
         surfaces=surfaces or SurfaceRegistry(),
         behaviors=behaviors,
+        engine=build_engine(dispatcher, keyboard=keyboard, processes=_RecordingProcesses()),
     )
     context_handlers = EventHandlerRegistry()
     register_context_action_handlers(context_handlers)

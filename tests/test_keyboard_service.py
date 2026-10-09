@@ -42,6 +42,10 @@ class FakeKeyboardBackend:
     def shutdown(self) -> None:
         self.shutdown_calls += 1
 
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         self.listeners.append(listener)
 

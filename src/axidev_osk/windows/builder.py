@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize
+from PySide6.QtCore import QEvent
 from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.config_paths import window_source_path
+from ..runtime.engine_messages import window_visibility_changed
 from ..runtime.events import window_close_requested, window_drag_ended, window_drag_started
 from ..runtime.source import source_state_namespace
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
@@ -209,12 +211,26 @@ class RuntimeWindow(QMainWindow):
         self.apply_startup_size(minimum_size=self._config.surface.minimum_size)
         self._overlay.handle_show()
         self._dwell_click.start()
+        self._report_visibility()
 
     def hideEvent(self, event: QHideEvent) -> None:  # type: ignore[override]
         """Stop dwell sampling while this window is hidden."""
 
         self._dwell_click.stop()
         super().hideEvent(event)
+        self._report_visibility()
+
+    def changeEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        """Report minimize and restore as window observations."""
+
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._report_visibility()
+
+    def _report_visibility(self) -> None:
+        self._context.dispatcher.dispatch_event(
+            window_visibility_changed(self._config.id, self.isVisible(), self.isMinimized())
+        )
 
 
 def build_window(config: WindowConfig, context: Context, *, parent: QWidget | None = None) -> RuntimeWindow:

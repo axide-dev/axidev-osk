@@ -56,6 +56,10 @@ class FakeWidgetKeyboardBackend:
         self._pressed_key_names = pressed_key_names or set()
         self._listeners = []
 
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         self._listeners.append(listener)
 

@@ -19,6 +19,10 @@ class FakeKeyboardBackend:
     def add_modifier_state_listener(self, listener):
         return lambda: None
 
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
+
     def add_key_state_listener(self, listener: object) -> object:
         del listener
         return lambda: None

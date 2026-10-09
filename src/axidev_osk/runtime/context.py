@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .dispatcher import Dispatcher
     from .behaviors import BehaviorRegistry
     from ..services.keyboard import KeyboardService
+    from .engine import Engine
 
 
 @dataclass(slots=True)
@@ -27,6 +28,7 @@ class Context:
         components: Component builder registry.
         surfaces: Surface builder registry.
         behaviors: Runtime component behavior registry.
+        engine: Profile state, functions, and bindings.
     """
 
     config: AppConfig
@@ -36,3 +38,4 @@ class Context:
     components: ComponentRegistry
     surfaces: SurfaceRegistry
     behaviors: "BehaviorRegistry"
+    engine: "Engine"

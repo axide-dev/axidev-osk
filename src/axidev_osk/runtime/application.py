@@ -16,9 +16,11 @@ from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig, ChromeConfig, PromptConfig, SurfaceConfig, WindowConfig
 from ..services import register_services
 from ..services.keyboard import KeyboardService
+from ..services.process import ProcessService
 from ..styles.theme import apply_theme
 from ..windows.surface import register_surfaces
 from .context import Context
+from .engine import build_engine
 from .behaviors import BehaviorRegistry, register_builtin_behaviors
 from .dispatcher import Dispatcher
 from .event_handlers import (
@@ -85,6 +87,7 @@ class ApplicationRuntime:
         if services is None:
             register_services(self._services, parent=app)
         self._keyboard = self._services.get("keyboard", KeyboardService)
+        self._processes = ProcessService(parent=app)
         self._state = StateStore()
         self._components = ComponentRegistry()
         self._surfaces = SurfaceRegistry()
@@ -104,6 +107,7 @@ class ApplicationRuntime:
             components=self._components,
             surfaces=self._surfaces,
             behaviors=self._behaviors,
+            engine=build_engine(self._dispatcher, keyboard=self._keyboard, processes=self._processes),
         )
         context_handlers = EventHandlerRegistry()
         register_context_action_handlers(context_handlers)
@@ -138,6 +142,8 @@ class ApplicationRuntime:
         """
 
         apply_theme(self._app)
+        self._processes.start(self.context)
+        self._quit_controller.register_quit_callback(self._processes.stop)
         autostart_services = tuple(self._services.autostart_services())
         for service in autostart_services:
             service.start(self.context)

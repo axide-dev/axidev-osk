@@ -41,6 +41,10 @@ class FakeKeyboardBackend:
         self.down_calls: list[tuple[str, frozenset[str]]] = []
         self.up_calls: list[str] = []
 
+    def add_observation_listener(self, listener):
+        del listener
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         self.listeners.append(listener)
         return lambda: self.listeners.remove(listener)
