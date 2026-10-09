@@ -1,20 +1,32 @@
 from __future__ import annotations
 
+import inspect
 import unittest
-from unittest.mock import patch
+from dataclasses import replace
+from unittest.mock import Mock, patch
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from axidev_osk.components import register_components
 from axidev_osk.components.grid.keyboard import KeyboardWidget
+from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.registries import ComponentRegistry, SurfaceRegistry
+from axidev_osk.runtime.config_paths import window_source_path
+from axidev_osk.runtime.events import (
+    WINDOW_CLOSE_REQUESTED,
+    WindowCloseRequestedArguments,
+    component_pressed,
+    component_released,
+)
+from axidev_osk.runtime.source import source_state_namespace
 from axidev_osk.runtime.testing import make_test_context
-from axidev_osk.windows.builder import build_window
+from axidev_osk.windows.builder import RuntimeWindow, build_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
-from axidev_osk.windows.surface import register_surfaces
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
+from axidev_osk.windows.surface import register_surfaces
 
 
 class FakeKeyboardBackend:
@@ -28,6 +40,9 @@ class FakeKeyboardBackend:
 
     def shutdown(self) -> None:
         return None
+
+    def add_modifier_state_listener(self, listener):
+        return lambda: None
 
     def add_key_state_listener(self, listener):
         return lambda: None
@@ -54,8 +69,9 @@ class FakeKeyboardBackend:
         return None
 
 class FakeOverlayController:
-    def __init__(self, *, uses_custom_chrome: bool = True) -> None:
+    def __init__(self, *, uses_custom_chrome: bool = True, uses_runtime_pointer_drag: bool = False) -> None:
         self.uses_custom_chrome = uses_custom_chrome
+        self.uses_runtime_pointer_drag = uses_runtime_pointer_drag
 
     def prepare_show(self) -> bool:
         return True
@@ -96,6 +112,57 @@ def _build_keyboard_window(backend: FakeKeyboardBackend):
 
 class RuntimeWindowLayoutTests(unittest.TestCase):
     """Tests covering the default keyboard window built via ``build_window``."""
+
+    def test_removed_output_close_does_not_request_application_quit(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+        overlay.has_removed_output = Mock(return_value=True)
+        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=overlay):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+        try:
+            window.set_quit_controller_managed(True)
+            events = []
+            window._context.dispatcher.add_event_handler(
+                WINDOW_CLOSE_REQUESTED,
+                lambda close_event: events.append(close_event) or [],
+            )
+            event = QCloseEvent()
+            window.closeEvent(event)
+            self.assertFalse(event.isAccepted())
+            self.assertEqual(events, [])
+
+            overlay.has_removed_output.return_value = False
+            window.closeEvent(QCloseEvent())
+            self.assertEqual(events, [WindowCloseRequestedArguments(window.window_id)])
+        finally:
+            overlay.has_removed_output.return_value = False
+            window.set_quit_controller_managed(False)
+            window.close()
+
+    def test_failed_content_build_releases_platform_resources(self) -> None:
+        _app()
+        config = build_default_app_config()
+        surfaces = SurfaceRegistry()
+        surfaces.build = Mock(side_effect=RuntimeError("surface failed"))
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=config,
+            components=ComponentRegistry(),
+            surfaces=surfaces,
+        )
+        overlay = Mock()
+
+        with (
+            patch(
+                "axidev_osk.windows.builder.configure_always_on_top_window",
+                return_value=overlay,
+            ),
+            self.assertRaisesRegex(RuntimeError, "surface failed"),
+        ):
+            build_window(config.windows[0], context)
+
+        overlay.release_resources.assert_called_once_with()
+
     def test_custom_chrome_puts_resize_handle_in_title_bar(self) -> None:
         _app()
         overlay = FakeOverlayController()
@@ -126,6 +193,100 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         status_label = window.findChild(QLabel, "statusLabel")
         self.assertIsNotNone(status_label)
         self.assertFalse(status_label.isVisible())
+
+    def test_runtime_title_bar_drag_suppresses_qt_motion_deltas(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test", use_runtime_drag_motion=True)
+        deltas: list[tuple[int, int]] = []
+        lifecycle: list[str] = []
+        title_bar.dragDelta.connect(lambda dx, dy: deltas.append((dx, dy)))
+        title_bar.dragStarted.connect(lambda: lifecycle.append("started"))
+        title_bar.dragEnded.connect(lambda: lifecycle.append("ended"))
+
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, 10),
+            QPointF(500, 500),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        title_bar.mousePressEvent(press)
+
+        for local, global_position in ((QPointF(-20, 30), QPointF(0, 0)), (QPointF(40, -5), QPointF(2000, 1000))):
+            move = QMouseEvent(
+                QEvent.Type.MouseMove,
+                local,
+                global_position,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            title_bar.mouseMoveEvent(move)
+
+        release = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(40, -5),
+            QPointF(2000, 1000),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        title_bar.mouseReleaseEvent(release)
+
+        self.assertEqual(deltas, [])
+        self.assertEqual(lifecycle, ["started", "ended"])
+
+    def test_non_raw_title_bar_drag_uses_incremental_global_positions(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test")
+        deltas: list[tuple[int, int]] = []
+        title_bar.dragDelta.connect(lambda dx, dy: deltas.append((dx, dy)))
+
+        title_bar.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(10, 10),
+                QPointF(100, 100),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        title_bar.mouseMoveEvent(
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                QPointF(12, 13),
+                QPointF(105, 107),
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+
+        self.assertEqual(deltas, [(5, 7)])
+
+    def test_runtime_title_bar_ends_drag_when_mouse_grab_is_lost(self) -> None:
+        _app()
+        title_bar = OverlayTitleBar("Test", use_runtime_drag_motion=True)
+        lifecycle: list[str] = []
+        title_bar.dragStarted.connect(lambda: lifecycle.append("started"))
+        title_bar.dragEnded.connect(lambda: lifecycle.append("ended"))
+        title_bar.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(10, 10),
+                QPointF(100, 100),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+
+        title_bar.event(QEvent(QEvent.Type.UngrabMouse))
+        title_bar.event(QEvent(QEvent.Type.UngrabMouse))
+
+        self.assertEqual(lifecycle, ["started", "ended"])
 
     def test_status_footer_is_only_visible_when_backend_is_unavailable(self) -> None:
         _app()
@@ -163,6 +324,55 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         central = window.centralWidget()
         self.assertTrue(central.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
 
+    def test_rebuilt_window_restores_central_dwell_state(self) -> None:
+        _app()
+        config = build_default_app_config()
+        components = ComponentRegistry()
+        surfaces = SurfaceRegistry()
+        register_components(components)
+        register_surfaces(surfaces)
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=config,
+            components=components,
+            surfaces=surfaces,
+        )
+        window_config = config.windows[0]
+        requested: list[object] = []
+        context.dispatcher.register_action(
+            "window.set_dwell_enabled",
+            lambda arguments: arguments,
+            lambda arguments: requested.append(arguments) or [],
+        )
+        dwell_source = next(
+            binding.target
+            for binding in config.behaviors
+            if binding.default.arguments.get("latchable") is True
+        )
+        context.dispatcher.dispatch_event(component_pressed(dwell_source))
+        context.dispatcher.dispatch_event(component_released(dwell_source))
+        context.state.set(
+            source_state_namespace(window_source_path(config, window_config.id)),
+            "dwell_enabled",
+            True,
+        )
+        self.assertEqual(requested, [{"window_id": window_config.id, "enabled": True}])
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=FakeOverlayController(),
+        ):
+            window = build_window(window_config, context)
+
+        self.addCleanup(window.close)
+        dwell = next(
+            button
+            for button in window.findChildren(QPushButton)
+            if button.text() == "Dwell"
+        )
+        self.assertTrue(window._dwell_click.enabled)
+        self.assertTrue(dwell.property("latched"))
+
     def test_startup_size_uses_minimum_size(self) -> None:
         _app()
         overlay = FakeOverlayController()
@@ -181,6 +391,56 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertEqual(window.minimumSize(), window.minimumSizeHint().expandedTo(window.minimumSize()))
         self.assertLessEqual(window.minimumWidth(), window.width())
         self.assertLessEqual(window.minimumHeight(), window.height())
+
+    def test_default_keyboard_window_installs_configured_pointer_locator(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        locator = window.findChild(PointerLocator, "pointerLocator")
+        self.assertIsNotNone(locator)
+        self.assertIs(locator.parentWidget(), window.centralWidget())
+        self.assertEqual(locator.property("componentId"), "component:pointer-locator")
+        self.assertTrue(window.centralWidget().property("pointerLocatorEnabled"))
+
+    def test_window_omits_pointer_locator_when_config_is_none(self) -> None:
+        _app()
+        app_config = build_default_app_config()
+        window_config = replace(
+            app_config.windows[0],
+            surface=replace(app_config.windows[0].surface, background_components=()),
+        )
+        components = ComponentRegistry()
+        surfaces = SurfaceRegistry()
+        register_components(components)
+        register_surfaces(surfaces)
+        context = make_test_context(
+            FakeKeyboardBackend(ready=True),
+            config=app_config,
+            components=components,
+            surfaces=surfaces,
+        )
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=FakeOverlayController(),
+        ):
+            window = build_window(window_config, context)
+
+        self.addCleanup(window.close)
+        self.assertIsNone(window.findChild(PointerLocator, "pointerLocator"))
+
+    def test_runtime_window_has_no_pointer_locator_branch(self) -> None:
+        source = inspect.getsource(RuntimeWindow.__init__)
+
+        self.assertNotIn("PointerLocator", source)
+        self.assertNotIn("pointerLocatorEnabled", source)
 
     def test_keyboard_window_uses_center_overlay_placement(self) -> None:
         _app()
@@ -211,6 +471,27 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         self.addCleanup(window.close)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+
+    def test_runtime_window_can_hide_and_restore_custom_close_control(self) -> None:
+        _app()
+        overlay = FakeOverlayController()
+
+        with patch(
+            "axidev_osk.windows.builder.configure_always_on_top_window",
+            return_value=overlay,
+        ):
+            window = _build_keyboard_window(FakeKeyboardBackend(ready=True))
+
+        self.addCleanup(window.close)
+        close_button = window.findChild(QPushButton, "layerShellCloseButton")
+        self.assertIsNotNone(close_button)
+        self.assertFalse(close_button.isHidden())
+
+        window.set_close_enabled(False)
+        self.assertTrue(close_button.isHidden())
+
+        window.set_close_enabled(True)
+        self.assertFalse(close_button.isHidden())
 
     def test_runtime_window_and_components_expose_dynamic_identity_properties(self) -> None:
         _app()

@@ -33,6 +33,9 @@ class FakeKeyboardBackend:
     def shutdown(self) -> None:
         return None
 
+    def add_modifier_state_listener(self, listener):
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         del listener
         return lambda: None
@@ -70,6 +73,16 @@ class RecordingService:
 
 
 class ServiceRegistryTests(unittest.TestCase):
+    def test_deferred_service_is_excluded_only_from_autostart(self) -> None:
+        services = ServiceRegistry()
+        deferred = RecordingService("deferred", [])
+        automatic = RecordingService("automatic", [])
+        services.register("deferred", deferred, autostart=False)
+        services.register("automatic", automatic)
+
+        self.assertEqual(tuple(services.services()), (deferred, automatic))
+        self.assertEqual(tuple(services.autostart_services()), (automatic,))
+
     def test_runtime_starts_and_stops_registered_services_in_order(self) -> None:
         calls: list[str] = []
         services = ServiceRegistry()

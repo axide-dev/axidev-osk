@@ -3,12 +3,37 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from ..config.models import SurfaceConfig
 from ..runtime.context import Context
 from ..runtime.registries import SurfaceRegistry
 from ..runtime.source import SourcePath
+
+
+class RootSurface(QWidget):
+    """Generic root surface with a background-component layer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._background_components: list[QWidget] = []
+
+    def install_background_component(self, widget: QWidget) -> None:
+        """Parent and stack one component immediately above the styled background."""
+
+        widget.setParent(self)
+        widget.setGeometry(self.rect())
+        self._background_components.append(widget)
+        for component in reversed(self._background_components):
+            component.lower()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # type: ignore[override]
+        """Keep all background components fitted to the surface."""
+
+        super().resizeEvent(event)
+        for component in self._background_components:
+            component.setGeometry(self.rect())
 
 
 def register_surfaces(registry: SurfaceRegistry) -> None:
@@ -45,11 +70,20 @@ def build_surface(
         Constructs child widgets via the component registry.
     """
 
-    central = QWidget()
+    central = RootSurface()
     central.setObjectName("rootSurface")
     central.setProperty("componentType", "surface")
     central.setProperty("componentId", config.id)
     central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    for component in config.background_components:
+        widget = context.components.build(
+            component,
+            context,
+            source_path=source_path.child("component", component.id),
+            host=central,
+        )
+        central.install_background_component(widget)
 
     layout = QVBoxLayout(central)
     layout.setContentsMargins(*config.margins)

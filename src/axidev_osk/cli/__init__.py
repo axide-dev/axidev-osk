@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the Axidev OSK command parser without importing the GUI runtime."""
 
     parser = argparse.ArgumentParser(prog="axidev-osk")
-    platforms = parser.add_subparsers(dest="platform", required=True)
+    platforms = parser.add_subparsers(dest="platform", required=True, metavar="{linux}")
     linux.register_commands(platforms.add_parser("linux", help="manage Linux integration"))
     return parser
 
@@ -22,6 +22,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse and dispatch one headless Axidev OSK command."""
 
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["internal"]:
+        from . import internal
+
+        return internal.main(args[1:])
     namespace = build_parser().parse_args(args)
     return namespace.handler(namespace, args)
 

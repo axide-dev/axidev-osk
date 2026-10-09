@@ -61,6 +61,7 @@ def _iter_window_paths(config: AppConfig, window: WindowConfig) -> Iterator[Sour
     yield window_path
     surface_path = window_path.child("surface", window.surface.id)
     yield surface_path
+    yield from _iter_components(surface_path, window.surface.background_components)
     yield from _iter_components(surface_path, window.surface.components)
 
 

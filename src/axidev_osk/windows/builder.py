@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QCloseEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from ..config.models import WindowConfig
 from ..runtime.context import Context
 from ..runtime.config_paths import window_source_path
-from ..runtime.events import window_close_requested
-from .chrome import install_overlay_chrome
+from ..runtime.events import window_close_requested, window_drag_ended, window_drag_started
+from ..runtime.source import source_state_namespace
+from .chrome import OverlayChromeWidgets, install_overlay_chrome
+from .dwell_click import DwellClickController
+from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 
 
@@ -20,7 +23,7 @@ class RuntimeWindow(QMainWindow):
     The class owns only Qt event interception and overlay show handling. Window
     identity, title, content, chrome, and overlay behavior all come from config.
     Close requests are routed through the runtime dispatcher via
-    ``WindowCloseRequested`` events; the quit controller subscribes to that
+    ``window.close_requested`` events; the quit controller subscribes to that
     event to drive shutdown rather than relying on a Qt signal side channel.
     """
 
@@ -43,37 +46,109 @@ class RuntimeWindow(QMainWindow):
         self._config = config
         self._context = context
         self._quit_controller_managed = False
+        self._chrome_widgets: OverlayChromeWidgets | None = None
         self.setProperty("componentType", "window")
         self.setProperty("componentId", config.id)
         self.setWindowTitle(config.title)
-        self.setWindowOpacity(config.opacity)
         if config.overlay.always_on_top:
             self._overlay = configure_always_on_top_window(self, config=config.overlay.config)
         else:
             self._overlay = configure_plain_window(self)
-
-        surface_path = window_source_path(context.config, config.id).child(
-            "surface", config.surface.id
-        )
-        central = context.surfaces.build(config.surface, context, surface_path)
-        if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
-            central_layout = central.layout()
-            if isinstance(central_layout, QVBoxLayout):
-                install_overlay_chrome(
-                    central_layout,
-                    title=self.windowTitle(),
-                    parent=central,
-                    on_move=self._overlay.move_by,
-                    on_resize=self._overlay.resize_by,
+        self.destroyed.connect(self._release_platform_resources_on_destroy)
+        try:
+            window_path = window_source_path(context.config, config.id)
+            central = context.surfaces.build(
+                config.surface,
+                context,
+                window_path.child("surface", config.surface.id),
+            )
+            if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
+                central_layout = central.layout()
+                if isinstance(central_layout, QVBoxLayout):
+                    use_runtime_drag_motion = getattr(self._overlay, "uses_runtime_pointer_drag", False)
+                    self._chrome_widgets = install_overlay_chrome(
+                        central_layout,
+                        title=self.windowTitle(),
+                        parent=central,
+                        on_move=self._overlay.move_by,
+                        on_resize=self._overlay.resize_by,
+                        use_runtime_drag_motion=use_runtime_drag_motion,
+                        on_drag_started=(
+                            lambda: context.dispatcher.dispatch_event(window_drag_started(config.id))
+                        )
+                        if use_runtime_drag_motion
+                        else None,
+                        on_drag_ended=(
+                            lambda: context.dispatcher.dispatch_event(window_drag_ended(config.id))
+                        )
+                        if use_runtime_drag_motion
+                        else None,
+                    )
+            self.setCentralWidget(central)
+            self._dwell_click = DwellClickController(
+                self,
+                central,
+                config.dwell_click,
+            )
+            dwell_enabled = bool(
+                context.state.get(
+                    source_state_namespace(window_path),
+                    "dwell_enabled",
+                    config.dwell_click.enabled,
                 )
-        self.setCentralWidget(central)
-        self.apply_startup_size(minimum_size=config.surface.minimum_size)
+            )
+            self._dwell_click.set_enabled(dwell_enabled)
+            self._opacity = WindowOpacityController(self)
+            self.set_visual_opacity(config.opacity)
+            self.apply_startup_size(minimum_size=config.surface.minimum_size)
+        except Exception:
+            self.release_platform_resources()
+            raise
 
     @property
     def window_id(self) -> str:
         """Return this window's deterministic runtime ID."""
 
         return self._config.id
+
+    def set_visual_opacity(self, opacity: float) -> None:
+        """Set opacity through the platform-supported window implementation."""
+
+        self._opacity.set_opacity(opacity)
+
+    def set_dwell_enabled(self, enabled: bool) -> None:
+        """Set whether pointer dwell activates components in this window."""
+
+        self._dwell_click.set_enabled(enabled)
+
+    def move_by(self, dx: int, dy: int) -> None:
+        """Move this window through its selected overlay backend."""
+
+        self._overlay.move_by(dx, dy)
+
+    def refresh_screen_configuration(self) -> None:
+        """Apply display recovery through the selected overlay backend."""
+
+        refresh = getattr(self._overlay, "refresh_screen_configuration", None)
+        if refresh is not None:
+            refresh()
+
+    def set_close_enabled(self, enabled: bool) -> None:
+        """Set whether installed custom chrome exposes its close control."""
+
+        if self._chrome_widgets is not None:
+            self._chrome_widgets.title_bar.set_close_enabled(enabled)
+
+    def release_platform_resources(self) -> None:
+        """Release native resources before Qt destroys this window."""
+
+        release = getattr(self._overlay, "release_resources", None)
+        if release is not None:
+            release()
+
+    def _release_platform_resources_on_destroy(self, *args: object) -> None:
+        del args
+        self.release_platform_resources()
 
     def set_quit_controller_managed(self, managed: bool) -> None:
         """Set whether close events should request managed app quit.
@@ -117,6 +192,10 @@ class RuntimeWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Route managed close requests through the runtime dispatcher."""
 
+        removed_output = getattr(self._overlay, "has_removed_output", None)
+        if removed_output is not None and removed_output():
+            event.ignore()
+            return
         if not self._quit_controller_managed:
             super().closeEvent(event)
             return
@@ -129,6 +208,13 @@ class RuntimeWindow(QMainWindow):
         super().showEvent(event)
         self.apply_startup_size(minimum_size=self._config.surface.minimum_size)
         self._overlay.handle_show()
+        self._dwell_click.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:  # type: ignore[override]
+        """Stop dwell sampling while this window is hidden."""
+
+        self._dwell_click.stop()
+        super().hideEvent(event)
 
 
 def build_window(config: WindowConfig, context: Context, *, parent: QWidget | None = None) -> RuntimeWindow:

@@ -64,6 +64,13 @@ class FakeWidgetKeyboardBackend:
 
         return unsubscribe
 
+    def add_modifier_state_listener(self, listener):
+        del listener
+        return lambda: None
+
+    def lock_name_for_key(self, key_name: str) -> str | None:
+        return {"CapsLock": "capslock"}.get(key_name)
+
     def is_key_down(self, key_name: str) -> bool:
         return key_name in self._pressed_key_names
 
@@ -248,6 +255,43 @@ class KeyStateListenerTests(unittest.TestCase):
 
         self.assertEqual(button.property("interactionState"), "idle")
         self.assertEqual(calls, ["released"])
+
+    def test_letters_get_shift_only_from_the_shift_latch(self) -> None:
+        backend, fake_keyboard, _listener = self._initialized_backend()
+        output = KeyboardOutput(output_key="A")
+
+        backend.key_down(output, frozenset({"caps"}))
+        fake_keyboard.sender.key_down.assert_called_once_with("A", repeat=True)
+
+        fake_keyboard.sender.key_down.reset_mock()
+        backend.key_down(output, frozenset({"shift", "caps"}))
+        fake_keyboard.sender.key_down.assert_called_once_with("A", mods="Shift", repeat=True)
+
+    def test_listener_reports_lock_modifiers_before_the_key(self) -> None:
+        backend, _keyboard, fake_listener = self._initialized_backend()
+        events: list[object] = []
+        backend.add_modifier_state_listener(events.append)
+        backend.add_key_state_listener(lambda key_name, pressed: events.append((key_name, pressed)))
+
+        fake_listener.callback(SimpleNamespace(key_name="CapsLock", pressed=True, modifiers=("CapsLock",)))
+
+        self.assertEqual(events, [frozenset({"capslock"}), ("CapsLock", True)])
+
+    def _initialized_backend(self):
+        backend = AxidevIoKeyboardBackend()
+        fake_listener = FakeNativeListener()
+        fake_keyboard = SimpleNamespace(
+            initialize=Mock(),
+            status=Mock(return_value=SimpleNamespace(backend_name="fake")),
+            keys=FakeKeys(),
+            listener=fake_listener,
+            sender=FakeSender(),
+        )
+        fake_module = ModuleType("axidev_io")
+        fake_module.keyboard = fake_keyboard
+        with patch.dict("sys.modules", {"axidev_io": fake_module}):
+            self.assertTrue(backend.initialize())
+        return backend, fake_keyboard, fake_listener
 
     def _button_for_component(self, widget: KeyboardWidget, component_id: str) -> QPushButton:
         for button in widget.findChildren(QPushButton):

@@ -13,7 +13,7 @@ pulling Qt or the full application stack.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ..config.defaults import build_default_app_config
 from ..config.models import AppConfig
@@ -37,6 +37,9 @@ from .events import (
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
 from .state_store import StateStore
 from .window_manager import WindowManager
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
 
 
 class _TestApplication:
@@ -63,6 +66,9 @@ class _TestRuntime:
         self._dispatcher = context.dispatcher
         self._window_manager = WindowManager(context)
         self._app = _TestApplication()
+        self._services = ServiceRegistry()
+        self._active_pointer_drag_window_id: str | None = None
+        self._pointer_drag_remainder = (0.0, 0.0)
 
     def _handle_window_close_requested(self, event: WindowCloseRequestedArguments) -> MessageResult:
         """Map close requests to a direct test quit action."""
@@ -75,6 +81,15 @@ class _TestRuntime:
 
         return route_hot_corner_triggered(event, self)
 
+    def _set_pointer_drag_active(self, enabled: bool) -> None:
+        """Accept drag lifecycle changes without starting platform services."""
+
+        del enabled
+
+    def _commit_window_surface(self, window: "QWidget") -> None:
+        """Accept surface commits without a Wayland connection."""
+
+        del window
 
 def make_test_context(
     keyboard_backend: Any,

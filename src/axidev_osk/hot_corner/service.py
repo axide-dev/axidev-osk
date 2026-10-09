@@ -33,3 +33,9 @@ class HotCornerService:
 
         if self._controller is not None:
             self._controller.stop()
+
+    def refresh_screen_configuration(self) -> None:
+        """Apply the main runtime's display-change notification."""
+
+        if self._controller is not None:
+            self._controller.refresh_screen_configuration()

@@ -8,6 +8,8 @@ The payload targets x86_64 Linux with glibc 2.34 or newer. It requires `/usr/bin
 
 The host supplies PySide6, Qt, Qt's X11 and Wayland platform plugins, LayerShellQt, libinput, libudev, libxkbcommon, and normal desktop libraries. PySide6 and Qt must use matching major and minor versions from 6.7 up to, but not including, 7.0.
 
+The layer-shell drag path loads the host's `libwayland-client.so.0` and requires the compositor to expose the `zwp_relative_pointer_manager_v1` protocol. The library comes from the normal system Wayland runtime and is not bundled. Without the protocol, the overlay can still run, but interactive title-bar dragging is unavailable.
+
 Use these runtime packages on Fedora:
 
 ```bash
@@ -160,7 +162,9 @@ sudo axidev-osk linux setup-greeter --manager lightdm
 
 Setup validates every required account, hook, and existing file before changing the manager. It configures one manager and never restarts it. Reboot or restart the selected display manager after setup.
 
-Plasma Login Manager uses an `axidev-osk-greeter.service` user unit tied to `plasma-login-wayland.target`. LightDM uses a `greeter-wrapper` drop-in. greetd replaces only the default-session command line with `/etc/axidev-osk/greetd-session-wrapper`, while `/etc/axidev-osk/greeter.json` keeps the exact original value for removal.
+Plasma Login Manager configures Axidev OSK as KWin's input method for both the login manager and the session lock screen. On Plasma versions from 6.7.0 up to, but not including, 7.0.0, setup also adds one marked block to `/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/LockScreenUi.qml`. The block keeps the password interface visible while the pointer uses Axidev OSK. Running setup again restores a block removed by a Plasma package update before reporting any other managed-file drift. Setup and removal refuse partial or edited markers.
+
+LightDM uses a `greeter-wrapper` drop-in. greetd replaces only the default-session command line with `/etc/axidev-osk/greetd-session-wrapper`, while `/etc/axidev-osk/greeter.json` keeps the exact original value for removal.
 
 The LightDM and greetd shell wrappers start the original greeter before invoking the Axidev launcher. A missing Python package, incompatible Qt runtime, keyboard crash, or display-detection error cannot stop the original greeter. The keyboard retries after 1, 2, 4, 8, 16, 32, and then 60 seconds until the greeter exits.
 
@@ -203,7 +207,7 @@ Uninstall stops when permission or autostart cleanup fails. `uninstall --force` 
 
 Permission setup manages `/etc/modules-load.d/axidev-osk-uinput.conf` and `/etc/udev/rules.d/70-axidev-io-uinput.rules` through the application command line. Removal deletes only files whose contents still match Axidev OSK's definitions, and it does not unload the shared `uinput` module. Autostart setup manages the selected user's XDG autostart file.
 
-Files owned by a configured manager are conditional. `/etc/axidev-osk/greeter.json` records the selected adapter. Plasma Login Manager owns its user service and target link. LightDM owns its drop-in and wrapper. greetd owns its wrapper and restores the previous command during removal.
+Files owned by a configured manager are conditional. `/etc/axidev-osk/greeter.json` records the selected adapter. Plasma Login Manager owns its KWin input-method desktop entry, systemd drop-in, and KWin configuration. It also adds and removes only the exact marked block in Plasma's lock-screen QML. LightDM owns its drop-in and wrapper. greetd owns its wrapper and restores the previous command during removal.
 
 The uninstaller removes exact managed greeter files before it disables the Axidev OSK uinput rule. It stops on changed files unless `--force` is selected. Shared `uinput` memberships remain in place.
 

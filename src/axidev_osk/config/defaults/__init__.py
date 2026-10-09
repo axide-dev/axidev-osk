@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ...components.prompt import prompt_button_config
-from ...runtime.actions import prompt_resolve, window_toggle_opacity
+from ...runtime.actions import prompt_resolve, window_set_dwell_enabled, window_toggle_opacity
 from ...runtime.behaviors import action_behavior
 from ...runtime.identity import stable_id, validate_unique_ids
 from ...runtime.source import SourcePath, SourcePathSegment
@@ -13,15 +13,17 @@ from ..models import (
     BehaviorBinding,
     ButtonConfig,
     ChromeConfig,
+    DwellClickConfig,
     HotCornerConfig,
     KeyboardGridConfig,
     KeyboardStatusConfig,
     OverlayConfig,
+    PointerLocatorConfig,
     PromptConfig,
     SurfaceConfig,
     WindowConfig,
 )
-from .us_iso import build_us_iso_behavior_configs, build_us_iso_layout_config
+from .us_iso import DWELL_ID, GHOST_ID, build_us_iso_behavior_configs, build_us_iso_layout_config
 
 
 def build_default_app_config() -> AppConfig:
@@ -43,6 +45,12 @@ def build_default_app_config() -> AppConfig:
     keyboard_surface_id = stable_id(keyboard_window_id, "surface", "keyboard", stable_override="surface:keyboard")
     keyboard_grid_id = stable_id(keyboard_surface_id, "component", "keyboard-grid", stable_override="component:keyboard-grid")
     keyboard_status_id = stable_id(keyboard_surface_id, "component", "keyboard-status", stable_override="component:keyboard-status")
+    pointer_locator_id = stable_id(
+        keyboard_surface_id,
+        "component",
+        "pointer-locator",
+        stable_override="component:pointer-locator",
+    )
     keyboard_layout = build_us_iso_layout_config()
     keyboard_window = WindowConfig(
         id=keyboard_window_id,
@@ -56,6 +64,14 @@ def build_default_app_config() -> AppConfig:
                 ),
                 KeyboardStatusConfig(id=keyboard_status_id),
             ),
+            background_components=(
+                PointerLocatorConfig(
+                    id=pointer_locator_id,
+                    radius_percent=30,
+                    maximum_opacity_percent=60,
+                    radius_standard_deviations=3,
+                ),
+            ),
             margins=(10, 10, 10, 10),
             spacing=8,
         ),
@@ -67,6 +83,19 @@ def build_default_app_config() -> AppConfig:
             ),
         ),
         chrome=ChromeConfig(enabled=True),
+        dwell_click=DwellClickConfig(
+            enabled=False,
+            delay_ms=200,
+            dead_zone_px=10,
+            full_speed_px_s=20,
+            stop_speed_px_s=240,
+            maximum_progress_rate=1.75,
+            indicator_start_progress=0.25,
+            direction_reversal_progress_factor=0.5,
+            movement_penalty_px=15,
+            distance_curve_full_px=200,
+            velocity_release_ms=100,
+        ),
         opacity=0.85,
     )
 
@@ -136,18 +165,27 @@ def _build_default_behaviors(
         for component_id, behavior in keyboard_behaviors.items()
     ]
 
-    all_key_ids = {component.id for component in grid.components}
-    ghost_ids = all_key_ids - keyboard_behaviors.keys()
-    if len(ghost_ids) != 1:
-        raise ValueError("US ISO layout must contain exactly one non-keyboard control")
-    ghost_id = next(iter(ghost_ids))
+    action_key_ids = {component.id for component in grid.components} - keyboard_behaviors.keys()
+    if action_key_ids != {GHOST_ID, DWELL_ID}:
+        raise ValueError("US ISO action keys must be exactly Ghost and Dwell")
     bindings.append(
         BehaviorBinding(
-            target=grid_path.child("component", ghost_id),
+            target=grid_path.child("component", GHOST_ID),
             default=action_behavior(
                 pressed_actions=(
-                    window_toggle_opacity(keyboard_window.id, ghost_id, 0.01),
+                    window_toggle_opacity(keyboard_window.id, GHOST_ID, 0.01),
                 )
+            ),
+        )
+    )
+    bindings.append(
+        BehaviorBinding(
+            target=grid_path.child("component", DWELL_ID),
+            default=action_behavior(
+                latchable=True,
+                initially_latched=keyboard_window.dwell_click.enabled,
+                latched_actions=(window_set_dwell_enabled(keyboard_window.id, True),),
+                unlatched_actions=(window_set_dwell_enabled(keyboard_window.id, False),),
             ),
         )
     )

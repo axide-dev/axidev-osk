@@ -48,7 +48,13 @@ _STATE_TAGS_BY_KEY = {
     "superright": frozenset({"super"}),
 }
 
+_LOCK_NAMES_BY_KEY = {
+    "capslock": "capslock",
+    "numlock": "numlock",
+}
+
 KeyStateListener = Callable[[str, bool], None]
+ModifierStateListener = Callable[[frozenset[str]], None]
 Unsubscribe = Callable[[], None]
 
 
@@ -77,6 +83,7 @@ class AxidevIoKeyboardBackend:
         self._needs_permission_setup = False
         self._pressed_key_names: set[str] = set()
         self._key_state_listeners: list[KeyStateListener] = []
+        self._modifier_state_listeners: list[ModifierStateListener] = []
         self._listener_unsubscribe: Unsubscribe | None = None
         self._key_state_lock = RLock()
 
@@ -181,6 +188,19 @@ class AxidevIoKeyboardBackend:
 
         return unsubscribe
 
+    def add_modifier_state_listener(self, listener: ModifierStateListener) -> Unsubscribe:
+        """Register a listener for observed modifier names and return an unsubscribe callback."""
+
+        with self._key_state_lock:
+            self._modifier_state_listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._key_state_lock:
+                if listener in self._modifier_state_listeners:
+                    self._modifier_state_listeners.remove(listener)
+
+        return unsubscribe
+
     def is_key_down(self, key_name: str) -> bool:
         """Return whether a canonical backend key is currently pressed."""
 
@@ -195,6 +215,12 @@ class AxidevIoKeyboardBackend:
         """Resolve keyboard output to a canonical backend key name."""
 
         return self._canonical_key_name(output.output_key) or output.output_key
+
+    def lock_name_for_key(self, key_name: str) -> str | None:
+        """Return the observed lock modifier driven by one backend key, if any."""
+
+        canonical = self._canonical_key_name(key_name) or key_name
+        return _LOCK_NAMES_BY_KEY.get(canonical.casefold())
 
     def state_tags_for_key(self, output_key: str) -> frozenset[str]:
         """Return runtime state tags published by one backend key name."""
@@ -296,20 +322,10 @@ class AxidevIoKeyboardBackend:
             return None
 
         shift = "shift" in active_state_tags
-        caps = "caps" in active_state_tags
         shift_is_held = self.is_key_down("ShiftLeft") or self.is_key_down("ShiftRight")
-        modifiers: list[str] = []
-
-        if len(output.output_key) == 1 and output.output_key.isalpha():
-            if (shift and not shift_is_held) ^ caps:
-                modifiers.append("Shift")
-        elif shift and not shift_is_held:
-            modifiers.append("Shift")
-
-        if not modifiers:
-            return None
-
-        return "+".join(modifiers)
+        if shift and not shift_is_held:
+            return "Shift"
+        return None
 
     def _build_install_hint(self) -> str:
         repo_root = self._repo_root()
@@ -363,6 +379,11 @@ class AxidevIoKeyboardBackend:
             self._listener_unsubscribe = None
 
     def _handle_key_event(self, event: object) -> None:
+        modifiers = getattr(event, "modifiers", None)
+        if isinstance(modifiers, tuple):
+            # Report lock state before the key so a Caps Lock press is
+            # rendered with the state it just produced.
+            self._notify_modifier_state_listeners(frozenset(str(name).lower() for name in modifiers))
         key_name = getattr(event, "key_name", None)
         if not isinstance(key_name, str) or not key_name:
             return
@@ -391,6 +412,16 @@ class AxidevIoKeyboardBackend:
 
         for key_name in pressed_key_names:
             self._notify_key_state_listeners(key_name, False)
+
+    def _notify_modifier_state_listeners(self, modifiers: frozenset[str]) -> None:
+        with self._key_state_lock:
+            listeners = tuple(self._modifier_state_listeners)
+
+        for listener in listeners:
+            try:
+                listener(modifiers)
+            except Exception as exc:
+                _logger.exception("axidev_io modifier state listener failed: %s", exc)
 
     def _notify_key_state_listeners(self, key_name: str, pressed: bool) -> None:
         with self._key_state_lock:

@@ -9,9 +9,11 @@ from ..models import BehaviorConfig, GridConfig, KeyConfig, LayoutConfig
 
 UNIT = 4
 MAIN_BLOCK_WIDTH = 60
-NAV_START = 64
+NAV_START = 68
 LAYOUT_ID = "layout:us-iso"
 GRID_ID = "grid:us-iso:keyboard"
+GHOST_ID = "key-08f8b62608b6de45"
+DWELL_ID = "key-dwell"
 
 # These IDs were generated from the shipped layout. Each visual uses its ID
 # directly below, while output behavior is joined through this exact-ID map.
@@ -206,6 +208,7 @@ def _build_us_iso_components() -> tuple[KeyConfig, ...]:
         KeyConfig("key-7602dede35eaf26e", key("F10", row=0, column=u(13))),
         KeyConfig("key-4d2488576bc83769", key("F11", row=0, column=u(14))),
         KeyConfig("key-c98f8b8aa6abd0ac", key("F12", row=0, column=u(15))),
+        KeyConfig(DWELL_ID, key("Dwell", row=0, column=u(16))),
         KeyConfig("key-515671db3895067f", key("PrtSc", row=0, column=NAV_START)),
         KeyConfig(
             "key-d31535e62738fcdb",
@@ -254,7 +257,7 @@ def _build_us_iso_components() -> tuple[KeyConfig, ...]:
         KeyConfig("key-136eb67434983829", letter_key("P", row=2, column=42)),
         KeyConfig("key-d4d064bb7ee9b43e", shifted_key("[", "{", row=2, column=46)),
         KeyConfig("key-b72cd12dae4c6310", shifted_key("]", "}", row=2, column=50)),
-        KeyConfig("key-08f8b62608b6de45", key("Ghost", row=2, column=54)),
+        KeyConfig(GHOST_ID, key("Ghost", row=2, column=54)),
         KeyConfig("key-ba8bdcd343001c8e", key("Del", row=2, column=NAV_START)),
         KeyConfig(
             "key-d855d8ccc4e10e16",
@@ -333,7 +336,7 @@ def build_us_iso_layout_config() -> LayoutConfig:
 
 
 def build_us_iso_behavior_configs() -> dict[str, BehaviorConfig]:
-    """Return keyboard behavior by explicit component ID; Ghost is excluded."""
+    """Return keyboard behavior by explicit component ID; Ghost and Dwell are excluded."""
 
     component_ids = {component.id for component in _build_us_iso_components()}
     unknown_ids = _OUTPUT_BY_COMPONENT_ID.keys() - component_ids
@@ -343,9 +346,10 @@ def build_us_iso_behavior_configs() -> dict[str, BehaviorConfig]:
     for component_id, output_key in _OUTPUT_BY_COMPONENT_ID.items():
         mode = KeyboardBehaviorMode.MOMENTARY
         uses_active_state_tags = True
+        repeats = True
         if output_key == "CapsLock":
-            mode = KeyboardBehaviorMode.LOGICAL_TOGGLE
             uses_active_state_tags = False
+            repeats = False
         elif output_key in _HELD_TOGGLE_KEYS:
             mode = KeyboardBehaviorMode.HELD_TOGGLE
             uses_active_state_tags = False
@@ -353,7 +357,7 @@ def build_us_iso_behavior_configs() -> dict[str, BehaviorConfig]:
             mode,
             KeyboardOutput(
                 output_key=output_key,
-                repeats=True,
+                repeats=repeats,
                 uses_active_state_tags=uses_active_state_tags,
             ),
         )

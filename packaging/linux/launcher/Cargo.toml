@@ -5,6 +5,10 @@ edition = "2021"
 license = "GPL-3.0-only"
 publish = false
 
+[dependencies]
+libc = "0.2.175"
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+
 [[bin]]
 name = "axidev-osk"
 path = "src/main.rs"

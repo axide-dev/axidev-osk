@@ -25,15 +25,17 @@ from .behavior_models import (
     KeyboardOutput,
 )
 from .config_paths import iter_all_source_paths, iter_interactive_source_paths
-from .decoding import map_value, require_keys, runtime_action_from_data, string_value
+from .decoding import bool_value, map_value, require_keys, runtime_action_from_data, string_value
 from .events import (
     COMPONENT_PRESSED,
     COMPONENT_RELEASED,
     KEYBOARD_KEY_STATE_CHANGED,
+    KEYBOARD_LOCK_STATE_CHANGED,
     KEYBOARD_OUTPUT_REGISTERED,
     ComponentPressedArguments,
     ComponentReleasedArguments,
     KeyboardKeyStateChangedArguments,
+    KeyboardLockStateChangedArguments,
     KeyboardOutputRegisteredArguments,
     behavior_failed,
 )
@@ -155,9 +157,18 @@ class BehaviorRegistry:
             KEYBOARD_KEY_STATE_CHANGED,
             self._handle_backend_state_changed,
         )
+        context.dispatcher.add_event_handler(
+            KEYBOARD_LOCK_STATE_CHANGED,
+            self._handle_backend_lock_changed,
+        )
 
     def activate(self) -> None:
-        """Register keyboard outputs and initialize complete component snapshots."""
+        """Register keyboard outputs and initialize complete component snapshots.
+
+        Activation runs again whenever keyboard output starts, so it releases
+        keyboard latches whose backend keys were released, while configured
+        action latches keep their central state.
+        """
 
         context = self._require_context()
         layout_paths: set[SourcePath] = set()
@@ -168,6 +179,13 @@ class BehaviorRegistry:
                 state["latched"] = False
                 layout_paths.add(source.through("layout"))
                 keyboard_bindings.append((source, binding.default_decoded))
+            elif isinstance(binding.default_decoded, ActionBehavior) and binding.default_decoded.latchable:
+                state["latched"] = bool(
+                    self.state_snapshot(source).get(
+                        "latched",
+                        binding.default_decoded.initially_latched,
+                    )
+                )
             context.dispatcher.dispatch_action(state_replace(source, state))
         for layout_path in sorted(layout_paths, key=repr):
             context.dispatcher.dispatch_action(
@@ -320,6 +338,17 @@ class BehaviorRegistry:
             self.layout_state_action(event.source, state),
         ]
 
+    def _handle_backend_lock_changed(
+        self,
+        event: KeyboardLockStateChangedArguments,
+    ) -> MessageResult:
+        state = dict(self.state_snapshot(event.source))
+        state["latched"] = event.locked
+        return [
+            state_replace(event.source, state),
+            self.layout_state_action(event.source, state),
+        ]
+
     def _failure(
         self,
         source: SourcePath,
@@ -352,14 +381,21 @@ def action_behavior(
     *,
     pressed_actions: tuple[RuntimeAction, ...] = (),
     released_actions: tuple[RuntimeAction, ...] = (),
+    latchable: bool = False,
+    initially_latched: bool = False,
+    latched_actions: tuple[RuntimeAction, ...] = (),
+    unlatched_actions: tuple[RuntimeAction, ...] = (),
 ) -> BehaviorConfig:
-    return BehaviorConfig(
-        COMPONENT_ACTIONS,
-        {
-            "pressed_actions": [runtime_action_to_data(action) for action in pressed_actions],
-            "released_actions": [runtime_action_to_data(action) for action in released_actions],
-        },
-    )
+    arguments: DataMap = {
+        "pressed_actions": [runtime_action_to_data(action) for action in pressed_actions],
+        "released_actions": [runtime_action_to_data(action) for action in released_actions],
+    }
+    if latchable:
+        arguments["latchable"] = True
+        arguments["initially_latched"] = initially_latched
+        arguments["latched_actions"] = [runtime_action_to_data(action) for action in latched_actions]
+        arguments["unlatched_actions"] = [runtime_action_to_data(action) for action in unlatched_actions]
+    return BehaviorConfig(COMPONENT_ACTIONS, arguments)
 
 
 def keyboard_behavior(mode: KeyboardBehaviorMode, output: KeyboardOutput) -> BehaviorConfig:
@@ -386,10 +422,26 @@ def action_hook(
 
 
 def decode_action_behavior(arguments: DataMap) -> ActionBehavior:
-    require_keys(arguments, ("pressed_actions", "released_actions"))
+    latch_keys = ("latchable", "initially_latched", "latched_actions", "unlatched_actions")
+    require_keys(arguments, ("pressed_actions", "released_actions"), optional=latch_keys)
+    present = [key for key in latch_keys if key in arguments]
+    if present and len(present) != len(latch_keys):
+        raise ValueError(
+            "Latchable action behavior needs latchable, initially_latched, latched_actions, and unlatched_actions"
+        )
+    latchable = bool_value(arguments, "latchable") if present else False
+    initially_latched = bool_value(arguments, "initially_latched") if present else False
+    latched_actions = _action_list(arguments, "latched_actions") if present else ()
+    unlatched_actions = _action_list(arguments, "unlatched_actions") if present else ()
+    if not latchable and (initially_latched or latched_actions or unlatched_actions):
+        raise ValueError("Only a latchable action behavior may define latch actions")
     return ActionBehavior(
         pressed_actions=_action_list(arguments, "pressed_actions"),
         released_actions=_action_list(arguments, "released_actions"),
+        latchable=latchable,
+        initially_latched=initially_latched,
+        latched_actions=latched_actions,
+        unlatched_actions=unlatched_actions,
     )
 
 
@@ -431,7 +483,15 @@ def _handle_actions(
     del registry
     if interaction.event == COMPONENT_PRESSED:
         return list(behavior.pressed_actions)
-    return list(behavior.released_actions)
+    messages: MessageResult = list(behavior.released_actions)
+    if behavior.latchable:
+        state = dict(interaction.proposed_state)
+        state["latched"] = not bool(interaction.previous_state.get("latched", False))
+        messages.append(state_replace(interaction.source, state))
+        messages.extend(
+            behavior.latched_actions if state["latched"] else behavior.unlatched_actions
+        )
+    return messages
 
 
 def _handle_keyboard(

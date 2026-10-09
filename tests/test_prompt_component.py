@@ -16,6 +16,9 @@ class FakeKeyboardBackend:
     status_text = ""
     needs_permission_setup = False
 
+    def add_modifier_state_listener(self, listener):
+        return lambda: None
+
     def add_key_state_listener(self, listener: object) -> object:
         del listener
         return lambda: None

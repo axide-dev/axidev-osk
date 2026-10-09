@@ -7,7 +7,9 @@ from axidev_osk.messages import MessageResult
 from axidev_osk.runtime.behavior_models import KeyboardOutput
 from axidev_osk.runtime.events import (
     KEYBOARD_KEY_STATE_CHANGED,
+    KEYBOARD_LOCK_STATE_CHANGED,
     KeyboardKeyStateChangedArguments,
+    KeyboardLockStateChangedArguments,
 )
 from axidev_osk.runtime.source import SourcePath, SourcePathSegment
 from axidev_osk.runtime.testing import make_test_context
@@ -28,6 +30,7 @@ class FakeKeyboardBackend:
         self.initialize_calls = 0
         self.shutdown_calls = 0
         self.listeners = []
+        self.modifier_listeners = []
         self.pressed: set[str] = set()
         self.down_calls: list[tuple[KeyboardOutput, frozenset[str]]] = []
         self.up_calls: list[object | None] = []
@@ -46,6 +49,17 @@ class FakeKeyboardBackend:
             self.listeners.remove(listener)
 
         return unsubscribe
+
+    def add_modifier_state_listener(self, listener):
+        self.modifier_listeners.append(listener)
+        return lambda: self.modifier_listeners.remove(listener)
+
+    def lock_name_for_key(self, key_name: str) -> str | None:
+        return {"capslock": "capslock", "numlock": "numlock"}.get(key_name.casefold())
+
+    def emit_modifiers(self, *modifiers: str) -> None:
+        for listener in tuple(self.modifier_listeners):
+            listener(frozenset(modifiers))
 
     def key_name_for_output(self, output: KeyboardOutput) -> str:
         return output.output_key.casefold()
@@ -113,6 +127,42 @@ class KeyboardServiceTests(unittest.TestCase):
             return []
 
         self.context.dispatcher.add_event_handler(KEYBOARD_KEY_STATE_CHANGED, record)
+
+    def test_observed_lock_state_is_published_once_per_change(self) -> None:
+        locks: list[KeyboardLockStateChangedArguments] = []
+
+        def record(event: KeyboardLockStateChangedArguments) -> MessageResult:
+            locks.append(event)
+            return []
+
+        self.context.dispatcher.add_event_handler(KEYBOARD_LOCK_STATE_CHANGED, record)
+        caps = _source("caps")
+        self.service.register_output(caps, KeyboardOutput("CapsLock"))
+        self.service.register_output(_source("a"), KeyboardOutput("A"))
+
+        self.backend.emit_modifiers("capslock")
+        self.backend.emit_modifiers("capslock", "shift")
+        self.backend.emit_modifiers()
+
+        self.assertEqual([(event.source, event.locked) for event in locks], [(caps, True), (caps, False)])
+
+    def test_late_registration_receives_last_observed_lock_state(self) -> None:
+        locks: list[KeyboardLockStateChangedArguments] = []
+
+        def record(event: KeyboardLockStateChangedArguments) -> MessageResult:
+            locks.append(event)
+            return []
+
+        self.context.dispatcher.add_event_handler(KEYBOARD_LOCK_STATE_CHANGED, record)
+        self.service.register_output(_source("caps"), KeyboardOutput("CapsLock"))
+        self.backend.emit_modifiers("capslock")
+        self.service.reset_state()
+
+        caps = _source("caps-again")
+        self.service.register_output(caps, KeyboardOutput("CapsLock"))
+
+        self.assertEqual(locks[-1].source, caps)
+        self.assertTrue(locks[-1].locked)
 
     def test_start_initializes_backend_and_listener_once(self) -> None:
         self.service.start(self.context)

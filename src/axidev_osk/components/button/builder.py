@@ -13,6 +13,7 @@ from ...runtime.context import Context
 from ...runtime.events import STATE_CHANGED, StateChangedArguments, component_pressed, component_released
 from ...runtime.registries import ComponentRegistry
 from ...runtime.source import SourcePath
+from .widget import Button
 
 
 def register(registry: ComponentRegistry) -> None:
@@ -56,7 +57,7 @@ def build_button_component(
     del host
     if not isinstance(config, ButtonConfig):
         raise TypeError(f"Expected ButtonConfig, got {type(config).__name__}")
-    button = QPushButton(config.label)
+    button = Button(config.label)
     button.setProperty("componentType", "button")
     button.setProperty("componentId", config.id)
     if config.object_name is not None:

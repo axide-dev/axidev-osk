@@ -42,7 +42,9 @@ from ...platform.layer_shell import (
     find_qt_platform_plugin_root,
     is_wayland_session,
     prepend_plugin_root,
+    update_wayland_layer_shell_margins,
 )
+from ...platform.kwin_input_panel import attach_kwin_input_panel
 
 
 TWindow = TypeVar("TWindow", bound=QWidget)
@@ -102,6 +104,11 @@ def prepare_always_on_top_window_environment(
 
     if forced_platforms and "wayland" not in forced_platforms:
         return _set_overlay_backend(OverlayBackend.NATIVE)
+
+    if os.environ.get("WAYLAND_SOCKET"):
+        os.environ["QT_QPA_PLATFORM"] = "wayland"
+        os.environ["QT_WAYLAND_USE_BYPASSWINDOWMANAGERHINT"] = "1"
+        return _set_overlay_backend(OverlayBackend.WAYLAND_INPUT_PANEL)
 
     if not is_wayland_session():
         if os.environ.get("DISPLAY"):
@@ -175,9 +182,15 @@ class AlwaysOnTopWindowController:
         self._layer_shell_left_margin = 0
         self._layer_shell_bottom_margin = 0
         self._layer_shell_position_initialized = False
+        self._layer_shell_pending_move_x = 0
+        self._layer_shell_pending_move_y = 0
+        self._layer_shell_move_scheduled = False
         self._floating_position_initialized = False
         self._show_adjustments_applied = False
         self._layer_shell_startup_refresh_applied = False
+        self._input_panel_attachment = None
+        self._screen_handle = None
+        self._mapped_screen_name: str | None = None
 
     @property
     def backend(self) -> OverlayBackend:
@@ -190,10 +203,17 @@ class AlwaysOnTopWindowController:
         """Whether this backend requires app-provided frameless chrome."""
 
         return self._backend in {
+            OverlayBackend.WAYLAND_INPUT_PANEL,
             OverlayBackend.WAYLAND_LAYER_SHELL,
             OverlayBackend.X11_UTILITY,
             OverlayBackend.X11_UTILITY_BRIDGE,
         }
+
+    @property
+    def uses_runtime_pointer_drag(self) -> bool:
+        """Whether title-bar movement comes from compositor pointer events."""
+
+        return self._backend == OverlayBackend.WAYLAND_LAYER_SHELL
 
     def configure_window(self) -> None:
         """Apply base Qt flags and attributes for overlay behavior."""
@@ -205,6 +225,9 @@ class AlwaysOnTopWindowController:
         self._window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._window.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
 
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            self._window.setWindowFlag(Qt.WindowType.BypassWindowManagerHint, True)
+
         if self.uses_custom_chrome:
             self._window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
 
@@ -215,6 +238,14 @@ class AlwaysOnTopWindowController:
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             _set_windows_taskbar_style(int(self._window.winId()))
 
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            screen = self._window.screen()
+            output_name = screen.name() if screen is not None else ""
+            self._input_panel_attachment = attach_kwin_input_panel(
+                int(self._window.winId()),
+                output_name=output_name,
+            )
+
         self._debug_log(
             "configure-window",
             backend=self._backend.value,
@@ -222,6 +253,13 @@ class AlwaysOnTopWindowController:
             placement=self._config.placement.value,
             screen_margin=self._config.screen_margin,
         )
+
+    def release_resources(self) -> None:
+        """Release native resources owned by this overlay controller."""
+
+        if self._input_panel_attachment is not None:
+            self._input_panel_attachment.close()
+            self._input_panel_attachment = None
 
     def handle_show(self) -> bool:
         """Apply backend-specific adjustments after the window is shown."""
@@ -232,9 +270,14 @@ class AlwaysOnTopWindowController:
             return True
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self._watch_layer_shell_screen()
+            self._recover_layer_shell_position()
             applied = self._apply_wayland_layer_shell_if_needed()
             self._refresh_wayland_layer_shell_surface_after_startup()
             return applied
+
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            return True
 
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
             self._position_floating_window_if_needed()
@@ -255,11 +298,85 @@ class AlwaysOnTopWindowController:
         """Apply backend-specific adjustments before showing the window."""
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self._recover_layer_shell_position()
             return self._sync_wayland_layer_shell()
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            return True
         if self._backend in {OverlayBackend.WINDOWS_NATIVE, OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE, OverlayBackend.NATIVE}:
             self._position_floating_window_if_needed()
             return True
         return False
+
+    def refresh_screen_configuration(self) -> None:
+        """Recover a layer surface after its output disappears or changes size."""
+
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
+            return
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        if not screens:
+            return
+        output_removed = self.has_removed_output()
+        if output_removed and self._window.isVisible():
+            # A dismissed layer surface cannot be reused; showing again lets
+            # the compositor choose the active output for the same Qt window.
+            self._window.hide()
+            self.prepare_show()
+            self._window.show()
+        else:
+            self._recover_layer_shell_position()
+            self._sync_wayland_layer_shell()
+
+    def has_removed_output(self) -> bool:
+        """Identify a dismissed layer surface without treating it as app quit."""
+
+        if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL or self._mapped_screen_name is None:
+            return False
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        return all(screen.name() != self._mapped_screen_name for screen in screens)
+
+    def _watch_layer_shell_screen(self) -> None:
+        handle = self._window.windowHandle()
+        if handle is not None and handle is not self._screen_handle:
+            handle.screenChanged.connect(self._layer_shell_screen_changed)
+            self._screen_handle = handle
+        screen = self._window.screen()
+        if screen is not None:
+            self._mapped_screen_name = screen.name()
+
+    def _layer_shell_screen_changed(self, screen: object) -> None:
+        app = QGuiApplication.instance()
+        screens = app.screens() if app is not None else []
+        # Retain the old identity until runtime recovery has remapped a
+        # surface whose output was removed.
+        if screen is not None and (
+            self._mapped_screen_name is None
+            or any(item.name() == self._mapped_screen_name for item in screens)
+        ):
+            self._mapped_screen_name = screen.name()
+        self._recover_layer_shell_position()
+        self._sync_wayland_layer_shell()
+
+    def _recover_layer_shell_position(self) -> None:
+        if not self._layer_shell_position_initialized:
+            self._initialize_layer_shell_position()
+        geometry = self._current_screen_geometry(for_layer_shell=True)
+        if geometry.isEmpty():
+            return
+        width, height = self._window.width(), self._window.height()
+        margins = self._layer_shell_margins
+        anchors = self._layer_shell_anchors
+        left = margins.left() if anchors & ANCHOR_LEFT else geometry.width() - margins.right() - width
+        top = margins.top() if anchors & ANCHOR_TOP else geometry.height() - margins.bottom() - height
+        if QRect(0, 0, geometry.width(), geometry.height()).contains(QRect(left, top, width, height)):
+            return
+        self._layer_shell_left_margin = (geometry.width() - width) // 2
+        self._layer_shell_bottom_margin = (geometry.height() - height) // 2
+        self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
+        self._layer_shell_margins = QMargins(
+            self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin
+        )
 
     def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None:
         """Move the overlay to an absolute screen position."""
@@ -371,10 +488,13 @@ class AlwaysOnTopWindowController:
         platform = self._qt_platform()
         if platform == "wayland":
             selected = _read_selected_backend()
-            if selected == OverlayBackend.WAYLAND_LAYER_SHELL:
+            if selected in {
+                OverlayBackend.WAYLAND_INPUT_PANEL,
+                OverlayBackend.WAYLAND_LAYER_SHELL,
+            }:
                 return selected
             raise RuntimeError(
-                "Wayland overlay backend was initialized without layer-shell support."
+                "Wayland overlay backend was initialized without input-panel or layer-shell support."
             )
 
         if platform == "xcb":
@@ -442,11 +562,33 @@ class AlwaysOnTopWindowController:
         )
 
     def _move_layer_shell_by(self, dx: int, dy: int) -> None:
+        self._layer_shell_pending_move_x += dx
+        self._layer_shell_pending_move_y += dy
+        self._flush_layer_shell_move()
+
+    def _flush_layer_shell_move(self) -> None:
+        self._layer_shell_move_scheduled = False
+        dx = self._layer_shell_pending_move_x
+        dy = self._layer_shell_pending_move_y
+        self._layer_shell_pending_move_x = 0
+        self._layer_shell_pending_move_y = 0
+        if dx == 0 and dy == 0:
+            return
+
         if not self._layer_shell_position_initialized:
             self._initialize_layer_shell_position()
 
-        self._layer_shell_left_margin += dx
-        self._layer_shell_bottom_margin -= dy
+        screen_size = self._current_screen_geometry(for_layer_shell=True).size()
+        max_left_margin = max(0, screen_size.width() - self._window.width())
+        max_bottom_margin = max(0, screen_size.height() - self._window.height())
+        self._layer_shell_left_margin = max(
+            0,
+            min(self._layer_shell_left_margin + dx, max_left_margin),
+        )
+        self._layer_shell_bottom_margin = max(
+            0,
+            min(self._layer_shell_bottom_margin - dy, max_bottom_margin),
+        )
         self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
         self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
         self._layer_shell_position_initialized = True
@@ -456,7 +598,7 @@ class AlwaysOnTopWindowController:
             anchors=self._layer_shell_anchors,
             margins=self._layer_shell_margins,
         )
-        self._sync_wayland_layer_shell()
+        update_wayland_layer_shell_margins(self._window, self._layer_shell_margins)
 
     def _resize_layer_shell_by(self, dx: int, dy: int) -> None:
         if not self._layer_shell_position_initialized:

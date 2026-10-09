@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 
+from .widget import Button
+
 from ..grid.metrics import DEFAULT_KEYBOARD_METRICS, KeyboardMetrics
 
 VoidCallback = Callable[[], None]
@@ -62,7 +64,7 @@ def create_key_button(
 ) -> QPushButton:
     """Create a visual key button that emits callbacks but owns no state."""
 
-    button = QPushButton()
+    button = Button()
     cell_metrics = metrics or DEFAULT_KEYBOARD_METRICS
     set_key_button_label(button, label, secondary_label)
     button.setProperty("componentType", "key")

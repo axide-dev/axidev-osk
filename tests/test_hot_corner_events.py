@@ -22,6 +22,7 @@ from axidev_osk.runtime.actions import (
     decode_window_toggle_opacity,
     window_hide,
     window_show,
+    window_set_dwell_enabled,
     window_toggle_opacity,
 )
 from axidev_osk.runtime.events import (
@@ -32,7 +33,9 @@ from axidev_osk.runtime.events import (
     decode_component_pressed,
     hot_corner_triggered,
 )
-from axidev_osk.runtime.config_paths import surface_source_path
+from axidev_osk.runtime.config_paths import surface_source_path, window_source_path
+from axidev_osk.runtime.source import source_state_namespace
+from axidev_osk.runtime.window_manager import WindowManager
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 
@@ -47,6 +50,19 @@ class FakeOverlayController:
     def handle_show(self) -> bool:
         return True
 
+    def set_screen(self, screen: object) -> None:
+        del screen
+
+    def move_to_anchored(
+        self,
+        position: QPoint,
+        *,
+        anchors: int,
+        screen_geometry: QRect | None = None,
+    ) -> None:
+        del anchors
+        self.move_to(position, screen_geometry=screen_geometry)
+
 
 class FakeKeyboardBackend:
     ready = True
@@ -59,6 +75,10 @@ class FakeKeyboardBackend:
 
     def shutdown(self) -> None:
         return None
+
+    def add_modifier_state_listener(self, listener):
+        del listener
+        return lambda: None
 
     def add_key_state_listener(self, listener):
         del listener
@@ -248,6 +268,19 @@ class HotCornerEventTests(unittest.TestCase):
         context.dispatcher.dispatch_event(hot_corner_triggered("bottom_left"))
 
         self.assertEqual(actions, [window_show("window:keyboard")])
+
+    def test_dwell_action_updates_window_and_central_window_state(self) -> None:
+        context = make_test_context(FakeKeyboardBackend(), event_handlers=True)
+        window_path = window_source_path(context.config, "window:keyboard")
+
+        with patch.object(WindowManager, "set_dwell_enabled") as set_dwell_enabled:
+            context.dispatcher.dispatch_action(window_set_dwell_enabled("window:keyboard", True))
+
+        set_dwell_enabled.assert_called_once_with("window:keyboard", True)
+        self.assertIs(
+            context.state.get(source_state_namespace(window_path), "dwell_enabled"),
+            True,
+        )
 
     def test_component_action_dispatches_configured_window_opacity_command(self) -> None:
         context = make_test_context(FakeKeyboardBackend())

@@ -24,10 +24,14 @@ KEYBOARD_KEY_DOWN = "keyboard.key_down"
 KEYBOARD_KEY_UP = "keyboard.key_up"
 KEYBOARD_REGISTER_OUTPUT = "keyboard.register_output"
 PROMPT_RESOLVE = "prompt.resolve"
+SECURE_INPUT_PANEL_PREPARE = "secure_input_panel.prepare"
+SECURE_INPUT_PANEL_RELEASE = "secure_input_panel.release"
 STATE_REPLACE = "state.replace"
 STATE_SET = "state.set"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
+WINDOW_MOVE_BY = "window.move_by"
+WINDOW_SET_DWELL_ENABLED = "window.set_dwell_enabled"
 WINDOW_SHOW = "window.show"
 WINDOW_TOGGLE_OPACITY = "window.toggle_opacity"
 
@@ -71,6 +75,24 @@ class StateSetArguments:
 @dataclass(frozen=True, slots=True)
 class WindowArguments:
     window_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class NoArguments:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class WindowMoveByArguments:
+    window_id: str
+    dx: int
+    dy: int
+
+
+@dataclass(frozen=True, slots=True)
+class WindowSetDwellEnabledArguments:
+    window_id: str
+    enabled: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +156,30 @@ def window_hide(window_id: str) -> RuntimeAction:
 
 def window_close(window_id: str) -> RuntimeAction:
     return _validated_action(WINDOW_CLOSE, {"window_id": window_id}, decode_window)
+
+
+def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
+    return _validated_action(
+        WINDOW_MOVE_BY,
+        {"window_id": window_id, "dx": dx, "dy": dy},
+        decode_window_move_by,
+    )
+
+
+def window_set_dwell_enabled(window_id: str, enabled: bool) -> RuntimeAction:
+    return _validated_action(
+        WINDOW_SET_DWELL_ENABLED,
+        {"window_id": window_id, "enabled": enabled},
+        decode_window_set_dwell_enabled,
+    )
+
+
+def secure_input_panel_prepare() -> RuntimeAction:
+    return _validated_action(SECURE_INPUT_PANEL_PREPARE, {}, decode_no_arguments)
+
+
+def secure_input_panel_release() -> RuntimeAction:
+    return _validated_action(SECURE_INPUT_PANEL_RELEASE, {}, decode_no_arguments)
 
 
 def window_toggle_opacity(window_id: str, component_id: str, opacity: float) -> RuntimeAction:
@@ -210,6 +256,28 @@ def decode_state_set(arguments: DataMap) -> StateSetArguments:
 def decode_window(arguments: DataMap) -> WindowArguments:
     require_keys(arguments, ("window_id",))
     return WindowArguments(window_id=non_empty_string_value(arguments, "window_id"))
+
+
+def decode_no_arguments(arguments: DataMap) -> NoArguments:
+    require_keys(arguments, ())
+    return NoArguments()
+
+
+def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:
+    require_keys(arguments, ("window_id", "dx", "dy"))
+    return WindowMoveByArguments(
+        window_id=non_empty_string_value(arguments, "window_id"),
+        dx=int_value(arguments, "dx"),
+        dy=int_value(arguments, "dy"),
+    )
+
+
+def decode_window_set_dwell_enabled(arguments: DataMap) -> WindowSetDwellEnabledArguments:
+    require_keys(arguments, ("window_id", "enabled"))
+    return WindowSetDwellEnabledArguments(
+        window_id=non_empty_string_value(arguments, "window_id"),
+        enabled=bool_value(arguments, "enabled"),
+    )
 
 
 def decode_window_toggle_opacity(arguments: DataMap) -> WindowToggleOpacityArguments:

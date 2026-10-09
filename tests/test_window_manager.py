@@ -76,7 +76,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.assertTrue(blocker.eventFilter(window, event))
 
     def test_toggle_opacity_restores_configured_opacity_on_second_call(self) -> None:
-        window = QWidget()
+        window = Mock()
         self.manager._windows = {"window:keyboard": window}
 
         self.manager.toggle_opacity(
@@ -85,7 +85,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
             opacity=0.01,
         )
 
-        self.assertAlmostEqual(window.windowOpacity(), 0.01, delta=0.005)
+        window.set_visual_opacity.assert_called_once_with(0.01)
         self.assertIn("window:keyboard", self.manager._input_blockers)
 
         self.manager.toggle_opacity(
@@ -94,12 +94,14 @@ class WindowManagerVisibilityTests(unittest.TestCase):
             opacity=0.01,
         )
 
-        self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+        self.assertEqual(
+            window.set_visual_opacity.call_args_list,
+            [unittest.mock.call(0.01), unittest.mock.call(0.85)],
+        )
         self.assertNotIn("window:keyboard", self.manager._input_blockers)
 
     def test_show_restores_configured_opacity_and_removes_input_blocker(self) -> None:
-        window = QWidget()
-        window.setWindowOpacity(0.01)
+        window = Mock()
         blocker = _WindowInputBlocker(window, "key:ghost")
         self.app.installEventFilter(blocker)
         self.manager._windows = {"window:keyboard": window}
@@ -107,9 +109,8 @@ class WindowManagerVisibilityTests(unittest.TestCase):
 
         self.manager.show("window:keyboard")
 
-        self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+        window.set_visual_opacity.assert_called_once_with(0.85)
         self.assertNotIn("window:keyboard", self.manager._input_blockers)
-
 
 if __name__ == "__main__":
     unittest.main()

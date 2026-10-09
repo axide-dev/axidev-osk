@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+from PySide6.QtWidgets import QWidget
 
 from ..messages import MessageResult
 from .actions import (
@@ -12,42 +14,65 @@ from .actions import (
     KEYBOARD_KEY_UP,
     KEYBOARD_REGISTER_OUTPUT,
     PROMPT_RESOLVE,
+    SECURE_INPUT_PANEL_PREPARE,
+    SECURE_INPUT_PANEL_RELEASE,
     STATE_REPLACE,
     STATE_SET,
     WINDOW_CLOSE,
     WINDOW_HIDE,
+    WINDOW_MOVE_BY,
+    WINDOW_SET_DWELL_ENABLED,
     WINDOW_SHOW,
     WINDOW_TOGGLE_OPACITY,
     AppQuitArguments,
     KeyboardKeyArguments,
     KeyboardRegisterOutputArguments,
+    NoArguments,
     PromptResolveArguments,
     StateReplaceArguments,
     StateSetArguments,
     WindowArguments,
+    WindowMoveByArguments,
+    WindowSetDwellEnabledArguments,
     WindowToggleOpacityArguments,
     decode_app_quit,
     decode_keyboard_key,
     decode_keyboard_register_output,
+    decode_no_arguments,
     decode_prompt_resolve,
     decode_state_replace,
     decode_state_set,
     decode_window,
+    decode_window_move_by,
+    decode_window_set_dwell_enabled,
     decode_window_toggle_opacity,
+    state_set,
     window_hide,
+    window_move_by,
     window_show,
 )
 from .events import (
+    DISPLAY_CONFIGURATION_CHANGED,
     HOT_CORNER_TRIGGERED,
+    POINTER_MOTION_OBSERVED,
     WINDOW_CLOSE_REQUESTED,
+    WINDOW_DRAG_ENDED,
+    WINDOW_DRAG_STARTED,
+    DisplayConfigurationChangedArguments,
     HotCornerTriggeredArguments,
+    PointerMotionObservedArguments,
     WindowCloseRequestedArguments,
+    WindowDragArguments,
     keyboard_output_registered,
     prompt_resolved,
     state_changed,
 )
+from .config_paths import window_source_path
 from .source import source_state_namespace
 from .registries import EventHandlerRegistry
+
+if TYPE_CHECKING:
+    from .window_manager import WindowManager
 
 
 class _WindowVisibilityManager(Protocol):
@@ -66,6 +91,22 @@ class _ApplicationEventRuntime(Protocol):
         self,
         event: HotCornerTriggeredArguments,
     ) -> MessageResult: ...
+
+    def _prepare_secure_input_panel(self) -> MessageResult: ...
+
+    def _release_secure_input_panel(self) -> MessageResult: ...
+
+
+class _PointerDragRuntime(Protocol):
+    _active_pointer_drag_window_id: str | None
+    _pointer_drag_remainder: tuple[float, float]
+
+    @property
+    def _window_manager(self) -> "WindowManager": ...
+
+    def _set_pointer_drag_active(self, enabled: bool) -> None: ...
+
+    def _commit_window_surface(self, window: QWidget) -> None: ...
 
 
 def register_context_action_handlers(registry: EventHandlerRegistry) -> None:
@@ -127,6 +168,26 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
         lambda runtime: lambda arguments: _window_toggle_opacity(runtime, arguments),
     )
     registry.register_action_handler(
+        WINDOW_MOVE_BY,
+        decode_window_move_by,
+        lambda runtime: lambda arguments: route_window_move_by(arguments, runtime),
+    )
+    registry.register_action_handler(
+        WINDOW_SET_DWELL_ENABLED,
+        decode_window_set_dwell_enabled,
+        lambda runtime: lambda arguments: route_window_set_dwell_enabled(arguments, runtime),
+    )
+    registry.register_action_handler(
+        SECURE_INPUT_PANEL_PREPARE,
+        decode_no_arguments,
+        lambda runtime: lambda arguments: _secure_input_panel_prepare(runtime, arguments),
+    )
+    registry.register_action_handler(
+        SECURE_INPUT_PANEL_RELEASE,
+        decode_no_arguments,
+        lambda runtime: lambda arguments: _secure_input_panel_release(runtime, arguments),
+    )
+    registry.register_action_handler(
         APP_QUIT,
         decode_app_quit,
         lambda runtime: lambda arguments: _app_quit(runtime, arguments),
@@ -138,6 +199,22 @@ def register_event_handlers(registry: EventHandlerRegistry) -> None:
     registry.register_event_handler(
         HOT_CORNER_TRIGGERED,
         _hot_corner_triggered_handler,
+    )
+    registry.register_event_handler(
+        DISPLAY_CONFIGURATION_CHANGED,
+        lambda runtime: lambda event: route_display_configuration_changed(event, runtime),
+    )
+    registry.register_event_handler(
+        WINDOW_DRAG_STARTED,
+        lambda runtime: lambda event: route_window_drag_started(event, runtime),
+    )
+    registry.register_event_handler(
+        WINDOW_DRAG_ENDED,
+        lambda runtime: lambda event: route_window_drag_ended(event, runtime),
+    )
+    registry.register_event_handler(
+        POINTER_MOTION_OBSERVED,
+        lambda runtime: lambda event: route_pointer_motion_observed(event, runtime),
     )
 
 
@@ -160,6 +237,97 @@ def route_hot_corner_triggered(
         else:
             actions.append(window_show(window_id))
     return actions
+
+
+def route_display_configuration_changed(
+    event: DisplayConfigurationChangedArguments,
+    runtime: object,
+) -> MessageResult:
+    """Recover windows and services after connected outputs change."""
+
+    del event
+    runtime._window_manager.refresh_screen_configuration()  # type: ignore[attr-defined]  # noqa: SLF001
+    for service in runtime._services.services():  # type: ignore[attr-defined]  # noqa: SLF001
+        refresh = getattr(service, "refresh_screen_configuration", None)
+        if refresh is not None:
+            refresh()
+    return []
+
+
+def route_window_set_dwell_enabled(
+    arguments: WindowSetDwellEnabledArguments,
+    runtime: object,
+) -> MessageResult:
+    """Apply one window's dwell state and keep it in the central store."""
+
+    runtime._window_manager.set_dwell_enabled(arguments.window_id, arguments.enabled)  # type: ignore[attr-defined]  # noqa: SLF001
+    window_path = window_source_path(runtime._config, arguments.window_id)  # type: ignore[attr-defined]  # noqa: SLF001
+    return [state_set(source_state_namespace(window_path), "dwell_enabled", arguments.enabled)]
+
+
+def route_window_drag_started(event: WindowDragArguments, runtime: _PointerDragRuntime) -> MessageResult:
+    """Start routing raw pointer motion to one dragged layer-shell window."""
+
+    if runtime._active_pointer_drag_window_id is not None:  # noqa: SLF001
+        runtime._set_pointer_drag_active(False)  # noqa: SLF001
+    runtime._active_pointer_drag_window_id = event.window_id  # noqa: SLF001
+    runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
+    runtime._set_pointer_drag_active(True)  # noqa: SLF001
+    return []
+
+
+def route_window_drag_ended(event: WindowDragArguments, runtime: _PointerDragRuntime) -> MessageResult:
+    """Stop routing raw pointer motion when the dragged window releases."""
+
+    if runtime._active_pointer_drag_window_id == event.window_id:  # noqa: SLF001
+        _stop_pointer_drag(runtime)
+    return []
+
+
+def route_pointer_motion_observed(
+    event: PointerMotionObservedArguments,
+    runtime: _PointerDragRuntime,
+) -> MessageResult:
+    """Turn accumulated raw pointer motion into whole-pixel window moves."""
+
+    window_id = runtime._active_pointer_drag_window_id  # noqa: SLF001
+    if window_id is None:
+        return []
+    window = runtime._window_manager.get(window_id)  # noqa: SLF001
+    if window is None or not window.isVisible():
+        _stop_pointer_drag(runtime)
+        return []
+    remainder_x, remainder_y = runtime._pointer_drag_remainder  # noqa: SLF001
+    total_x = remainder_x + event.dx
+    total_y = remainder_y + event.dy
+    dx = int(total_x)
+    dy = int(total_y)
+    runtime._pointer_drag_remainder = (total_x - dx, total_y - dy)  # noqa: SLF001
+    if not dx and not dy:
+        return []
+    return [window_move_by(window_id, dx, dy)]
+
+
+def route_window_move_by(arguments: WindowMoveByArguments, runtime: _PointerDragRuntime) -> MessageResult:
+    """Move one managed window, then commit its surface in the same step."""
+
+    window = runtime._window_manager.get(arguments.window_id)  # noqa: SLF001
+    if window is None:
+        return []
+    try:
+        runtime._window_manager.move_by(arguments.window_id, arguments.dx, arguments.dy)  # noqa: SLF001
+        runtime._commit_window_surface(window)  # noqa: SLF001
+    except Exception:
+        if runtime._active_pointer_drag_window_id == arguments.window_id:  # noqa: SLF001
+            _stop_pointer_drag(runtime)
+        raise
+    return []
+
+
+def _stop_pointer_drag(runtime: _PointerDragRuntime) -> None:
+    runtime._set_pointer_drag_active(False)  # noqa: SLF001
+    runtime._active_pointer_drag_window_id = None  # noqa: SLF001
+    runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
 
 
 def _window_close_requested_handler(
@@ -233,6 +401,16 @@ def _window_toggle_opacity(runtime: object, arguments: WindowToggleOpacityArgume
         opacity=arguments.opacity,
     )
     return []
+
+
+def _secure_input_panel_prepare(runtime: _ApplicationEventRuntime, arguments: NoArguments) -> MessageResult:
+    del arguments
+    return runtime._prepare_secure_input_panel()  # noqa: SLF001
+
+
+def _secure_input_panel_release(runtime: _ApplicationEventRuntime, arguments: NoArguments) -> MessageResult:
+    del arguments
+    return runtime._release_secure_input_panel()  # noqa: SLF001
 
 
 def _app_quit(runtime: object, arguments: AppQuitArguments) -> MessageResult:

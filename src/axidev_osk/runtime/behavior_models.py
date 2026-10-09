@@ -35,10 +35,14 @@ class KeyboardBehavior:
 
 @dataclass(frozen=True, slots=True)
 class ActionBehavior:
-    """Ordered configured actions for component press and release."""
+    """Ordered configured actions for component press, release, and latch changes."""
 
     pressed_actions: tuple[RuntimeAction, ...] = ()
     released_actions: tuple[RuntimeAction, ...] = ()
+    latchable: bool = False
+    initially_latched: bool = False
+    latched_actions: tuple[RuntimeAction, ...] = ()
+    unlatched_actions: tuple[RuntimeAction, ...] = ()
 
 
 class HookDecision(str, Enum):

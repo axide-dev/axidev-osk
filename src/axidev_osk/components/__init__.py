@@ -9,6 +9,7 @@ _BUNDLED_COMPONENT_MODULES = (
     "axidev_osk.components.grid.builder",
     "axidev_osk.components.button",
     "axidev_osk.components.prompt",
+    "axidev_osk.components.pointer_locator",
 )
 
 

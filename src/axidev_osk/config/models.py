@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -58,6 +59,127 @@ class ChromeConfig:
 
     enabled: bool = True
 
+
+@dataclass(frozen=True, slots=True)
+class DwellClickConfig:
+    """Pointer dwell activation policy for one window.
+
+    Attributes:
+        enabled: Whether resting the pointer clicks inside the window.
+        delay_ms: Base time required to activate the current target.
+        dead_zone_px: Movement required to rearm after activation.
+        full_speed_px_s: Highest speed that advances at the maximum rate.
+        stop_speed_px_s: Speed at which progress stops completely.
+        maximum_progress_rate: Progress multiplier at or below full speed.
+        indicator_start_progress: Progress required before feedback appears.
+        direction_reversal_progress_factor: Progress retained after a clear
+            reversal inside the same target.
+        movement_penalty_px: Distance that removes one full dwell of progress.
+        distance_curve_full_px: Travel distance at which slowdown uses the
+            normal rather than short-distance curve.
+        velocity_release_ms: Time for remembered speed to fall from the stop
+            threshold to zero after movement ends.
+    """
+
+    enabled: bool = False
+    delay_ms: int = 200
+    dead_zone_px: int = 10
+    full_speed_px_s: float = 20.0
+    stop_speed_px_s: float = 240.0
+    maximum_progress_rate: float = 1.75
+    indicator_start_progress: float = 0.25
+    direction_reversal_progress_factor: float = 0.5
+    movement_penalty_px: float = 15.0
+    distance_curve_full_px: float = 200.0
+    velocity_release_ms: int = 100
+
+    def __post_init__(self) -> None:
+        """Reject timing and distance values that cannot define a dwell."""
+
+        if not math.isfinite(self.delay_ms) or self.delay_ms < 1:
+            raise ValueError("Dwell click delay must be at least 1 millisecond")
+        if not math.isfinite(self.dead_zone_px) or self.dead_zone_px < 0:
+            raise ValueError(
+                "Dwell click dead zone must be finite and non-negative"
+            )
+        if not math.isfinite(self.full_speed_px_s) or self.full_speed_px_s < 0:
+            raise ValueError(
+                "Dwell click full speed must be finite and non-negative"
+            )
+        if (
+            not math.isfinite(self.stop_speed_px_s)
+            or self.stop_speed_px_s <= self.full_speed_px_s
+        ):
+            raise ValueError(
+                "Dwell click stop speed must be finite and greater than full speed"
+            )
+        if (
+            not math.isfinite(self.maximum_progress_rate)
+            or self.maximum_progress_rate < 1
+        ):
+            raise ValueError(
+                "Dwell click maximum progress rate must be finite and at least 1"
+            )
+        if (
+            not math.isfinite(self.indicator_start_progress)
+            or not 0 <= self.indicator_start_progress <= 1
+        ):
+            raise ValueError(
+                "Dwell click indicator start progress must be between 0 and 1"
+            )
+        if (
+            not math.isfinite(self.direction_reversal_progress_factor)
+            or not 0 <= self.direction_reversal_progress_factor <= 1
+        ):
+            raise ValueError(
+                "Dwell click direction reversal progress factor must be between 0 and 1"
+            )
+        if not math.isfinite(self.movement_penalty_px) or self.movement_penalty_px <= 0:
+            raise ValueError(
+                "Dwell click movement penalty distance must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.distance_curve_full_px)
+            or self.distance_curve_full_px <= 0
+        ):
+            raise ValueError(
+                "Dwell click full curve distance must be finite and positive"
+            )
+        if (
+            not math.isfinite(self.velocity_release_ms)
+            or self.velocity_release_ms < 1
+        ):
+            raise ValueError(
+                "Dwell click velocity release must be at least 1 millisecond"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PointerLocatorConfig:
+    """Component-aware pointer feedback configured as a surface component.
+
+    Attributes:
+        id: Deterministic component ID.
+        radius_percent: Glow radius as a percentage of the surface's shorter side.
+        maximum_opacity_percent: Glow opacity at the pointer position.
+        radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
+    """
+
+    id: str
+    radius_percent: float
+    maximum_opacity_percent: float
+    radius_standard_deviations: float
+    kind: Literal["pointer-locator"] = "pointer-locator"
+
+    def __post_init__(self) -> None:
+        """Reject values that cannot define a visible glow."""
+
+        if not 0.0 < self.radius_percent <= 100.0:
+            raise ValueError("Pointer locator radius percent must be greater than 0 and at most 100")
+        if not 0.0 < self.maximum_opacity_percent <= 100.0:
+            raise ValueError("Pointer locator maximum opacity percent must be greater than 0 and at most 100")
+        if not math.isfinite(self.radius_standard_deviations) or self.radius_standard_deviations < 0.1:
+            raise ValueError("Pointer locator radius standard deviations must be finite and at least 0.1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,7 +365,15 @@ class KeyboardStatusConfig:
     kind: Literal["keyboard-status"] = "keyboard-status"
 
 
-ComponentConfig = KeyConfig | SpacerConfig | ButtonConfig | PromptConfig | KeyboardGridConfig | KeyboardStatusConfig
+ComponentConfig = (
+    KeyConfig
+    | SpacerConfig
+    | ButtonConfig
+    | PromptConfig
+    | KeyboardGridConfig
+    | KeyboardStatusConfig
+    | PointerLocatorConfig
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +442,7 @@ class SurfaceConfig:
         id: Deterministic surface ID.
         kind: Surface builder key.
         components: Child components mounted into the surface.
+        background_components: Components painted behind the surface content.
         margins: Qt layout margins in pixels ordered left, top, right, bottom.
         spacing: Qt layout spacing in pixels.
         minimum_size: Optional lower bound for startup size as ``(width, height)``.
@@ -319,6 +450,7 @@ class SurfaceConfig:
 
     id: str
     components: tuple[ComponentConfig, ...]
+    background_components: tuple[ComponentConfig, ...] = ()
     kind: Literal["surface"] = "surface"
     margins: tuple[int, int, int, int] = (10, 10, 10, 10)
     spacing: int = 8
@@ -327,7 +459,10 @@ class SurfaceConfig:
     def __post_init__(self) -> None:
         """Validate IDs at the surface composition boundary."""
 
-        validate_unique_ids((component.id for component in self.components), scope=f"surface {self.id!r} components")
+        validate_unique_ids(
+            (component.id for component in (*self.background_components, *self.components)),
+            scope=f"surface {self.id!r} components",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +475,7 @@ class WindowConfig:
         surface: Root surface content declaration.
         overlay: Overlay behavior for this window.
         chrome: Optional custom chrome policy.
+        dwell_click: Optional pointer dwell activation policy.
         opacity: Normal window opacity from zero through one.
     """
 
@@ -348,6 +484,7 @@ class WindowConfig:
     surface: SurfaceConfig
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     chrome: ChromeConfig = field(default_factory=ChromeConfig)
+    dwell_click: DwellClickConfig = field(default_factory=DwellClickConfig)
     opacity: float = 1.0
 
     def __post_init__(self) -> None:

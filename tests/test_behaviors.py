@@ -7,13 +7,14 @@ from types import SimpleNamespace
 from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import BehaviorBinding, BehaviorConfig, BehaviorHook
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
-from axidev_osk.runtime.behavior_models import HookDecision, HookOutcome, KeyboardOutput
+from axidev_osk.runtime.behavior_models import HookDecision, HookOutcome, KeyboardBehaviorMode, KeyboardOutput
 from axidev_osk.runtime.behaviors import (
     KEYBOARD_KEY,
     BehaviorInteraction,
     BehaviorRegistry,
     action_behavior,
     action_hook,
+    keyboard_behavior,
     register_builtin_behaviors,
 )
 from axidev_osk.runtime.events import (
@@ -35,6 +36,7 @@ class FakeKeyboardBackend:
 
     def __init__(self) -> None:
         self.listeners = []
+        self.modifier_listeners = []
         self.pressed: set[str] = set()
         self.down_calls: list[tuple[str, frozenset[str]]] = []
         self.up_calls: list[str] = []
@@ -42,6 +44,17 @@ class FakeKeyboardBackend:
     def add_key_state_listener(self, listener):
         self.listeners.append(listener)
         return lambda: self.listeners.remove(listener)
+
+    def add_modifier_state_listener(self, listener):
+        self.modifier_listeners.append(listener)
+        return lambda: self.modifier_listeners.remove(listener)
+
+    def lock_name_for_key(self, key_name: str) -> str | None:
+        return {"CapsLock": "capslock"}.get(key_name)
+
+    def emit_modifiers(self, *modifiers: str) -> None:
+        for listener in tuple(self.modifier_listeners):
+            listener(frozenset(modifiers))
 
     def key_name_for_output(self, output: KeyboardOutput) -> str:
         return output.output_key
@@ -122,6 +135,97 @@ def _record_action(label: str) -> RuntimeAction:
     return RuntimeAction("test.record", {"label": label})
 
 
+def _dwell_binding(config) -> BehaviorBinding:
+    for binding in config.behaviors:
+        if binding.default.arguments.get("latchable") is True:
+            return binding
+    raise AssertionError("Dwell behavior was not found")
+
+
+class SystemStateBehaviorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.backend = FakeKeyboardBackend()
+        self.config = build_default_app_config()
+        self.context = make_test_context(self.backend, config=self.config)
+        self.dwell_actions: list[bool] = []
+
+        def record_dwell(arguments: DataMap) -> MessageResult:
+            enabled = arguments["enabled"]
+            assert isinstance(enabled, bool)
+            self.dwell_actions.append(enabled)
+            return []
+
+        self.context.dispatcher.register_action(
+            "window.set_dwell_enabled",
+            lambda arguments: arguments,
+            record_dwell,
+        )
+
+    def _snapshot(self, source: SourcePath) -> DataMap:
+        return self.context.behaviors.state_snapshot(source)
+
+    def _layout_tags(self, source: SourcePath) -> list[object]:
+        tags = self._snapshot(source.through("layout")).get("state_tags")
+        assert isinstance(tags, list)
+        return tags
+
+    def test_caps_key_sends_caps_lock_without_toggling_its_latch(self) -> None:
+        caps = _keyboard_source(self.config, "CapsLock")
+
+        self.context.dispatcher.dispatch_event(component_pressed(caps))
+        self.context.dispatcher.dispatch_event(component_released(caps))
+
+        self.assertEqual([call[0] for call in self.backend.down_calls], ["CapsLock"])
+        self.assertEqual(self.backend.up_calls, ["CapsLock"])
+        self.assertFalse(self._snapshot(caps)["latched"])
+
+    def test_caps_key_and_letter_legends_follow_observed_caps_lock(self) -> None:
+        caps = _keyboard_source(self.config, "CapsLock")
+
+        self.backend.emit_modifiers("capslock")
+
+        self.assertTrue(self._snapshot(caps)["latched"])
+        self.assertIn("caps", self._layout_tags(caps))
+
+        self.backend.emit_modifiers()
+
+        self.assertFalse(self._snapshot(caps)["latched"])
+        self.assertNotIn("caps", self._layout_tags(caps))
+
+    def test_dwell_key_latches_and_requests_window_state_without_keyboard_output(self) -> None:
+        dwell = _dwell_binding(self.config).target
+
+        self.assertFalse(self._snapshot(dwell)["latched"])
+        self.context.dispatcher.dispatch_event(component_pressed(dwell))
+        self.context.dispatcher.dispatch_event(component_released(dwell))
+
+        self.assertTrue(self._snapshot(dwell)["latched"])
+        self.assertEqual(self.dwell_actions, [True])
+
+        self.context.dispatcher.dispatch_event(component_pressed(dwell))
+        self.context.dispatcher.dispatch_event(component_released(dwell))
+
+        self.assertFalse(self._snapshot(dwell)["latched"])
+        self.assertEqual(self.dwell_actions, [True, False])
+        self.assertEqual(self.backend.down_calls, [])
+        self.assertEqual(self.backend.up_calls, [])
+
+    def test_restart_clears_keyboard_latches_but_keeps_action_latches(self) -> None:
+        shift = _keyboard_source(self.config, "ShiftLeft")
+        dwell = _dwell_binding(self.config).target
+        for source in (shift, dwell):
+            self.context.dispatcher.dispatch_event(component_pressed(source))
+            self.context.dispatcher.dispatch_event(component_released(source))
+        self.assertTrue(self._snapshot(shift)["latched"])
+
+        self.context.keyboard.reset_state()
+        self.context.behaviors.activate()
+
+        self.assertFalse(self._snapshot(shift)["latched"])
+        self.assertTrue(self._snapshot(dwell)["latched"])
+        self.assertNotIn("shift", self._layout_tags(shift))
+
+
 class KeyboardBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.backend = FakeKeyboardBackend()
@@ -146,13 +250,25 @@ class KeyboardBehaviorTests(unittest.TestCase):
         )
 
     def test_logical_toggle_taps_output_and_toggles_latched_state(self) -> None:
-        source = _keyboard_source(self.config, "CapsLock")
+        source = _keyboard_source(self.config, "ScrollLock")
+        self.config = _replace_binding(
+            self.config,
+            BehaviorBinding(
+                target=source,
+                default=keyboard_behavior(
+                    KeyboardBehaviorMode.LOGICAL_TOGGLE,
+                    KeyboardOutput("ScrollLock", repeats=False, uses_active_state_tags=False),
+                ),
+            ),
+        )
+        self.backend = FakeKeyboardBackend()
+        self.context = make_test_context(self.backend, config=self.config)
 
         self.context.dispatcher.dispatch_event(component_pressed(source))
         self.context.dispatcher.dispatch_event(component_released(source))
 
-        self.assertEqual(self.backend.down_calls, [("CapsLock", frozenset())])
-        self.assertEqual(self.backend.up_calls, ["CapsLock"])
+        self.assertEqual(self.backend.down_calls, [("ScrollLock", frozenset())])
+        self.assertEqual(self.backend.up_calls, ["ScrollLock"])
         self.assertEqual(
             self.context.behaviors.state_snapshot(source),
             {"pressed": False, "latched": True},
@@ -164,7 +280,7 @@ class KeyboardBehaviorTests(unittest.TestCase):
             self.context.behaviors.state_snapshot(source),
             {"pressed": False, "latched": False},
         )
-        self.assertEqual(self.backend.up_calls, ["CapsLock", "CapsLock"])
+        self.assertEqual(self.backend.up_calls, ["ScrollLock", "ScrollLock"])
 
     def test_held_toggle_keeps_output_down_until_second_release(self) -> None:
         source = _keyboard_source(self.config, "ShiftLeft")

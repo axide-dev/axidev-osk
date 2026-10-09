@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Set
 
 from PySide6.QtCore import QObject
@@ -9,7 +10,11 @@ from PySide6.QtCore import QObject
 from ..hot_corner.service import HotCornerService
 from ..runtime.registries import ServiceRegistry
 from .keyboard import KeyboardService
+from .displays import DisplayService
 from .single_instance import WindowsSingleInstanceService
+
+if sys.platform.startswith("linux"):
+    from .wayland_relative_pointer import WaylandRelativePointerService
 
 
 def register_services(
@@ -36,8 +41,12 @@ def register_services(
 
     if include is None or "single_instance" in include:
         registry.register("single_instance", WindowsSingleInstanceService(parent=parent))
+    if sys.platform.startswith("linux") and (include is None or "wayland_relative_pointer" in include):
+        registry.register("wayland_relative_pointer", WaylandRelativePointerService(parent=parent))
     if include is None or "keyboard" in include:
         registry.register("keyboard", keyboard or KeyboardService())
     if include is None or "hot_corner" in include:
         registry.register("hot_corner", HotCornerService(parent=parent))
+    if include is None or "displays" in include:
+        registry.register("displays", DisplayService(parent=parent))
 __all__ = ["KeyboardService", "WindowsSingleInstanceService", "register_services"]

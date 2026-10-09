@@ -30,6 +30,8 @@ from .events import (
     HotCornerTriggeredArguments,
     WindowCloseRequestedArguments,
     register_builtin_events,
+    secure_input_panel_prepared,
+    secure_input_panel_released,
 )
 from .prompt import PromptResolutionWaiter
 from .registries import ComponentRegistry, EventHandlerRegistry, ServiceRegistry, SurfaceRegistry
@@ -49,6 +51,8 @@ class ApplicationRuntime:
         config: AppConfig | None = None,
         services: ServiceRegistry | None = None,
         event_handlers: EventHandlerRegistry | None = None,
+        confirm_quit: bool = True,
+        show_startup_windows: bool = True,
     ) -> None:
         """Create the main runtime.
 
@@ -57,6 +61,8 @@ class ApplicationRuntime:
             config: Optional declarative app config.
             services: Optional pre-populated service registry for tests.
             event_handlers: Optional pre-populated handler registry for tests.
+            confirm_quit: Whether shutdown requests require confirmation.
+            show_startup_windows: Whether to create configured startup windows immediately.
 
         Returns:
             None.
@@ -66,6 +72,10 @@ class ApplicationRuntime:
         """
 
         self._app = app
+        self._show_startup_windows = show_startup_windows
+        self._active_pointer_drag_window_id: str | None = None
+        self._pointer_drag_remainder = (0.0, 0.0)
+        self._secure_input_panel_prepared = False
         self._config = config or build_default_app_config()
         self._dispatcher = Dispatcher()
         register_builtin_events(self._dispatcher)
@@ -101,7 +111,7 @@ class ApplicationRuntime:
         self._event_handlers.install(self._dispatcher, self)
         self._quit_controller = ApplicationQuitController(
             app,
-            prompt=self._show_quit_prompt,
+            prompt=self._show_quit_prompt if confirm_quit else lambda _parent: True,
             parent=app,
         )
         self._linux_permissions = LinuxPermissionController(
@@ -126,12 +136,15 @@ class ApplicationRuntime:
         """
 
         apply_theme(self._app)
-        for service in self._services.services():
+        autostart_services = tuple(self._services.autostart_services())
+        for service in autostart_services:
             service.start(self.context)
-        self._behaviors.activate()
-        for window_id in self._config.startup_window_ids:
-            window = self._window_manager.show(window_id)
-            self._quit_controller.register_window(window)
+        if any(service is self._keyboard for service in autostart_services):
+            self._behaviors.activate()
+        if self._show_startup_windows:
+            for window_id in self._config.startup_window_ids:
+                window = self._window_manager.show(window_id)
+                self._quit_controller.register_window(window)
         for service in self._services.services():
             self._quit_controller.register_quit_callback(service.stop)
         self._quit_controller.install_signal_handlers()
@@ -160,6 +173,66 @@ class ApplicationRuntime:
         """Map hot-corner events to managed window visibility actions."""
 
         return route_hot_corner_triggered(event, self)
+
+    def _prepare_secure_input_panel(self) -> MessageResult:
+        """Create the keyboard window and backend requested by the lock-screen button."""
+
+        if self._secure_input_panel_prepared:
+            return [secure_input_panel_prepared()]
+        window_id = self._config.keyboard_window_id
+        try:
+            self._keyboard.start(self.context)
+            self._behaviors.activate()
+            window = self._window_manager.show(window_id)
+            window.set_close_enabled(False)
+        except Exception:
+            try:
+                self._window_manager.destroy(window_id)
+            except Exception:
+                _logger.exception("Failed to destroy a partially prepared secure input panel")
+            try:
+                self._keyboard.shutdown()
+            except Exception:
+                _logger.exception("Failed to shut down keyboard output after panel preparation failed")
+            raise
+        self._secure_input_panel_prepared = True
+        return [secure_input_panel_prepared()]
+
+    def _release_secure_input_panel(self) -> MessageResult:
+        """Destroy the panel while retaining this KWin input-method connection."""
+
+        if not self._secure_input_panel_prepared:
+            return [secure_input_panel_released()]
+        try:
+            self._keyboard.reset_state()
+        finally:
+            try:
+                self._window_manager.destroy(self._config.keyboard_window_id)
+            finally:
+                self._secure_input_panel_prepared = False
+        return [secure_input_panel_released()]
+
+    def _commit_window_surface(self, window: QWidget) -> None:
+        """Commit a moved layer-shell surface through interested services."""
+
+        surface = int(window.winId())
+        for service in self._services.services():
+            commit_surface = getattr(service, "commit_surface", None)
+            if commit_surface is not None:
+                commit_surface(surface)
+
+    def _set_pointer_drag_active(self, enabled: bool) -> None:
+        """Start or stop relative-pointer collection in interested services."""
+
+        for service in self._services.services():
+            if enabled:
+                begin_drag = getattr(service, "begin_drag", None)
+                if begin_drag is not None:
+                    begin_drag()
+            else:
+                end_drag = getattr(service, "end_drag", None)
+                if end_drag is not None:
+                    end_drag()
 
     def _show_quit_prompt(self, parent: QWidget | None) -> bool:
         prompt_config = self._config.quit_prompt

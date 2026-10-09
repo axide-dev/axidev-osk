@@ -9,9 +9,21 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from axidev_osk.cli import linux
+from axidev_osk.cli import build_parser
 
 
 class LinuxCliTests(unittest.TestCase):
+    def test_public_top_level_help_hides_internal_commands(self) -> None:
+        output = io.StringIO()
+
+        with patch("sys.stdout", output), self.assertRaises(SystemExit) as exit_context:
+            build_parser().parse_args(["--help"])
+
+        self.assertEqual(exit_context.exception.code, 0)
+        self.assertIn("linux", output.getvalue())
+        self.assertNotIn("internal", output.getvalue())
+        self.assertNotIn("plasma-lock", output.getvalue())
+
     def test_public_help_describes_configuration_and_hides_runtime_command(self) -> None:
         parser = argparse.ArgumentParser()
         linux.register_commands(parser)

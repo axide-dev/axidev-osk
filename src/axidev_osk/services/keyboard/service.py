@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ...runtime.behavior_models import KeyboardOutput
-from ...runtime.events import keyboard_key_state_changed
+from ...runtime.events import keyboard_key_state_changed, keyboard_lock_state_changed
 from ...runtime.source import SourcePath
 from .io import AxidevIoKeyboardBackend
 
@@ -31,6 +31,8 @@ class KeyboardService:
         self._outputs_by_source: dict[SourcePath, KeyboardOutput] = {}
         self._sources_by_key_name: dict[str, list[SourcePath]] = {}
         self._backend_listener_unsubscribe: Unsubscribe | None = None
+        self._modifier_listener_unsubscribe: Unsubscribe | None = None
+        self._locked_by_key_name: dict[str, bool] = {}
 
     def bind_context(self, context: "Context") -> None:
         self._context = context
@@ -61,6 +63,7 @@ class KeyboardService:
 
     def initialize(self) -> bool:
         initialized = self._backend.initialize()
+        self._shutdown = False
         self._ensure_backend_listener()
         return initialized
 
@@ -71,7 +74,7 @@ class KeyboardService:
         self._shutdown = True
         started_at = time.perf_counter()
         _logger.info("Shutting down keyboard backend")
-        self._release_press_handles()
+        self.reset_state()
         self._backend.shutdown()
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)
 
@@ -90,6 +93,9 @@ class KeyboardService:
             sources.append(source)
         if self._backend.is_key_down(key_name):
             self._emit_key_state(source, True, state_tags)
+        locked = self._locked_by_key_name.get(key_name)
+        if locked is not None:
+            self._emit_lock_state(source, locked)
         return key_name, state_tags
 
     def key_down(
@@ -135,6 +141,22 @@ class KeyboardService:
         for source in self._sources_by_key_name.get(key_name, []):
             self._emit_key_state(source, pressed, state_tags)
 
+    def _handle_backend_modifier_state_change(self, modifiers: frozenset[str]) -> None:
+        for key_name, sources in tuple(self._sources_by_key_name.items()):
+            lock_name = self._backend.lock_name_for_key(key_name)
+            if lock_name is None:
+                continue
+            locked = lock_name in modifiers
+            if self._locked_by_key_name.get(key_name) == locked:
+                continue
+            self._locked_by_key_name[key_name] = locked
+            for source in tuple(sources):
+                self._emit_lock_state(source, locked)
+
+    def _emit_lock_state(self, source: SourcePath, locked: bool) -> None:
+        if self._context is not None:
+            self._context.dispatcher.dispatch_event(keyboard_lock_state_changed(source, locked))
+
     def _emit_key_state(
         self,
         source: SourcePath,
@@ -150,4 +172,8 @@ class KeyboardService:
         if self._backend_listener_unsubscribe is None:
             self._backend_listener_unsubscribe = self._backend.add_key_state_listener(
                 self._handle_backend_key_state_change
+            )
+        if self._modifier_listener_unsubscribe is None:
+            self._modifier_listener_unsubscribe = self._backend.add_modifier_state_listener(
+                self._handle_backend_modifier_state_change
             )

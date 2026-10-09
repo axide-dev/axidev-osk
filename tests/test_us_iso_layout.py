@@ -94,6 +94,7 @@ class UsIsoLayoutTests(unittest.TestCase):
                 "F10",
                 "F11",
                 "F12",
+                "Dwell",
                 "PrtSc",
                 "ScrLk",
                 "Pause",
@@ -177,6 +178,59 @@ class UsIsoLayoutTests(unittest.TestCase):
         self.assertEqual(actions[0]["action"], "window.toggle_opacity")
         self.assertEqual(actions[0]["arguments"]["window_id"], "window:keyboard")
         self.assertEqual(actions[0]["arguments"]["component_id"], ghost.id)
+
+    def test_function_keys_declare_matching_outputs(self) -> None:
+        pairs = [
+            (visual.label, output.output_key)
+            for visual, output in _visual_output_pairs()
+            if visual.row == 0 and visual.label.startswith("F")
+        ]
+
+        self.assertEqual(pairs, [(f"F{number}", f"F{number}") for number in range(1, 13)])
+
+    def test_caps_key_is_momentary_and_does_not_repeat(self) -> None:
+        caps = [
+            (visual, output)
+            for visual, output in _visual_output_pairs()
+            if output.output_key == "CapsLock"
+        ]
+        behaviors = build_us_iso_behavior_configs()
+        caps_ids = [
+            component.id
+            for component in build_us_iso_layout_config().grids[0].components
+            if component.visual.label == "Caps"
+        ]
+
+        self.assertEqual(len(caps), 1)
+        self.assertFalse(caps[0][1].repeats)
+        self.assertEqual(behaviors[caps_ids[0]].arguments["mode"], "momentary")
+
+    def test_dwell_key_is_a_latchable_window_action_after_f12(self) -> None:
+        config = build_default_app_config()
+        keyboard = config.windows[0].surface.components[0]
+        grid = keyboard.layout.grids[0]
+        labels = [component.visual.label for component in grid.components]
+        dwell = grid.components[labels.index("Dwell")]
+        binding = next(
+            behavior
+            for behavior in config.behaviors
+            if behavior.target.segments[-1].id == dwell.id
+        )
+        arguments = binding.default.arguments
+
+        self.assertEqual(labels.index("Dwell"), labels.index("F12") + 1)
+        self.assertEqual(dwell.visual.column, 64)
+        self.assertNotIn(dwell.id, build_us_iso_behavior_configs())
+        self.assertIs(arguments["latchable"], True)
+        self.assertIs(arguments["initially_latched"], False)
+        self.assertEqual(
+            [action["arguments"] for action in arguments["latched_actions"]],
+            [{"window_id": "window:keyboard", "enabled": True}],
+        )
+        self.assertEqual(
+            [action["arguments"] for action in arguments["unlatched_actions"]],
+            [{"window_id": "window:keyboard", "enabled": False}],
+        )
 
 
 if __name__ == "__main__":

@@ -31,6 +31,10 @@ class FakeKeyboardBackend:
     needs_permission_setup = False
     permission_setup_text = ""
 
+    def add_modifier_state_listener(self, listener):
+        del listener
+        return lambda: None
+
     def add_key_state_listener(self, listener):
         del listener
         return lambda: None

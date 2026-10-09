@@ -32,6 +32,21 @@ PLASMA_SERVICE_PATH = Path("/etc/systemd/user/axidev-osk-greeter.service")
 PLASMA_WANTS_PATH = Path(
     "/etc/systemd/user/plasma-login-wayland.target.wants/axidev-osk-greeter.service"
 )
+PLASMA_INPUT_METHOD_PATH = Path(
+    "/usr/local/share/applications/axidev-osk-input-panel.desktop"
+)
+KWIN_CONFIG_PATH = Path("/etc/xdg/kwinrc")
+PLASMA_LOCK_SCREEN_UI_PATH = Path(
+    "/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/LockScreenUi.qml"
+)
+PLASMA_KWIN_UNIT_PATHS = (
+    Path("/usr/local/lib/systemd/user/plasma-login-kwin_wayland.service"),
+    Path("/usr/lib/systemd/user/plasma-login-kwin_wayland.service"),
+    Path("/lib/systemd/user/plasma-login-kwin_wayland.service"),
+)
+PLASMA_KWIN_DROPIN_PATH = Path(
+    "/etc/systemd/user/plasma-login-kwin_wayland.service.d/50-axidev-osk.conf"
+)
 LIGHTDM_CONFIG_PATH = Path("/etc/lightdm/lightdm.conf.d/99-axidev-osk.conf")
 LIGHTDM_WRAPPER_PATH = Path("/etc/axidev-osk/lightdm-greeter-wrapper")
 GREETD_WRAPPER_PATH = Path("/etc/axidev-osk/greetd-session-wrapper")
@@ -46,6 +61,121 @@ MANAGED_GREETD_COMMENT = (
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0)
 HEALTHY_RUNTIME_SECONDS = 60.0
 POLL_SECONDS = 0.1
+
+PLASMA_LOCK_SCREEN_V0173_PATCH_START = "// BEGIN AXIDEV OSK MANAGED"
+PLASMA_LOCK_SCREEN_V0173_PATCH_END = "// END AXIDEV OSK MANAGED"
+PLASMA_LOCK_SCREEN_ROOT_PATCH_START = "// BEGIN AXIDEV OSK ROOT MANAGED"
+PLASMA_LOCK_SCREEN_ROOT_PATCH_END = "// END AXIDEV OSK ROOT MANAGED"
+PLASMA_LOCK_SCREEN_BUTTON_PATCH_START = "// BEGIN AXIDEV OSK BUTTON MANAGED"
+PLASMA_LOCK_SCREEN_BUTTON_PATCH_END = "// END AXIDEV OSK BUTTON MANAGED"
+PLASMA_LOCK_SCREEN_IMPORT_PATCH_START = "// BEGIN AXIDEV OSK IMPORT MANAGED"
+PLASMA_LOCK_SCREEN_IMPORT_PATCH_END = "// END AXIDEV OSK IMPORT MANAGED"
+PLASMA_LOCK_SCREEN_MIN_VERSION = (6, 7, 0)
+PLASMA_LOCK_SCREEN_MAX_VERSION = (7, 0, 0)
+PLASMA_LOCK_SCREEN_V0173_PATCH = (
+    "        // BEGIN AXIDEV OSK MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: lockScreenRoot.uiVisible = true\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_ROOT_PATCH = (
+    "        // BEGIN AXIDEV OSK ROOT MANAGED\n"
+    "        Connections {\n"
+    "            target: lockScreenRoot\n"
+    "            Component.onCompleted: Qt.callLater(function() {\n"
+    "                lockScreenRoot.uiVisible = true;\n"
+    "            })\n\n"
+    "            function onUiVisibleChanged() {\n"
+    "                if (!lockScreenRoot.uiVisible) {\n"
+    "                    lockScreenRoot.uiVisible = true;\n"
+    "                }\n"
+    "            }\n"
+    "        }\n"
+    "        // END AXIDEV OSK ROOT MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_IMPORT_PATCH = (
+    "// BEGIN AXIDEV OSK IMPORT MANAGED\n"
+    "import org.kde.plasma.workspace.keyboardlayout as Keyboards\n"
+    "import org.kde.plasma.workspace.dbus as DBus\n"
+    "// END AXIDEV OSK IMPORT MANAGED\n"
+)
+PLASMA_LOCK_SCREEN_BUTTON_PATCH = (
+    "            // BEGIN AXIDEV OSK BUTTON MANAGED\n"
+    "            PlasmaComponents3.ToolButton {\n"
+    "                id: axidevOskButton\n\n"
+    "                property int previousVirtualKeyboardMode: -1\n\n"
+    "                focusPolicy: Qt.TabFocus\n"
+    "                text: \"Axidev OSK\"\n"
+    "                icon.name: \"input-keyboard-virtual-on\"\n"
+    "                visible: inputPanel.status === Loader.Ready\n"
+    "                Layout.fillHeight: true\n\n"
+    "                function restoreVirtualKeyboardMode() {\n"
+    "                    if (previousVirtualKeyboardMode >= 0) {\n"
+    "                        Keyboards.KWinVirtualKeyboard.mode = previousVirtualKeyboardMode;\n"
+    "                        previousVirtualKeyboardMode = -1;\n"
+    "                    }\n"
+    "                }\n\n"
+    "                function showPreparedKeyboard() {\n"
+    "                    if (inputPanel.keyboardActive || previousVirtualKeyboardMode >= 0) {\n"
+    "                        return;\n"
+    "                    }\n"
+    "                    previousVirtualKeyboardMode = Keyboards.KWinVirtualKeyboard.mode;\n"
+    "                    Keyboards.KWinVirtualKeyboard.mode = 2;\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    inputPanel.showHide();\n"
+    "                }\n\n"
+    "                Connections {\n"
+    "                    target: Keyboards.KWinVirtualKeyboard\n\n"
+    "                    function onVisibleChanged() {\n"
+    "                        if (Keyboards.KWinVirtualKeyboard.visible) {\n"
+    "                            axidevOskButton.restoreVirtualKeyboardMode();\n"
+    "                        }\n"
+    "                    }\n"
+    "                }\n\n"
+    "                function releasePreparedKeyboard() {\n"
+    "                    restoreVirtualKeyboardMode();\n"
+    "                    DBus.SessionBus.asyncCall({\n"
+    "                        service: \"org.axidev.OSK.LockScreen\",\n"
+    "                        path: \"/org/axidev/OSK/LockScreen\",\n"
+    "                        iface: \"org.axidev.OSK.LockScreen\",\n"
+    "                        member: \"release\"\n"
+    "                    });\n"
+    "                }\n\n"
+    "                Connections {\n"
+    "                    target: authenticator\n\n"
+    "                    function onSucceeded() {\n"
+    "                        axidevOskButton.releasePreparedKeyboard();\n"
+    "                    }\n"
+    "                }\n\n"
+    "                Connections {\n"
+    "                    target: mainBlock\n\n"
+    "                    function onPasswordResult(password) {\n"
+    "                        axidevOskButton.releasePreparedKeyboard();\n"
+    "                    }\n"
+    "                }\n\n"
+    "                onClicked: {\n"
+    "                    mainBlock.mainPasswordBox.forceActiveFocus();\n"
+    "                    DBus.SessionBus.asyncCall({\n"
+    "                        service: \"org.axidev.OSK.LockScreen\",\n"
+    "                        path: \"/org/axidev/OSK/LockScreen\",\n"
+    "                        iface: \"org.axidev.OSK.LockScreen\",\n"
+    "                        member: \"prepare\"\n"
+    "                    }, function() {\n"
+    "                        axidevOskButton.showPreparedKeyboard();\n"
+    "                    }, function(reply) {\n"
+    "                        console.warn(\"Cannot prepare Axidev OSK:\", reply.error.message);\n"
+    "                    });\n"
+    "                }\n"
+    "            }\n"
+    "            // END AXIDEV OSK BUTTON MANAGED\n"
+)
 
 @dataclass(frozen=True)
 class GreetdConfig:
@@ -78,11 +208,9 @@ class _FileTransaction:
         self._remember(path)
         linux._write_atomic(path, contents, mode)
 
-    def symlink(self, path: Path, target: Path) -> None:
+    def remove(self, path: Path) -> None:
         self._remember(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         path.unlink(missing_ok=True)
-        path.symlink_to(target)
 
     def rollback(self) -> None:
         for path, kind, value, mode in reversed(self._originals):
@@ -91,15 +219,13 @@ class _FileTransaction:
                     path.unlink()
                 if kind == "file":
                     assert isinstance(value, bytes)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(value)
                     assert mode is not None
-                    path.chmod(mode)
+                    linux._write_atomic(path, value.decode("utf-8"), mode)
                 elif kind == "symlink":
                     assert isinstance(value, str)
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.symlink_to(value)
-            except OSError:
+            except (OSError, linux.LinuxSetupError):
                 pass
 
 
@@ -153,24 +279,41 @@ def run_runtime_command(namespace: argparse.Namespace, argv: list[str]) -> int:
 
 def _setup(requested_manager: str | None) -> int:
     existing = _load_state(required=False)
-    if existing is not None:
+    legacy_plasma = existing is not None and _is_v0173_plasma_state(existing)
+    if existing is not None and not legacy_plasma:
         if requested_manager is not None and existing["manager"] != requested_manager:
             raise linux.LinuxSetupError(
                 f"greeter integration already manages {existing['manager']}; remove it first"
             )
+        if existing["manager"] == "plasma-login":
+            _require_supported_plasma_lock_screen_version()
+            upgraded_supervisor = _upgrade_plasma_supervisor_files(_installed_launcher())
+            if upgraded_supervisor:
+                print("Migrated Plasma lock-screen supervision to the native launcher.")
+        repaired_lock_screen = _repair_plasma_lock_screen_patch(existing)
+        if repaired_lock_screen:
+            print("Restored the managed Plasma lock-screen visibility block.")
         if _status_state(existing) == 0:
             print(f"Greeter startup is already configured for {existing['manager']}.")
             return 0
         raise linux.LinuxSetupError("managed greeter state is incomplete; remove it before setup")
 
-    manager = requested_manager or _select_manager(_installed_managers())
+    if legacy_plasma:
+        if requested_manager is not None and requested_manager != "plasma-login":
+            raise linux.LinuxSetupError(
+                "greeter integration already manages plasma-login; remove it first"
+            )
+        manager = "plasma-login"
+    else:
+        manager = requested_manager or _select_manager(_installed_managers())
     adapter = _manager_adapter(manager)
     if not _manager_installed(adapter):
         raise linux.LinuxSetupError(f"{adapter.label} is not installed")
 
     launcher = _installed_launcher()
     account, details = adapter.prepare(launcher)
-
+    if legacy_plasma:
+        details["v0173_plasma"] = True
     linux._setup_permissions(account)
     _install_manager(manager, adapter, account, launcher, details)
     print(
@@ -196,6 +339,58 @@ def _status_state(state: dict[str, Any]) -> int:
         print(f"{'ok' if passed else 'missing'}: {label}")
     permission_status = linux._status_permissions(account)
     return 0 if permission_status == 0 and all(passed for _, passed in checks) else 1
+
+
+def _repair_plasma_lock_screen_patch(state: dict[str, Any]) -> bool:
+    """Restore a missing managed QML block independently of other status checks."""
+
+    if _state_manager(state) != "plasma-login":
+        return False
+    lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
+    if _plasma_lock_screen_patch_is_current(lock_screen_ui):
+        return False
+    if lock_screen_ui is None:
+        raise linux.LinuxSetupError(
+            f"Plasma lock-screen QML does not exist: {PLASMA_LOCK_SCREEN_UI_PATH}"
+        )
+    _require_writable_regular_file(PLASMA_LOCK_SCREEN_UI_PATH)
+    managed = _plasma_lock_screen_ui_text(lock_screen_ui)
+    linux._write_atomic(
+        PLASMA_LOCK_SCREEN_UI_PATH,
+        managed,
+        PLASMA_LOCK_SCREEN_UI_PATH.stat().st_mode & 0o777,
+    )
+    return True
+
+
+def _upgrade_plasma_supervisor_files(launcher: Path) -> bool:
+    """Atomically replace exact files owned by the pre-supervisor integration."""
+
+    input_method = linux._read_text(PLASMA_INPUT_METHOD_PATH)
+    dropin = linux._read_text(PLASMA_KWIN_DROPIN_PATH)
+    expected_input_method = _plasma_input_method_text(launcher)
+    expected_dropin = _plasma_kwin_dropin_text(launcher)
+    previous_input_method = _previous_plasma_input_method_text(launcher)
+    previous_dropin = _previous_plasma_kwin_dropin_text(launcher)
+    if input_method == expected_input_method and dropin == expected_dropin:
+        return False
+    if input_method not in {expected_input_method, previous_input_method}:
+        raise linux.LinuxSetupError(
+            f"refusing to replace conflicting file: {PLASMA_INPUT_METHOD_PATH}"
+        )
+    if dropin not in {expected_dropin, previous_dropin}:
+        raise linux.LinuxSetupError(
+            f"refusing to replace conflicting file: {PLASMA_KWIN_DROPIN_PATH}"
+        )
+
+    transaction = _FileTransaction()
+    try:
+        transaction.write(PLASMA_INPUT_METHOD_PATH, expected_input_method)
+        transaction.write(PLASMA_KWIN_DROPIN_PATH, expected_dropin)
+    except Exception:
+        transaction.rollback()
+        raise
+    return True
 
 
 def _remove() -> int:
@@ -315,18 +510,46 @@ def _terminal_key_reader() -> str:
 
 def _installed_launcher() -> Path:
     launcher = shutil.which("axidev-osk")
-    path = Path(launcher).resolve() if launcher else DEFAULT_LAUNCHER_PATH
+    path = Path(launcher or DEFAULT_LAUNCHER_PATH).resolve()
     if not path.is_file():
         raise linux.LinuxSetupError("axidev-osk must be installed before greeter setup")
     return path
 
 
 def _prepare_plasma(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
+    _require_supported_plasma_lock_screen_version()
     account = linux._resolve_account("plasmalogin", require_home=False)
-    _require_compatible_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-    _require_compatible_file(PLASMA_SERVICE_PATH, _plasma_service_text())
-    _require_compatible_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-    return account, {}
+    original_kwinrc = linux._read_text(KWIN_CONFIG_PATH)
+    lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
+    if lock_screen_ui is None:
+        raise linux.LinuxSetupError(
+            f"Plasma lock-screen QML does not exist: {PLASMA_LOCK_SCREEN_UI_PATH}"
+        )
+    managed_kwinrc = _plasma_kwin_config_text(original_kwinrc)
+    managed_lock_screen_ui = _plasma_lock_screen_ui_text(lock_screen_ui)
+    _require_compatible_file(
+        PLASMA_INPUT_METHOD_PATH,
+        _plasma_input_method_text(launcher),
+        _previous_plasma_input_method_text(launcher),
+    )
+    _require_compatible_file(
+        PLASMA_KWIN_DROPIN_PATH,
+        _plasma_kwin_dropin_text(launcher),
+        _previous_plasma_kwin_dropin_text(launcher),
+    )
+    if PLASMA_INPUT_METHOD_PATH.exists() or PLASMA_INPUT_METHOD_PATH.is_symlink():
+        _require_writable_regular_file(PLASMA_INPUT_METHOD_PATH)
+    if original_kwinrc is not None:
+        _require_writable_regular_file(KWIN_CONFIG_PATH)
+    _require_writable_regular_file(PLASMA_LOCK_SCREEN_UI_PATH)
+    return account, {
+        "kwinrc_existed": original_kwinrc is not None,
+        "kwinrc_mode": KWIN_CONFIG_PATH.stat().st_mode & 0o777 if original_kwinrc is not None else 0o644,
+        "original_kwinrc": original_kwinrc or "",
+        "managed_kwinrc": managed_kwinrc,
+        "lock_screen_ui_mode": PLASMA_LOCK_SCREEN_UI_PATH.stat().st_mode & 0o777,
+        "managed_lock_screen_ui": managed_lock_screen_ui,
+    }
 
 
 def _prepare_lightdm(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
@@ -386,11 +609,26 @@ def _install_plasma(
     launcher: Path,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    del details
-    transaction.write(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher), 0o755)
-    transaction.write(PLASMA_SERVICE_PATH, _plasma_service_text())
-    transaction.symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-    return {}
+    if bool(details.get("v0173_plasma")):
+        _require_removable_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+        _require_removable_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+        _require_removable_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+        transaction.remove(PLASMA_WANTS_PATH)
+        transaction.remove(PLASMA_SERVICE_PATH)
+        transaction.remove(NATIVE_SUPERVISOR_PATH)
+    transaction.write(PLASMA_INPUT_METHOD_PATH, _plasma_input_method_text(launcher))
+    transaction.write(PLASMA_KWIN_DROPIN_PATH, _plasma_kwin_dropin_text(launcher))
+    transaction.write(KWIN_CONFIG_PATH, _state_string(details, "managed_kwinrc"))
+    transaction.write(
+        PLASMA_LOCK_SCREEN_UI_PATH,
+        _state_string(details, "managed_lock_screen_ui"),
+        int(details["lock_screen_ui_mode"]),
+    )
+    return {
+        "kwinrc_existed": bool(details["kwinrc_existed"]),
+        "kwinrc_mode": int(details["kwinrc_mode"]),
+        "original_kwinrc": _state_text(details, "original_kwinrc"),
+    }
 
 
 def _install_lightdm(
@@ -421,13 +659,46 @@ def _install_greetd(
 
 
 def _check_plasma(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool]]:
-    del state
-    service_ok = linux._read_text(PLASMA_SERVICE_PATH) == _plasma_service_text()
-    link_ok = PLASMA_WANTS_PATH.is_symlink() and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH
+    version_check = (
+        "Plasma version >=6.7.0,<7.0.0",
+        _plasma_lock_screen_version_supported(),
+    )
+    if _is_v0173_plasma_state(state):
+        return [
+            version_check,
+            (
+                str(NATIVE_SUPERVISOR_PATH),
+                linux._read_text(NATIVE_SUPERVISOR_PATH) == _native_supervisor_text(launcher),
+            ),
+            (
+                str(PLASMA_SERVICE_PATH),
+                linux._read_text(PLASMA_SERVICE_PATH) == _plasma_service_text(),
+            ),
+            (
+                str(PLASMA_WANTS_PATH),
+                PLASMA_WANTS_PATH.is_symlink()
+                and PLASMA_WANTS_PATH.resolve() == PLASMA_SERVICE_PATH.resolve(),
+            ),
+        ]
+    original_kwinrc = _state_text(state, "original_kwinrc")
     return [
-        (str(NATIVE_SUPERVISOR_PATH), linux._read_text(NATIVE_SUPERVISOR_PATH) == _native_supervisor_text(launcher)),
-        (str(PLASMA_SERVICE_PATH), service_ok),
-        (str(PLASMA_WANTS_PATH), link_ok),
+        version_check,
+        (
+            str(PLASMA_INPUT_METHOD_PATH),
+            linux._read_text(PLASMA_INPUT_METHOD_PATH) == _plasma_input_method_text(launcher),
+        ),
+        (
+            str(PLASMA_KWIN_DROPIN_PATH),
+            linux._read_text(PLASMA_KWIN_DROPIN_PATH) == _plasma_kwin_dropin_text(launcher),
+        ),
+        (
+            str(KWIN_CONFIG_PATH),
+            linux._read_text(KWIN_CONFIG_PATH) == _plasma_kwin_config_text(original_kwinrc or None),
+        ),
+        (
+            str(PLASMA_LOCK_SCREEN_UI_PATH),
+            _plasma_lock_screen_patch_is_current(linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)),
+        ),
     ]
 
 
@@ -458,13 +729,53 @@ def _check_greetd(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool
 
 
 def _remove_plasma(launcher: Path, state: dict[str, Any]) -> None:
-    del state
-    _require_removable_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-    _require_removable_file(PLASMA_SERVICE_PATH, _plasma_service_text())
-    _require_removable_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
-    _remove_owned_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
-    linux._remove_owned_file(PLASMA_SERVICE_PATH, _plasma_service_text())
-    linux._remove_owned_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+    if _is_v0173_plasma_state(state):
+        _require_removable_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+        _require_removable_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+        _require_removable_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+        lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
+        unmanaged_lock_screen_ui = (
+            _plasma_lock_screen_ui_without_patch(lock_screen_ui)
+            if lock_screen_ui is not None
+            else None
+        )
+        _remove_owned_symlink(PLASMA_WANTS_PATH, PLASMA_SERVICE_PATH)
+        linux._remove_owned_file(PLASMA_SERVICE_PATH, _plasma_service_text())
+        linux._remove_owned_file(NATIVE_SUPERVISOR_PATH, _native_supervisor_text(launcher))
+        if lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
+            linux._write_atomic(
+                PLASMA_LOCK_SCREEN_UI_PATH,
+                unmanaged_lock_screen_ui,
+                PLASMA_LOCK_SCREEN_UI_PATH.stat().st_mode & 0o777,
+            )
+        return
+    original_kwinrc = _state_text(state, "original_kwinrc")
+    managed_kwinrc = _plasma_kwin_config_text(original_kwinrc or None)
+    _require_removable_file(PLASMA_INPUT_METHOD_PATH, _plasma_input_method_text(launcher))
+    _require_removable_file(PLASMA_KWIN_DROPIN_PATH, _plasma_kwin_dropin_text(launcher))
+    _require_removable_file(KWIN_CONFIG_PATH, managed_kwinrc)
+    lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
+    unmanaged_lock_screen_ui = (
+        _plasma_lock_screen_ui_without_patch(lock_screen_ui)
+        if lock_screen_ui is not None
+        else None
+    )
+    linux._remove_owned_file(PLASMA_INPUT_METHOD_PATH, _plasma_input_method_text(launcher))
+    linux._remove_owned_file(PLASMA_KWIN_DROPIN_PATH, _plasma_kwin_dropin_text(launcher))
+    try:
+        PLASMA_KWIN_DROPIN_PATH.parent.rmdir()
+    except OSError:
+        pass
+    if bool(state.get("kwinrc_existed")):
+        linux._write_atomic(KWIN_CONFIG_PATH, original_kwinrc, _state_mode(state, "kwinrc_mode"))
+    else:
+        linux._remove_owned_file(KWIN_CONFIG_PATH, managed_kwinrc)
+    if lock_screen_ui is not None and unmanaged_lock_screen_ui != lock_screen_ui:
+        linux._write_atomic(
+            PLASMA_LOCK_SCREEN_UI_PATH,
+            unmanaged_lock_screen_ui,
+            PLASMA_LOCK_SCREEN_UI_PATH.stat().st_mode & 0o777,
+        )
 
 
 def _remove_lightdm(launcher: Path, state: dict[str, Any]) -> None:
@@ -545,6 +856,359 @@ def _plasma_service_text() -> str:
     )
 
 
+def _plasma_input_method_text(launcher: Path) -> str:
+    return (
+        "[Desktop Entry]\n"
+        "Name=Axidev OSK\n"
+        f"Exec={launcher} internal plasma-lock-supervisor\n"
+        "Type=Application\n"
+        "X-KDE-Wayland-VirtualKeyboard=true\n"
+        "NoDisplay=true\n"
+        "Icon=axidev-osk\n"
+    )
+
+
+def _previous_plasma_input_method_text(launcher: Path) -> str:
+    """Return the exact pre-supervisor file accepted during managed upgrade."""
+
+    return _plasma_input_method_text(launcher).replace(
+        " internal plasma-lock-supervisor",
+        "",
+        1,
+    )
+
+
+def _plasma_kwin_dropin_text(launcher: Path) -> str:
+    return _plasma_kwin_dropin_text_for_command(
+        f"{launcher} internal plasma-login-worker",
+        greeter_environment=False,
+    )
+
+
+def _previous_plasma_kwin_dropin_text(launcher: Path) -> str:
+    """Return the exact pre-supervisor drop-in accepted during managed upgrade."""
+
+    return _plasma_kwin_dropin_text_for_command(
+        str(launcher),
+        greeter_environment=True,
+    )
+
+
+def _plasma_kwin_dropin_text_for_command(
+    input_method: str,
+    *,
+    greeter_environment: bool,
+) -> str:
+    unit_path = next((path for path in PLASMA_KWIN_UNIT_PATHS if path.is_file()), None)
+    if unit_path is None:
+        raise linux.LinuxSetupError("Plasma Login Manager KWin service is missing")
+    unit_text = linux._read_text(unit_path)
+    assert unit_text is not None
+    command = _systemd_service_command(unit_text, "ExecStart")
+    try:
+        arguments = shlex.split(command)
+    except ValueError as exc:
+        raise linux.LinuxSetupError("Plasma Login Manager KWin command is invalid") from exc
+    try:
+        input_method_index = arguments.index("--inputmethod")
+    except ValueError as exc:
+        raise linux.LinuxSetupError(
+            "Plasma Login Manager KWin command has no --inputmethod option"
+        ) from exc
+    if input_method_index + 1 >= len(arguments):
+        raise linux.LinuxSetupError("Plasma Login Manager KWin input method is missing")
+    arguments[input_method_index + 1] = input_method
+    environment = "Environment=AXIDEV_OSK_GREETER=1\n" if greeter_environment else ""
+    return (
+        "[Service]\n"
+        + environment
+        + "ExecStart=\n"
+        + f"ExecStart={shlex.join(arguments)}\n"
+    )
+
+
+def _systemd_service_command(unit_text: str, key: str) -> str:
+    section = ""
+    matches: list[str] = []
+    for raw_line in unit_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if section == "Service" and line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip()
+            if value:
+                matches.append(value)
+    if len(matches) != 1:
+        raise linux.LinuxSetupError(
+            f"Plasma Login Manager KWin service requires exactly one {key} command"
+        )
+    return matches[0]
+
+
+def _plasma_kwin_config_text(original: str | None) -> str:
+    lines = [] if original is None else original.splitlines(keepends=True)
+    if lines and not lines[-1].endswith(("\n", "\r")):
+        lines[-1] += "\n"
+
+    section_start = next(
+        (index for index, line in enumerate(lines) if line.strip() == "[Wayland]"),
+        None,
+    )
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines.extend(
+            (
+                "[Wayland]\n",
+                f"InputMethod={PLASMA_INPUT_METHOD_PATH}\n",
+                "VirtualKeyboardMode=2\n",
+            )
+        )
+        return "".join(lines)
+
+    section_end = next(
+        (
+            index
+            for index in range(section_start + 1, len(lines))
+            if lines[index].lstrip().startswith("[")
+        ),
+        len(lines),
+    )
+    managed = {
+        "InputMethod": f"InputMethod={PLASMA_INPUT_METHOD_PATH}\n",
+        "VirtualKeyboardMode": "VirtualKeyboardMode=2\n",
+    }
+    found: set[str] = set()
+    rewritten: list[str] = []
+    for line in lines[section_start + 1 : section_end]:
+        key = line.split("=", 1)[0].strip() if "=" in line else ""
+        if key not in managed:
+            rewritten.append(line)
+        elif key not in found:
+            rewritten.append(managed[key])
+            found.add(key)
+    for key, line in managed.items():
+        if key not in found:
+            rewritten.append(line)
+    lines[section_start + 1 : section_end] = rewritten
+    return "".join(lines)
+
+
+def _plasma_lock_screen_patch_is_current(text: str | None) -> bool:
+    """Return whether QML contains both unmodified managed blocks."""
+
+    return bool(
+        text is not None
+        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH_END) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_END) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_START) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_END) == 1
+    )
+
+
+def _managed_block_span(text: str, start: str, end: str) -> tuple[int, int] | None:
+    """Locate one complete line-delimited managed block."""
+
+    if start not in text and end not in text:
+        return None
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise linux.LinuxSetupError("invalid Axidev lock marker pair")
+    start_index = text.rfind("\n", 0, text.index(start)) + 1
+    end_marker = text.index(end)
+    if end_marker < start_index:
+        raise linux.LinuxSetupError("invalid Axidev lock marker order")
+    end_index = text.find("\n", end_marker)
+    return start_index, len(text) if end_index < 0 else end_index + 1
+
+
+def _replace_managed_block(
+    text: str,
+    start: str,
+    end: str,
+    replacement: str,
+) -> tuple[str, bool]:
+    span = _managed_block_span(text, start, end)
+    if span is None:
+        return text, False
+    return text[: span[0]] + replacement + text[span[1] :], True
+
+
+def _remove_managed_block(text: str, start: str, end: str) -> tuple[str, bool]:
+    span = _managed_block_span(text, start, end)
+    if span is None:
+        return text, False
+    block_start, block_end = span
+    if block_start >= 2 and text[block_start - 2 : block_start] == "\n\n":
+        block_start -= 1
+    elif text[block_end : block_end + 1] == "\n":
+        block_end += 1
+    return text[:block_start] + text[block_end:], True
+
+
+def _plasma_version() -> tuple[int, int, int] | None:
+    """Return the version of the package that owns Plasma's lock-screen QML."""
+
+    path = str(PLASMA_LOCK_SCREEN_UI_PATH)
+    version_text: str | None = None
+    rpm = shutil.which("rpm")
+    dpkg_query = shutil.which("dpkg-query")
+    pacman = shutil.which("pacman")
+    if rpm is not None:
+        version_text = _command_output([rpm, "-qf", "--queryformat", "%{VERSION}", path])
+    elif dpkg_query is not None:
+        owner = _command_output([dpkg_query, "-S", path])
+        if owner is not None and ": " in owner:
+            package = owner.split(": ", 1)[0]
+            version_text = _command_output([dpkg_query, "-W", "-f=${Version}", package])
+    elif pacman is not None:
+        package = _command_output([pacman, "-Qqo", path])
+        if package is not None:
+            installed = _command_output([pacman, "-Q", package])
+            if installed is not None and " " in installed:
+                version_text = installed.split(" ", 1)[1]
+    if version_text is None:
+        return None
+    version_text = version_text.strip().split(":", 1)[-1]
+    match = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?\b", version_text)
+    if match is None:
+        return None
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch or 0)
+
+
+def _command_output(arguments: list[str]) -> str | None:
+    """Run a metadata command and return non-empty stdout on success."""
+
+    try:
+        completed = subprocess.run(
+            arguments,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    output = completed.stdout.strip()
+    return output if completed.returncode == 0 and output else None
+
+
+def _plasma_lock_screen_version_supported() -> bool:
+    version = _plasma_version()
+    return bool(
+        version is not None
+        and PLASMA_LOCK_SCREEN_MIN_VERSION <= version < PLASMA_LOCK_SCREEN_MAX_VERSION
+    )
+
+
+def _require_supported_plasma_lock_screen_version() -> None:
+    version = _plasma_version()
+    if version is None:
+        raise linux.LinuxSetupError("cannot determine the installed Plasma version")
+    if not PLASMA_LOCK_SCREEN_MIN_VERSION <= version < PLASMA_LOCK_SCREEN_MAX_VERSION:
+        rendered = ".".join(str(part) for part in version)
+        raise linux.LinuxSetupError(
+            f"Plasma lock-screen integration supports versions >=6.7.0 and <7.0.0; found {rendered}"
+        )
+
+
+def _plasma_lock_screen_ui_text(original: str) -> str:
+    """Add the managed always-visible unlock UI block to Plasma QML."""
+
+    if PLASMA_LOCK_SCREEN_V0173_PATCH in original:
+        original = original.replace("\n" + PLASMA_LOCK_SCREEN_V0173_PATCH, "", 1)
+    elif (
+        PLASMA_LOCK_SCREEN_V0173_PATCH_START in original
+        or PLASMA_LOCK_SCREEN_V0173_PATCH_END in original
+    ):
+        raise linux.LinuxSetupError("refusing to replace a changed Axidev 0.17.3 QML block")
+
+    managed, has_import = _replace_managed_block(
+        original,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH,
+    )
+    managed, has_root = _replace_managed_block(
+        managed,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_START,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_END,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH,
+    )
+    managed, has_button = _replace_managed_block(
+        managed,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH,
+    )
+    root_anchor = "    MouseArea {\n        id: lockScreenRoot\n"
+    button_anchor = "            PlasmaComponents3.ToolButton {\n                id: virtualKeyboardButton\n"
+    if not has_root and managed.count(root_anchor) != 1:
+        raise linux.LinuxSetupError(
+            "Plasma lock-screen QML does not contain the supported lockScreenRoot structure"
+        )
+    if not has_button and managed.count(button_anchor) != 1:
+        raise linux.LinuxSetupError(
+            "Plasma lock-screen QML does not contain the supported virtualKeyboardButton structure"
+        )
+    if not has_root:
+        managed = managed.replace(
+            root_anchor,
+            root_anchor + "\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH,
+            1,
+        )
+    if not has_button:
+        managed = managed.replace(
+            button_anchor,
+            PLASMA_LOCK_SCREEN_BUTTON_PATCH + "\n" + button_anchor,
+            1,
+        )
+    return managed if has_import else _plasma_lock_screen_ui_with_import(managed)
+
+
+def _plasma_lock_screen_ui_with_import(text: str) -> str:
+    root_items = tuple(re.finditer(r"(?m)^Item \{\n", text))
+    if len(root_items) != 1:
+        raise linux.LinuxSetupError(
+            "Plasma lock-screen QML does not contain the supported root Item structure"
+        )
+    root_start = root_items[0].start()
+    return text[:root_start] + PLASMA_LOCK_SCREEN_IMPORT_PATCH + "\n" + text[root_start:]
+
+
+def _plasma_lock_screen_ui_without_patch(managed: str) -> str:
+    """Remove the line-delimited managed blocks from Plasma QML."""
+
+    unmanaged, _ = _remove_managed_block(
+        managed,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
+    )
+    unmanaged, _ = _remove_managed_block(
+        unmanaged,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_START,
+        PLASMA_LOCK_SCREEN_ROOT_PATCH_END,
+    )
+    unmanaged, _ = _remove_managed_block(
+        unmanaged,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+    )
+    if PLASMA_LOCK_SCREEN_V0173_PATCH in unmanaged:
+        return unmanaged.replace("\n" + PLASMA_LOCK_SCREEN_V0173_PATCH, "", 1)
+    if (
+        PLASMA_LOCK_SCREEN_V0173_PATCH_START in unmanaged
+        or PLASMA_LOCK_SCREEN_V0173_PATCH_END in unmanaged
+    ):
+        raise linux.LinuxSetupError("refusing to remove a changed Axidev 0.17.3 QML block")
+    return unmanaged
+
+
 def _lightdm_config_text() -> str:
     return f"[Seat:*]\ngreeter-wrapper={LIGHTDM_WRAPPER_PATH}\n"
 
@@ -610,7 +1274,7 @@ def _native_supervisor_text(launcher: Path) -> str:
         f'    "{launcher}" linux run-greeter-keyboard --manager "${{manager}}"\n'
         "    status=$?\n"
         '    message=$(printf \'axidev-osk greeter error: manager=%s account=%s protocol=%s '
-        "stage=supervisor-exit detail=status=%s retry_seconds=%s\' \"${manager}\" "
+        "stage=supervisor-exit detail=status=%s retry_seconds=%s' \"${manager}\" "
         '"${account}" "${protocol}" "${status}" "${delay}")\n'
         '    printf \'%s\\n\' "${message}" >&2\n'
         "    command -v systemd-cat >/dev/null 2>&1 && "
@@ -716,23 +1380,28 @@ def _parse_greetd_config(contents: str) -> GreetdConfig:
     return GreetdConfig(account, command, index, original_line, newline)
 
 
-def _require_compatible_file(path: Path, expected: str) -> None:
+def _require_compatible_file(path: Path, expected: str, *previous: str) -> None:
     current = linux._read_text(path)
-    if current is not None and current != expected:
+    if current is not None and current not in {expected, *previous}:
         raise linux.LinuxSetupError(f"refusing to replace conflicting file: {path}")
+
+
+def _require_writable_regular_file(path: Path) -> None:
+    if path.is_symlink() or not path.is_file():
+        raise linux.LinuxSetupError(f"refusing to replace a non-regular file: {path}")
 
 
 def _require_compatible_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to replace conflicting link: {path}")
 
 
 def _remove_owned_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to remove conflicting link: {path}")
     path.unlink()
 
@@ -746,7 +1415,7 @@ def _require_removable_file(path: Path, expected: str) -> None:
 def _require_removable_symlink(path: Path, target: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if not path.is_symlink() or path.resolve() != target:
+    if not path.is_symlink() or path.resolve() != target.resolve():
         raise linux.LinuxSetupError(f"refusing to remove conflicting link: {path}")
 
 
@@ -780,11 +1449,32 @@ def _state_string(state: dict[str, Any], key: str) -> str:
     return value
 
 
+def _state_text(state: dict[str, Any], key: str) -> str:
+    value = state.get(key)
+    if not isinstance(value, str):
+        raise linux.LinuxSetupError(f"managed greeter state is missing {key}")
+    return value
+
+
+def _state_mode(state: dict[str, Any], key: str) -> int:
+    value = state.get(key)
+    if not isinstance(value, int) or not 0 <= value <= 0o777:
+        raise linux.LinuxSetupError(f"managed greeter state is missing {key}")
+    return value
+
+
+def _is_v0173_plasma_state(state: dict[str, Any]) -> bool:
+    return state.get("manager") == "plasma-login" and "original_kwinrc" not in state
+
+
 def _runtime_launcher() -> Path:
     launcher = shutil.which("axidev-osk")
-    return Path(launcher).resolve() if launcher else DEFAULT_LAUNCHER_PATH
+    return Path(launcher or DEFAULT_LAUNCHER_PATH).resolve()
 
 
+# LightDM and greetd still use this legacy Python/shell supervision path. If it
+# needs behavioral changes, migrate that manager to the native launcher's
+# internal supervisor protocol instead of extending this parallel mechanism.
 class _KeyboardSupervisor:
     def __init__(self, manager: str, environment: dict[str, str]) -> None:
         self.manager = manager
