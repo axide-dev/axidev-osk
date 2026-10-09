@@ -132,6 +132,16 @@ class ProfileRuntime:
             self._unsubscribes.append(
                 self._dispatcher.add_raw_event_handler(event_name, self._callback_runner(event_name, refs))
             )
+        node_callbacks: dict[str, dict[str, FunctionRef]] = {}
+        for node in profile.nodes():
+            for event_name, ref in node.callbacks.items():
+                node_callbacks.setdefault(event_name, {})[node.id] = ref
+        for event_name, refs_by_node in node_callbacks.items():
+            if not self._dispatcher.has_event(event_name):
+                raise ValueError(f"Node event {event_name!r} is not registered")
+            self._unsubscribes.append(
+                self._dispatcher.add_raw_event_handler(event_name, self._node_callback_runner(event_name, refs_by_node))
+            )
 
     def stop(self) -> None:
         for unsubscribe in self._unsubscribes:
@@ -164,6 +174,20 @@ class ProfileRuntime:
             for ref in refs:
                 messages.extend(self.run_callback(ref, event_name, arguments))
             return messages
+
+        return run
+
+    def _node_callback_runner(
+        self,
+        event_name: str,
+        refs_by_node: dict[str, FunctionRef],
+    ) -> Callable[[DataMap], MessageResult]:
+        def run(arguments: DataMap) -> MessageResult:
+            node_id = arguments.get("node")
+            ref = refs_by_node.get(node_id) if isinstance(node_id, str) else None
+            if ref is None:
+                return []
+            return self.run_callback(ref, f"{node_id}.{event_name}", arguments)
 
         return run
 

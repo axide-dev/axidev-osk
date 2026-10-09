@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..nodes import NodeBuilder, NodeKindRegistry, register_builtin_nodes
 from .dispatcher import Dispatcher
 from .engine_messages import KeyboardEffects, ProcessEffects, install_engine_handlers, register_engine_events
 from .functions import FunctionRegistry
@@ -19,6 +20,8 @@ class Engine:
     state: StateTree
     profile: ProfileRuntime
     bindings: BindingTracker
+    nodes: NodeKindRegistry
+    node_builder: NodeBuilder
 
 
 def build_engine(
@@ -40,4 +43,14 @@ def build_engine(
     profile = ProfileRuntime(dispatcher, functions, state)
     install_engine_handlers(dispatcher, profile_runtime=profile, keyboard=keyboard, processes=processes)
     bindings = BindingTracker(dispatcher, functions, state)
-    return Engine(functions=functions, state=state, profile=profile, bindings=bindings)
+    nodes = NodeKindRegistry()
+    register_builtin_nodes(nodes)
+    nodes.register_events(dispatcher)
+    return Engine(
+        functions=functions,
+        state=state,
+        profile=profile,
+        bindings=bindings,
+        nodes=nodes,
+        node_builder=NodeBuilder(nodes, dispatcher, bindings),
+    )

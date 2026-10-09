@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEvent
@@ -16,10 +15,9 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
-        self.window = Mock()
+        self.window = Mock(configured_opacity=0.85)
         self.manager = WindowManager.__new__(WindowManager)
         self.manager._windows = {"window:keyboard": self.window}
-        self.manager._configs = {"window:keyboard": SimpleNamespace(opacity=0.85)}
         self.manager._input_blockers = {}
 
     def test_windows_hide_hides_window(self) -> None:
@@ -76,7 +74,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.assertTrue(blocker.eventFilter(window, event))
 
     def test_toggle_opacity_restores_configured_opacity_on_second_call(self) -> None:
-        window = Mock()
+        window = Mock(configured_opacity=0.85)
         self.manager._windows = {"window:keyboard": window}
 
         self.manager.toggle_opacity(
@@ -101,7 +99,7 @@ class WindowManagerVisibilityTests(unittest.TestCase):
         self.assertNotIn("window:keyboard", self.manager._input_blockers)
 
     def test_show_restores_configured_opacity_and_removes_input_blocker(self) -> None:
-        window = Mock()
+        window = Mock(configured_opacity=0.85)
         blocker = _WindowInputBlocker(window, "key:ghost")
         self.app.installEventFilter(blocker)
         self.manager._windows = {"window:keyboard": window}

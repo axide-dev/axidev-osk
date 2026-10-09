@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
-from PySide6.QtCore import QEvent
+from collections.abc import Callable
+
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
-from ..config.models import WindowConfig
+from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, WindowConfig
+from ..config.profile import StyleConfig
+from ..config.profile import WindowConfig as ProfileWindowConfig
+from ..nodes import apply_style
 from ..runtime.context import Context
 from ..runtime.config_paths import window_source_path
 from ..runtime.engine_messages import window_visibility_changed
@@ -17,10 +21,11 @@ from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
+from .surface import RootSurface
 
 
 class RuntimeWindow(QMainWindow):
-    """Generic host window built entirely from ``WindowConfig``.
+    """Generic host window around configured content.
 
     The class owns only Qt event interception and overlay show handling. Window
     identity, title, content, chrome, and overlay behavior all come from config.
@@ -29,42 +34,49 @@ class RuntimeWindow(QMainWindow):
     event to drive shutdown rather than relying on a Qt signal side channel.
     """
 
-    def __init__(self, config: WindowConfig, context: Context, parent: QWidget | None = None) -> None:
-        """Create a generic runtime window.
-
-        Args:
-            config: Declarative window config.
-            context: Runtime context used to build content and dispatch events.
-            parent: Optional Qt parent.
-
-        Returns:
-            None.
+    def __init__(
+        self,
+        *,
+        window_id: str,
+        title: str,
+        overlay: OverlayConfig,
+        chrome: ChromeConfig,
+        opacity: float,
+        minimum_size: tuple[int, int],
+        build_content: Callable[[], QWidget],
+        context: Context,
+        dwell: DwellClickConfig | None = None,
+        style: StyleConfig | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Create a generic runtime window around content built by ``build_content``.
 
         Side effects:
             Builds child widgets and configures platform overlay behavior.
         """
 
         super().__init__(parent)
-        self._config = config
+        self._window_id = window_id
         self._context = context
+        self._configured_opacity = opacity
+        self._minimum_size = minimum_size
         self._quit_controller_managed = False
         self._chrome_widgets: OverlayChromeWidgets | None = None
+        self._dwell_click: DwellClickController | None = None
         self.setProperty("componentType", "window")
-        self.setProperty("componentId", config.id)
-        self.setWindowTitle(config.title)
-        if config.overlay.always_on_top:
-            self._overlay = configure_always_on_top_window(self, config=config.overlay.config)
+        self.setProperty("componentId", window_id)
+        self.setWindowTitle(title)
+        if style is not None:
+            apply_style(self, style)
+
+        if overlay.always_on_top:
+            self._overlay = configure_always_on_top_window(self, config=overlay.config)
         else:
             self._overlay = configure_plain_window(self)
         self.destroyed.connect(self._release_platform_resources_on_destroy)
         try:
-            window_path = window_source_path(context.config, config.id)
-            central = context.surfaces.build(
-                config.surface,
-                context,
-                window_path.child("surface", config.surface.id),
-            )
-            if config.chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
+            central = build_content()
+            if chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
                 if isinstance(central_layout, QVBoxLayout):
                     use_runtime_drag_motion = getattr(self._overlay, "uses_runtime_pointer_drag", False)
@@ -76,33 +88,23 @@ class RuntimeWindow(QMainWindow):
                         on_resize=self._overlay.resize_by,
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
-                            lambda: context.dispatcher.dispatch_event(window_drag_started(config.id))
+                            lambda: context.dispatcher.dispatch_event(window_drag_started(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
                         on_drag_ended=(
-                            lambda: context.dispatcher.dispatch_event(window_drag_ended(config.id))
+                            lambda: context.dispatcher.dispatch_event(window_drag_ended(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
                     )
             self.setCentralWidget(central)
-            self._dwell_click = DwellClickController(
-                self,
-                central,
-                config.dwell_click,
-            )
-            dwell_enabled = bool(
-                context.state.get(
-                    source_state_namespace(window_path),
-                    "dwell_enabled",
-                    config.dwell_click.enabled,
-                )
-            )
-            self._dwell_click.set_enabled(dwell_enabled)
+            if dwell is not None:
+                self._dwell_click = DwellClickController(self, central, dwell)
+                self._dwell_click.set_enabled(dwell.enabled)
             self._opacity = WindowOpacityController(self)
-            self.set_visual_opacity(config.opacity)
-            self.apply_startup_size(minimum_size=config.surface.minimum_size)
+            self.set_visual_opacity(opacity)
+            self.apply_startup_size(minimum_size=minimum_size)
         except Exception:
             self.release_platform_resources()
             raise
@@ -111,7 +113,13 @@ class RuntimeWindow(QMainWindow):
     def window_id(self) -> str:
         """Return this window's deterministic runtime ID."""
 
-        return self._config.id
+        return self._window_id
+
+    @property
+    def configured_opacity(self) -> float:
+        """Return the opacity this window was configured with."""
+
+        return self._configured_opacity
 
     def set_visual_opacity(self, opacity: float) -> None:
         """Set opacity through the platform-supported window implementation."""
@@ -121,7 +129,8 @@ class RuntimeWindow(QMainWindow):
     def set_dwell_enabled(self, enabled: bool) -> None:
         """Set whether pointer dwell activates components in this window."""
 
-        self._dwell_click.set_enabled(enabled)
+        if self._dwell_click is not None:
+            self._dwell_click.set_enabled(enabled)
 
     def move_by(self, dx: int, dy: int) -> None:
         """Move this window through its selected overlay backend."""
@@ -201,22 +210,24 @@ class RuntimeWindow(QMainWindow):
         if not self._quit_controller_managed:
             super().closeEvent(event)
             return
-        self._context.dispatcher.dispatch_event(window_close_requested(self._config.id))
+        self._context.dispatcher.dispatch_event(window_close_requested(self._window_id))
         event.ignore()
 
     def showEvent(self, event: QShowEvent) -> None:  # type: ignore[override]
         """Let the overlay controller apply show-time platform fixes."""
 
         super().showEvent(event)
-        self.apply_startup_size(minimum_size=self._config.surface.minimum_size)
+        self.apply_startup_size(minimum_size=self._minimum_size)
         self._overlay.handle_show()
-        self._dwell_click.start()
+        if self._dwell_click is not None:
+            self._dwell_click.start()
         self._report_visibility()
 
     def hideEvent(self, event: QHideEvent) -> None:  # type: ignore[override]
         """Stop dwell sampling while this window is hidden."""
 
-        self._dwell_click.stop()
+        if self._dwell_click is not None:
+            self._dwell_click.stop()
         super().hideEvent(event)
         self._report_visibility()
 
@@ -229,23 +240,71 @@ class RuntimeWindow(QMainWindow):
 
     def _report_visibility(self) -> None:
         self._context.dispatcher.dispatch_event(
-            window_visibility_changed(self._config.id, self.isVisible(), self.isMinimized())
+            window_visibility_changed(self._window_id, self.isVisible(), self.isMinimized())
         )
 
 
 def build_window(config: WindowConfig, context: Context, *, parent: QWidget | None = None) -> RuntimeWindow:
-    """Build a generic runtime window from config.
+    """Build a runtime window from a legacy surface-based window config."""
 
-    Args:
-        config: Declarative window config.
-        context: Runtime context.
-        parent: Optional Qt parent.
+    window_path = window_source_path(context.config, config.id)
+    window = RuntimeWindow(
+        window_id=config.id,
+        title=config.title,
+        overlay=config.overlay,
+        chrome=config.chrome,
+        opacity=config.opacity,
+        minimum_size=config.surface.minimum_size,
+        build_content=lambda: context.surfaces.build(
+            config.surface,
+            context,
+            window_path.child("surface", config.surface.id),
+        ),
+        context=context,
+        dwell=config.dwell_click,
+        parent=parent,
+    )
+    window.set_dwell_enabled(
+        bool(
+            context.state.get(
+                source_state_namespace(window_path),
+                "dwell_enabled",
+                config.dwell_click.enabled,
+            )
+        )
+    )
+    return window
 
-    Returns:
-        A generic Qt window hosting configured content.
 
-    Side effects:
-        Constructs widgets and configures the selected overlay backend.
-    """
+def build_profile_window(
+    config: ProfileWindowConfig,
+    context: Context,
+    *,
+    parent: QWidget | None = None,
+) -> RuntimeWindow:
+    """Build a runtime window whose content is a profile node tree."""
 
-    return RuntimeWindow(config, context, parent=parent)
+    def build_content() -> QWidget:
+        surface = RootSurface()
+        surface.setObjectName("rootSurface")
+        surface.setProperty("componentType", "surface")
+        surface.setProperty("componentId", config.id)
+        surface.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(context.engine.node_builder.build(config.content))
+        return surface
+
+    return RuntimeWindow(
+        window_id=config.id,
+        title=config.title,
+        overlay=config.overlay,
+        chrome=config.chrome,
+        opacity=config.opacity,
+        minimum_size=config.minimum_size,
+        build_content=build_content,
+        context=context,
+        style=config.style,
+        parent=parent,
+    )

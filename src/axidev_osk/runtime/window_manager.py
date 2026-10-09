@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Callable, Mapping
 
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication, QWidget
@@ -13,6 +14,8 @@ from ..windows.builder import RuntimeWindow, build_window
 from .context import Context
 
 _logger = logging.getLogger(__name__)
+
+WindowFactory = Callable[[QWidget | None], RuntimeWindow]
 
 
 class _WindowInputBlocker(QObject):
@@ -68,8 +71,16 @@ class WindowManager:
 
         self._context = context
         self._windows: dict[str, RuntimeWindow] = {}
-        self._configs = {window.id: window for window in context.config.windows}
+        self._factories: dict[str, WindowFactory] = {
+            window.id: (lambda parent, config=window: build_window(config, context, parent=parent))
+            for window in context.config.windows
+        }
         self._input_blockers: dict[str, _WindowInputBlocker] = {}
+
+    def set_factories(self, factories: Mapping[str, WindowFactory]) -> None:
+        """Replace how windows are built, for example from a loaded profile."""
+
+        self._factories = dict(factories)
 
     def get_or_create(self, window_id: str, *, parent: QWidget | None = None) -> RuntimeWindow:
         """Return a live window, creating it from config if needed.
@@ -88,11 +99,11 @@ class WindowManager:
         existing = self._windows.get(window_id)
         if existing is not None:
             return existing
-        config = self._configs.get(window_id)
-        if config is None:
+        factory = self._factories.get(window_id)
+        if factory is None:
             raise ValueError(f"No window config registered for {window_id!r}")
-        _logger.info("Building runtime window %s with surface %s", config.id, config.surface.id)
-        window = build_window(config, self._context, parent=parent)
+        _logger.info("Building runtime window %s", window_id)
+        window = factory(parent)
         self._windows[window_id] = window
         return window
 
@@ -193,7 +204,7 @@ class WindowManager:
         app = QApplication.instance()
         if blocker is not None and app is not None:
             app.removeEventFilter(blocker)
-        window.set_visual_opacity(self._configs[window_id].opacity)
+        window.set_visual_opacity(window.configured_opacity)
 
     def close(self, window_id: str) -> None:
         """Close and forget a managed window if it exists."""
