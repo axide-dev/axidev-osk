@@ -1,14 +1,41 @@
-"""Central state tree read by profile functions and written through actions."""
+"""Central state: a registry of declared variables read by profile functions and written through actions.
+
+Every value lives in a declared variable. The engine declares what it
+observes, the root config declares what every profile shares, and the active
+profile declares its own. The tree stores values and checks them against
+their declared type, but it never knows what any of them mean.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
-from typing import TypeAlias
 
+from ..config.variables import (
+    MapOf,
+    Record,
+    Slot,
+    StatePath,
+    Variable,
+    VariableError,
+    VarType,
+    check,
+    descend,
+    empty_value,
+    path_text,
+)
 from ..messages import DataMap, DataValue, copy_data_value, data_equal
 
-StatePath: TypeAlias = tuple[str, ...]
+__all__ = [
+    "ReadRecorder",
+    "StatePath",
+    "StateTree",
+    "StateView",
+    "VariableError",
+    "parse_state_path",
+    "path_text",
+    "paths_overlap",
+]
 
 
 def parse_state_path(text: str) -> StatePath:
@@ -22,10 +49,6 @@ def parse_state_path(text: str) -> StatePath:
     return segments
 
 
-def path_text(path: StatePath) -> str:
-    return ".".join(path)
-
-
 def paths_overlap(left: StatePath, right: StatePath) -> bool:
     """Return whether a change at one path can affect a read at the other."""
 
@@ -33,96 +56,154 @@ def paths_overlap(left: StatePath, right: StatePath) -> bool:
     return left[:size] == right[:size]
 
 
-def _stored(value: object) -> DataValue:
-    """Copy a value for storage, dropping map entries set to ``None`` the way Lua drops ``nil`` fields."""
-
-    copied = copy_data_value(value)
-    return _without_none(copied)
-
-
-def _without_none(value: DataValue) -> DataValue:
-    if isinstance(value, dict):
-        return {key: _without_none(item) for key, item in value.items() if item is not None}
-    if isinstance(value, list):
-        return [_without_none(item) for item in value]
-    return value
-
-
 class StateTree:
-    """Own durable state as one tree of native data, with Lua table semantics.
+    """Own durable state as declared variables in one tree of native data.
 
-    Maps are nested state branches. Every stored value is copied on the way in
-    and on the way out, so callers never share mutable state with the tree. A
-    map never holds ``None``: assigning ``None`` removes the key, and a branch
-    left empty by a removal is removed too.
+    Variables are declared by an owner (``engine``, ``shared``, or
+    ``profile``) and hold their default until set. Reading or writing a path no
+    declaration covers raises ``VariableError``. Setting ``None`` resets a
+    variable or record field to its default and removes a map entry. Every
+    value is copied on the way in and on the way out.
     """
 
-    def __init__(self, initial: DataMap | None = None) -> None:
+    def __init__(self) -> None:
         self._root: DataMap = {}
-        self.reset(initial or {})
+        self._variables: dict[StatePath, Variable] = {}
+        self._owners: dict[StatePath, str] = {}
 
-    def reset(self, initial: DataMap) -> None:
-        """Replace all state, for example when a profile starts."""
+    def declare(self, variables: Mapping[StatePath, Variable], owner: str) -> None:
+        """Add variables with their default values; a path overlapping a declared one is rejected."""
 
-        stored = _stored(initial)
-        if not isinstance(stored, dict):
-            raise TypeError("Initial state must be a map")
-        self._root = stored
+        for path in variables:
+            clash = next((other for other in (*self._variables, *variables) if other != path and paths_overlap(path, other)), None)
+            if clash is not None or path in self._variables:
+                raise VariableError(f"State variable {path_text(path)!r} overlaps {path_text(clash or path)!r}")
+        for path, variable in variables.items():
+            self._variables[path] = variable
+            self._owners[path] = owner
+            branch = self._root
+            for segment in path[:-1]:
+                child = branch.setdefault(segment, {})
+                assert isinstance(child, dict)
+                branch = child
+            branch[path[-1]] = copy_data_value(variable.default)
+
+    def undeclare(self, owner: str) -> None:
+        """Remove every variable ``owner`` declared, with its value."""
+
+        for path in [path for path, declared_by in self._owners.items() if declared_by == owner]:
+            del self._variables[path]
+            del self._owners[path]
+            self._prune(path)
+
+    def declarations(self, owner: str) -> dict[StatePath, Variable]:
+        return {path: variable for path, variable in self._variables.items() if self._owners[path] == owner}
+
+    def owner(self, path: StatePath) -> str:
+        """Return who declared the variable covering ``path``."""
+
+        return self._owners[self.slot(path).variable]
+
+    def slot(self, path: StatePath) -> Slot:
+        """Return where ``path`` lands in its declared variable, raising when nothing declares it."""
+
+        for size in range(len(path), 0, -1):
+            variable = self._variables.get(path[:size])
+            if variable is not None:
+                return descend(path[:size], variable, path[size:])
+        raise VariableError(f"State path {path_text(path)!r} is not declared")
+
+    def is_branch(self, path: StatePath) -> bool:
+        """Whether ``path`` only groups declared variables, such as the root or ``std``."""
+
+        return any(len(declared) > len(path) and declared[: len(path)] == path for declared in self._variables)
 
     def get(self, path: StatePath) -> DataValue:
-        """Return a copy of the value at ``path``, or ``None`` when absent."""
+        """Return a copy of the value at ``path``; an absent map entry reads as ``None``."""
 
-        node = self._lookup(path)
-        return deepcopy(node)
+        if path and not self.is_branch(path):
+            self.slot(path)
+        return deepcopy(self._lookup(path))
 
     def set(self, path: StatePath, value: DataValue) -> bool:
         """Store ``value`` at ``path`` and return whether the tree changed.
 
-        Storing ``None`` removes the key, matching Lua's ``nil`` assignment.
+        ``None`` resets a variable or record field to its default and removes a
+        map entry, the way Lua's ``nil`` removes a table field.
         """
 
         if not path:
             raise ValueError("State path cannot be empty")
-        copied = _stored(value)
-        if copied is None:
-            return self._remove(path)
-        branch = self._root
-        for index, segment in enumerate(path[:-1]):
-            child = branch.get(segment)
-            if child is None:
-                child = {}
-                branch[segment] = child
-            elif not isinstance(child, dict):
-                raise ValueError(
-                    f"Cannot set {path_text(path)!r}: {path_text(path[: index + 1])!r} is not a map"
-                )
-            branch = child
-        if path[-1] in branch and data_equal(branch[path[-1]], copied):
-            return False
-        branch[path[-1]] = copied
-        return True
-
-    def _remove(self, path: StatePath) -> bool:
-        """Remove ``path`` and any branch the removal leaves empty; a missing path changes nothing."""
-
-        branches: list[DataMap] = [self._root]
-        for segment in path[:-1]:
-            child = branches[-1].get(segment)
-            if not isinstance(child, dict):
-                return False
-            branches.append(child)
-        if branches[-1].pop(path[-1], None) is None:
-            return False
-        for depth in range(len(branches) - 1, 0, -1):
-            if branches[depth]:
-                break
-            del branches[depth - 1][path[depth - 1]]
-        return True
+        slot = self.slot(path)
+        if value is None and slot.default is None:
+            return self._remove(path, slot)
+        stored = copy_data_value(slot.default) if value is None else check(slot.type, value, path_text(path))
+        return self._write(path, slot, stored)
 
     def view(self, recorder: "ReadRecorder | None" = None) -> "StateView":
         """Return a read-only view, optionally recording which paths are read."""
 
         return StateView(self, (), recorder)
+
+    def _write(self, path: StatePath, slot: Slot, value: DataValue) -> bool:
+        container = self._container(slot.variable)
+        name = slot.variable[-1]
+        var_type: VarType = self._variables[slot.variable].type
+        for segment in path[len(slot.variable):]:
+            child = container[name]
+            assert isinstance(child, dict)
+            var_type = _child_type(var_type, segment)
+            if child.get(segment) is None:
+                child[segment] = empty_value(var_type)
+            container, name = child, segment
+        if data_equal(container[name], value):
+            return False
+        container[name] = value
+        return True
+
+    def _remove(self, path: StatePath, slot: Slot) -> bool:
+        """Remove a map entry, then any enclosing map entries the removal left empty."""
+
+        trail: list[DataMap] = [self._container(slot.variable)]
+        names = [slot.variable[-1], *path[len(slot.variable):]]
+        for name in names[:-1]:
+            child = trail[-1].get(name)
+            if not isinstance(child, dict):
+                return False
+            trail.append(child)
+        if trail[-1].pop(names[-1], None) is None:
+            return False
+        variable_type = self._variables[slot.variable].type
+        types = [variable_type]
+        for segment in names[1:]:
+            types.append(_child_type(types[-1], segment))
+        # trail[depth] is the value named names[depth - 1]; only entries of a map are removed, never the variable.
+        for depth in range(len(trail) - 1, 1, -1):
+            if trail[depth] or not isinstance(types[depth - 2], MapOf):
+                break
+            del trail[depth - 1][names[depth - 1]]
+        return True
+
+    def _container(self, variable: StatePath) -> DataMap:
+        branch = self._root
+        for segment in variable[:-1]:
+            child = branch[segment]
+            assert isinstance(child, dict)
+            branch = child
+        return branch
+
+    def _prune(self, path: StatePath) -> None:
+        trail: list[DataMap] = [self._root]
+        for segment in path[:-1]:
+            child = trail[-1].get(segment)
+            if not isinstance(child, dict):
+                return
+            trail.append(child)
+        trail[-1].pop(path[-1], None)
+        for depth in range(len(trail) - 1, 0, -1):
+            if trail[depth]:
+                break
+            del trail[depth - 1][path[depth - 1]]
 
     def _lookup(self, path: StatePath) -> DataValue:
         node: DataValue = self._root
@@ -133,6 +214,13 @@ class StateTree:
             if node is None:
                 return None
         return node
+
+
+def _child_type(var_type: VarType, segment: str) -> VarType:
+    if isinstance(var_type, MapOf):
+        return var_type.item
+    assert isinstance(var_type, Record)
+    return var_type.fields[segment].type
 
 
 class ReadRecorder:
@@ -160,10 +248,11 @@ class ReadRecorder:
 
 
 class StateView:
-    """Read-only access to the state tree with Lua-like semantics.
+    """Read-only access to declared state with Lua-like semantics.
 
     ``view.name`` and ``view["name"]`` return the stored value, a nested view
-    for maps, or ``None`` when the value is absent.
+    for maps, or ``None`` for an absent map entry. Reading a path no
+    declaration covers raises ``VariableError``.
     """
 
     __slots__ = ("_tree", "_path", "_recorder")
@@ -184,6 +273,8 @@ class StateView:
         child = (*self._path, name)
         if self._recorder is not None:
             self._recorder.read(self._path, child)
+        if not self._tree.is_branch(child):
+            self._tree.slot(child)
         value = self._tree._lookup(child)  # noqa: SLF001
         if isinstance(value, dict):
             return StateView(self._tree, child, self._recorder)

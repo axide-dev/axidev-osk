@@ -8,7 +8,9 @@ Everything here builds plain maps. Nothing calls the engine directly. A Lua
 - Attachment builders: ``dwell``, ``pointer_locator``, ``hot_corners``,
   ``secure_input_panel``.
 - Action builders grouped by subject: ``state``, ``keyboard``, ``window``,
-  ``dwell``, ``process``, ``log``, ``app``, ``linux``.
+  ``process``, ``log``, ``app``, ``linux``.
+- State declarations: ``var`` with the types ``list_of``, ``map_of``, and
+  ``record``.
 - Helpers: ``config``, ``profile``, ``merge``, ``read``.
 """
 
@@ -19,7 +21,7 @@ from typing import Any
 
 Map = dict[str, Any]
 Binding = Callable[[Any], Any]
-"""``fn(state) -> value``: a node property that follows state."""
+"""``fn(state) -> value``: a value that follows state, accepted by any value field."""
 Callback = Callable[[Any, Any], "list[Map] | None"]
 """``fn(ctx, event) -> [actions]``: what happens when an event arrives."""
 
@@ -57,8 +59,41 @@ def read(state: Any, path: str | list[str]) -> Any:
     return value
 
 
-def config(*, active_profile: str, profiles: Mapping[str, Map]) -> Map:
-    return {"active_profile": active_profile, "profiles": dict(profiles)}
+def var(var_type: Any, default: Any = None) -> Map:
+    """Declare a state variable of ``var_type``; ``None`` resets it to ``default``.
+
+    ``var_type`` is ``"boolean"``, ``"integer"``, ``"number"``, ``"string"``,
+    ``list_of(T)``, ``map_of(T)``, or ``record({...})``. A list or map defaults
+    to empty, and a record takes its default from its fields.
+    """
+
+    declaration: Map = {"var": var_type}
+    if default is not None:
+        declaration["default"] = default
+    return declaration
+
+
+def list_of(item: Any) -> Map:
+    return {"list": item}
+
+
+def map_of(item: Any) -> Map:
+    return {"map": item}
+
+
+def record(fields: Mapping[str, Map]) -> Map:
+    """A record type whose fields are ``var`` declarations."""
+
+    return {"record": dict(fields)}
+
+
+def config(*, active_profile: str, profiles: Mapping[str, Map], state: Map | None = None) -> Map:
+    """Build a root config; ``state`` declares variables every profile shares, which survive a profile switch."""
+
+    result: Map = {"active_profile": active_profile, "profiles": dict(profiles)}
+    if state is not None:
+        result["state"] = state
+    return result
 
 
 def profile(
@@ -131,34 +166,12 @@ class _Window:
     def move_by(window: str, dx: int, dy: int) -> Map:
         return action("window.move_by", window=window, dx=dx, dy=dy)
 
-    @staticmethod
-    def set_opacity(window: str, opacity: float) -> Map:
-        return action("window.set_opacity", window=window, opacity=opacity)
-
-    @staticmethod
-    def block_input(window: str, allowed: list[str] | None = None) -> Map:
-        return action("window.block_input", window=window, **{"except": list(allowed or [])})
-
-    @staticmethod
-    def unblock_input(window: str) -> Map:
-        return action("window.unblock_input", window=window)
-
 
 window = _Window()
 
 
-class _Dwell:
-    """``osk.dwell(...)`` attaches dwell clicking; ``osk.dwell.set_enabled`` toggles it."""
-
-    def __call__(self, **fields: Any) -> Map:
-        return {"kind": "dwell", **fields}
-
-    @staticmethod
-    def set_enabled(dwell: str, enabled: bool) -> Map:
-        return action("dwell.set_enabled", dwell=dwell, enabled=enabled)
-
-
-dwell = _Dwell()
+def dwell(**fields: Any) -> Map:
+    return {"kind": "dwell", **fields}
 
 
 def pointer_locator(**fields: Any) -> Map:
@@ -176,7 +189,7 @@ def secure_input_panel(**fields: Any) -> Map:
 class state:  # noqa: N801 - mirrors the Lua ``osk.state`` table
     @staticmethod
     def set(path: str | list[str], value: Any) -> Map:
-        """Set a profile state path (``"a.b"`` or ``["a", "b"]``); ``None`` removes it."""
+        """Set a declared state path (``"a.b"`` or ``["a", "b"]``); ``None`` resets it to its default or removes a map entry."""
 
         return {"action": "state.set", "arguments": {"path": path if isinstance(path, str) else list(path), "value": value}}
 

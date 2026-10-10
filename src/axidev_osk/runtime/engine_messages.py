@@ -12,13 +12,13 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
-from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent
+from ..config.variables import MapOf, Record, Scalar, StatePath, Variable, record_default
+from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent
 from .decoding import (
     bool_value,
     decode_empty,
     int_value,
     non_empty_string_value,
-    number_value,
     optional_string_value,
     require_keys,
     string_list_value,
@@ -50,6 +50,49 @@ LOG_ERROR = "log.error"
 _LOCKS = ("capslock", "numlock")
 
 
+def _boolean(default: bool = False) -> Variable:
+    return Variable(Scalar("boolean"), default)
+
+
+def _integer() -> Variable:
+    return Variable(Scalar("integer"), 0)
+
+
+def _string() -> Variable:
+    return Variable(Scalar("string"), "")
+
+
+def _record(**fields: Variable) -> Variable:
+    record = Record(fields)
+    return Variable(record, record_default(record))
+
+
+OBSERVED_VARIABLES: dict[StatePath, Variable] = {
+    ("input", "keys"): Variable(MapOf(Scalar("boolean")), {}),
+    ("input", "locks"): _record(**{lock: _boolean() for lock in _LOCKS}),
+    ("keyboard",): _record(
+        ready=_boolean(),
+        status=_string(),
+        needs_permission_setup=_boolean(),
+        permission_setup_text=_string(),
+    ),
+    ("windows",): Variable(
+        MapOf(
+            Record(
+                {
+                    "visible": _boolean(),
+                    "minimized": _boolean(),
+                    "position": _record(x=_integer(), y=_integer()),
+                    "size": _record(width=_integer(), height=_integer()),
+                }
+            )
+        ),
+        {},
+    ),
+}
+"""What the engine observes: keys and locks, keyboard output status, and each built window."""
+
+
 @dataclass(frozen=True, slots=True)
 class InputKeyArguments:
     key: str
@@ -78,9 +121,10 @@ class WindowStateArguments:
     window_id: str
     visible: bool
     minimized: bool
-    opacity: float
-    configured_opacity: float
-    input_blocked: bool
+    x: int
+    y: int
+    width: int
+    height: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,19 +224,23 @@ def window_state_changed(
     *,
     visible: bool,
     minimized: bool,
-    opacity: float,
-    configured_opacity: float,
-    input_blocked: bool,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
 ) -> RuntimeEvent:
+    """Report what a window looks like on screen; ``x`` and ``y`` are its top-left corner in screen coordinates."""
+
     return validated_event(
         WINDOW_STATE_CHANGED,
         {
             "window": window_id,
             "visible": visible,
             "minimized": minimized,
-            "opacity": opacity,
-            "configured_opacity": configured_opacity,
-            "input_blocked": input_blocked,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
         },
         decode_window_state,
     )
@@ -264,14 +312,15 @@ def decode_process_exited(arguments: DataMap) -> ProcessExitedArguments:
 
 
 def decode_window_state(arguments: DataMap) -> WindowStateArguments:
-    require_keys(arguments, ("window", "visible", "minimized", "opacity", "configured_opacity", "input_blocked"))
+    require_keys(arguments, ("window", "visible", "minimized", "x", "y", "width", "height"))
     return WindowStateArguments(
         window_id=non_empty_string_value(arguments, "window"),
         visible=bool_value(arguments, "visible"),
         minimized=bool_value(arguments, "minimized"),
-        opacity=number_value(arguments, "opacity"),
-        configured_opacity=number_value(arguments, "configured_opacity"),
-        input_blocked=bool_value(arguments, "input_blocked"),
+        x=int_value(arguments, "x"),
+        y=int_value(arguments, "y"),
+        width=int_value(arguments, "width"),
+        height=int_value(arguments, "height"),
     )
 
 
@@ -335,18 +384,13 @@ def install_engine_handlers(
     keyboard: KeyboardEffects,
     processes: ProcessEffects,
 ) -> None:
-    """Declare the observed roots, then register engine actions and the handlers that record state.
+    """Declare the observed variables, then register engine actions and the handlers that record state.
 
     Call this before a profile starts so observation handlers run before
     profile callbacks for the same event.
     """
 
-    profile_runtime.declare_root("input", {"keys": {}, "locks": {lock: False for lock in _LOCKS}})
-    profile_runtime.declare_root(
-        "keyboard",
-        asdict(KeyboardStatusArguments(ready=False, status="", needs_permission_setup=False, permission_setup_text="")),
-    )
-    profile_runtime.declare_root("windows", {})
+    profile_runtime.declare_observed(OBSERVED_VARIABLES)
 
     def record_input_key(event: InputKeyArguments) -> MessageResult:
         messages = profile_runtime.set_observed(("input", "keys", event.key), event.pressed)
@@ -362,11 +406,15 @@ def install_engine_handlers(
         return messages
 
     def record_window_state(event: WindowStateArguments) -> MessageResult:
-        values = asdict(event)
-        window_id = values.pop("window_id")
+        observed: dict[str, DataValue] = {
+            "visible": event.visible,
+            "minimized": event.minimized,
+            "position": {"x": event.x, "y": event.y},
+            "size": {"width": event.width, "height": event.height},
+        }
         messages: MessageResult = []
-        for name, value in values.items():
-            messages.extend(profile_runtime.set_observed(("windows", window_id, name), value))
+        for name, value in observed.items():
+            messages.extend(profile_runtime.set_observed(("windows", event.window_id, name), value))
         return messages
 
     def press(arguments: KeyboardDownArguments) -> MessageResult:

@@ -1,11 +1,10 @@
 """Window helpers built only from ``osk`` primitives.
 
 Library state lives under ``std.ghosted.<window id>``. Ghosting fades a window
-and lets clicks pass through it except on the allowed nodes; unghosting
-restores the window's configured opacity (``windows.<id>.configured_opacity``).
-Profiles route ``window.state_changed`` to ``on_window_state`` (``std.with_handlers``
-does it) so the flag clears when the engine reports the window unblocked, for
-example after the window was closed and rebuilt.
+and lets clicks pass through it except on the Ghost button. The flag is the
+only source: a ghostable window binds its ``opacity`` with ``ghost_opacity``
+and its ``input_blocked`` with ``ghost_blocked``, so a rebuilt window comes
+back in the right state on its own.
 """
 
 from __future__ import annotations
@@ -16,6 +15,9 @@ from typing import Any
 from ... import osk
 
 GHOST_OPACITY = 0.01
+
+STATE = {"ghosted": osk.var(osk.map_of("boolean"))}
+"""The library's window variables, merged under ``std`` by ``std.with_state``."""
 
 
 def visible(state: Any, window: str) -> bool:
@@ -30,36 +32,36 @@ def ghosted(state: Any, window: str) -> bool:
     return bool(osk.read(state, ["std", "ghosted", window]))
 
 
-def ghost(window: str, allowed: list[str]) -> list[osk.Map]:
-    return [
-        osk.window.block_input(window, allowed),
-        osk.window.set_opacity(window, GHOST_OPACITY),
-        osk.state.set(["std", "ghosted", window], True),
-    ]
+def ghost_opacity(window: str, opacity: float | osk.Binding) -> osk.Binding:
+    """A window ``opacity`` binding: almost transparent while ghosted, otherwise ``opacity``."""
+
+    def bound(state: Any) -> float:
+        if ghosted(state, window):
+            return GHOST_OPACITY
+        return opacity(state) if callable(opacity) else opacity
+
+    return bound
 
 
-def unghost(state: Any, window: str) -> list[osk.Map]:
-    actions = [osk.window.unblock_input(window), osk.state.set(["std", "ghosted", window], None)]
-    opacity = osk.read(state, ["windows", window, "configured_opacity"])
-    if opacity is not None:
-        actions.insert(0, osk.window.set_opacity(window, opacity))
-    return actions
+def ghost_blocked(window: str) -> osk.Binding:
+    """A window ``input_blocked`` binding: clicks pass through while ghosted."""
+
+    return lambda state: ghosted(state, window)
 
 
-def on_window_state(ctx: Any, event: Any) -> list[osk.Map]:
-    """Clear the ghost flag of a window the engine reports as no longer blocking input."""
+def ghost(window: str) -> list[osk.Map]:
+    return [osk.state.set(["std", "ghosted", window], True)]
 
-    window = event["window"]
-    if not event["input_blocked"] and ghosted(ctx.state, window):
-        return [osk.state.set(["std", "ghosted", window], None)]
-    return []
+
+def unghost(window: str) -> list[osk.Map]:
+    return [osk.state.set(["std", "ghosted", window], None)]
 
 
 def reveal(state: Any, window: str) -> list[osk.Map]:
     """Show a window, bringing it back from ghost first."""
 
     if ghosted(state, window):
-        return [*unghost(state, window), osk.window.show(window)]
+        return [*unghost(window), osk.window.show(window)]
     return [osk.window.show(window)]
 
 
@@ -72,17 +74,20 @@ def toggle(state: Any, window: str) -> list[osk.Map]:
 
 
 def ghost_button(window: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
-    """A button that ghosts ``window`` except for itself, and unghosts it when pressed again."""
-
-    node_id = (opts or {}).get("id", f"ghost:{window}")
+    """A button that ghosts ``window`` and unghosts it when pressed again; it takes clicks while ghosted."""
 
     def on_press(ctx: Any, event: Any) -> list[osk.Map]:
         del event
         if ghosted(ctx.state, window):
-            return unghost(ctx.state, window)
-        return ghost(window, [node_id])
+            return unghost(window)
+        return ghost(window)
 
-    defaults = {"id": node_id, "label": "Ghost", "on_press": on_press}
+    defaults = {
+        "id": f"ghost:{window}",
+        "label": "Ghost",
+        "passes_input_block": True,
+        "on_press": on_press,
+    }
     return osk.button(**osk.merge(defaults, opts))
 
 

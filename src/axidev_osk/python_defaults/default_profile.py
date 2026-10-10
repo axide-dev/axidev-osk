@@ -138,22 +138,48 @@ def _key_node(entry: tuple[Any, ...], cell: dict[str, int]) -> osk.Map:
     raise ValueError(f"Unknown layout entry kind {kind!r}")
 
 
+# Settings every profile shares, so they survive a profile switch.
+DWELL_SETTINGS: dict[str, tuple[str, Any]] = {
+    "enabled": ("boolean", False),
+    "delay_ms": ("integer", 200),
+    "dead_zone_px": ("integer", 10),
+    "full_speed_px_s": ("number", 20),
+    "stop_speed_px_s": ("number", 240),
+    "maximum_progress_rate": ("number", 1.75),
+    "indicator_start_progress": ("number", 0.25),
+    "direction_reversal_progress_factor": ("number", 0.5),
+    "movement_penalty_px": ("number", 15),
+    "distance_curve_full_px": ("number", 200),
+    "velocity_release_ms": ("integer", 100),
+}
+SHARED_STATE = {
+    "settings": {
+        "opacity": osk.var("number", KEYBOARD_OPACITY),
+        "dwell": {name: osk.var(var_type, default) for name, (var_type, default) in DWELL_SETTINGS.items()},
+    }
+}
+
+
+def _setting(*path: str) -> osk.Binding:
+    return lambda state: osk.read(state, ["settings", *path])
+
+
 def _dwell_button(placement: osk.Map) -> osk.Map:
-    def dwell_enabled(state: Any) -> bool:
-        return bool(osk.read(state, ["dwell", DWELL, "enabled"]))
+    enabled = _setting("dwell", "enabled")
 
     def toggle(ctx: Any, event: Any) -> list[osk.Map]:
         del event
-        return [osk.dwell.set_enabled(DWELL, not dwell_enabled(ctx.state))]
+        return [osk.state.set("settings.dwell.enabled", not enabled(ctx.state))]
 
-    return osk.button(id="dwell", label="Dwell", latched=dwell_enabled, on_release=toggle, **placement)
+    return osk.button(id="dwell", label="Dwell", latched=enabled, on_release=toggle, **placement)
 
 
 def keyboard_window() -> osk.Map:
     return osk.window(
         id=KEYBOARD,
         title="axidev OSK",
-        opacity=KEYBOARD_OPACITY,
+        opacity=windows.ghost_opacity(KEYBOARD, _setting("opacity")),
+        input_blocked=windows.ghost_blocked(KEYBOARD),
         show_on_start=True,
         default_close=False,
         overlay=OVERLAY,
@@ -287,25 +313,17 @@ def build_default_config() -> osk.Map:
 
     return osk.config(
         active_profile="default",
+        state=SHARED_STATE,
         profiles={
             "default": osk.profile(
+                state=std.with_state(),
                 theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
                 windows=[keyboard_window(), *prompt_windows()],
                 attachments=[
                     osk.dwell(
                         id=DWELL,
                         window=KEYBOARD,
-                        enabled=False,
-                        delay_ms=200,
-                        dead_zone_px=10,
-                        full_speed_px_s=20,
-                        stop_speed_px_s=240,
-                        maximum_progress_rate=1.75,
-                        indicator_start_progress=0.25,
-                        direction_reversal_progress_factor=0.5,
-                        movement_penalty_px=15,
-                        distance_curve_full_px=200,
-                        velocity_release_ms=100,
+                        **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
                     ),
                     osk.pointer_locator(
                         id="keyboard-locator",

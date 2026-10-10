@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QWidget
 
 from axidev_osk.messages import DataMap, RuntimeEvent
@@ -10,22 +11,22 @@ from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import osk
 from axidev_osk.python_defaults.osk import std
 from axidev_osk.python_defaults.osk.std import keys, prompts, windows
-from axidev_osk.runtime.engine_messages import input_key, keyboard_reset, window_state_changed
+from axidev_osk.config.variables import decode_state
+from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.state import StateTree
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from support import RecordingBackend, build_window, find_node, nodes_by_id, qt_app, record_app_actions
 
 
-def _window_report(window: str, *, blocked: bool, opacity: float, configured: float) -> RuntimeEvent:
-    """What the engine reports about a window once actions on it have run."""
-
-    return window_state_changed(
-        window, visible=True, minimized=False, opacity=opacity, configured_opacity=configured, input_blocked=blocked
-    )
-
-
 class StdHarness:
-    def __init__(self, test: unittest.TestCase, children: list[osk.Map], *, on: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        test: unittest.TestCase,
+        children: list[osk.Map],
+        *,
+        on: dict[str, Any] | None = None,
+        **window_fields: Any,
+    ) -> None:
         qt_app()
         self.backend = RecordingBackend()
         self.context = make_test_context(self.backend)
@@ -35,7 +36,8 @@ class StdHarness:
             active_profile="p",
             profiles={
                 "p": osk.profile(
-                    windows=[osk.window(id="pad", title="Pad", content=osk.box(id="root", children=children))],
+                    windows=[osk.window(id="pad", title="Pad", content=osk.box(id="root", children=children), **window_fields)],
+                    state=std.with_state(),
                     on=std.with_handlers(on),
                 )
             },
@@ -116,7 +118,7 @@ class KeyTests(unittest.TestCase):
             harness.backend.sent,
             [("down", "ShiftLeft", (), False), ("down", "A", (), True), ("up", "A"), ("up", "ShiftLeft")],
         )
-        self.assertIsNone(harness.state("std", "held"))
+        self.assertEqual(harness.state("std", "held"), {})
 
     def test_a_one_shot_set_while_a_key_is_down_waits_for_the_next_key(self) -> None:
         harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
@@ -209,7 +211,7 @@ class KeyTests(unittest.TestCase):
 
         harness.context.dispatcher.dispatch(keyboard_reset())
 
-        self.assertIsNone(harness.state("std", "latched"))
+        self.assertEqual(harness.state("std", "latched"), {})
         self.assertFalse(harness.widget("key:CtrlLeft").property("latched"))
 
     def test_keys_whose_names_contain_dots_work(self) -> None:
@@ -223,10 +225,10 @@ class KeyTests(unittest.TestCase):
 
     def test_reading_through_a_plain_value_gives_none(self) -> None:
         harness = StdHarness(self, [keys.letter("a")])
-        harness.engine.profile.state.set(("mode",), "plain")
+        harness.engine.profile.set_observed(("keyboard", "status"), "plain")
 
-        self.assertIsNone(osk.read(harness.engine.profile.state.view(), "mode.inner"))
-        self.assertEqual(osk.read(harness.engine.profile.state.view(), "mode"), "plain")
+        self.assertIsNone(osk.read(harness.engine.profile.state.view(), "keyboard.status.inner"))
+        self.assertEqual(osk.read(harness.engine.profile.state.view(), "keyboard.status"), "plain")
 
     def test_any_field_can_be_overridden(self) -> None:
         def custom(ctx: Any, event: Any) -> list[osk.Map]:
@@ -239,42 +241,46 @@ class KeyTests(unittest.TestCase):
 
 class WindowHelperTests(unittest.TestCase):
     def test_ghost_button_fades_blocks_and_restores(self) -> None:
-        harness = StdHarness(self, [windows.ghost_button("pad")])
-
-        harness.tap("ghost:pad")
-        harness.context.dispatcher.dispatch(_window_report("pad", blocked=True, opacity=0.01, configured=0.85))
-        self.assertIs(harness.state("std", "ghosted", "pad"), True)
-        harness.tap("ghost:pad")
-
-        self.assertEqual(
-            harness.window_actions,
-            [
-                ("window.block_input", {"window": "pad", "except": ["ghost:pad"]}),
-                ("window.set_opacity", {"window": "pad", "opacity": 0.01}),
-                ("window.set_opacity", {"window": "pad", "opacity": 0.85}),
-                ("window.unblock_input", {"window": "pad"}),
-            ],
+        harness = StdHarness(
+            self,
+            [windows.ghost_button("pad"), keys.letter("a")],
+            opacity=windows.ghost_opacity("pad", 0.85),
+            input_blocked=windows.ghost_blocked("pad"),
         )
-        self.assertIsNone(harness.state("std", "ghosted", "pad"))
+        press = QEvent(QEvent.Type.MouseButtonPress)
 
-    def test_ghost_flag_clears_when_the_engine_reports_the_window_unblocked(self) -> None:
-        harness = StdHarness(self, [windows.ghost_button("pad")])
         harness.tap("ghost:pad")
-        self.assertIs(harness.state("std", "ghosted", "pad"), True)
 
-        harness.context.dispatcher.dispatch(_window_report("pad", blocked=False, opacity=0.85, configured=0.85))
+        self.assertIs(harness.state("std", "ghosted", "pad"), True)
+        self.assertAlmostEqual(harness.window.windowOpacity(), windows.GHOST_OPACITY, delta=0.005)
+        blocker = harness.window._input_blocker
+        assert blocker is not None
+        self.assertTrue(blocker.eventFilter(harness.widget("key:A"), press))
+        self.assertFalse(blocker.eventFilter(harness.widget("ghost:pad"), press))
+
+        harness.tap("ghost:pad")
 
         self.assertIsNone(harness.state("std", "ghosted", "pad"))
+        self.assertAlmostEqual(harness.window.windowOpacity(), 0.85, delta=0.005)
+        self.assertIsNone(harness.window._input_blocker)
+        self.assertEqual(harness.window_actions, [])
 
     def test_corner_toggle_brings_back_ghosted_and_minimized_windows(self) -> None:
-        def run(state: DataMap) -> list[str]:
-            return [item["action"] for item in windows.corner_toggle(StateTree(state).view(), "pad")]
+        def run(**window: bool) -> list[str]:
+            state = StateTree()
+            state.declare(OBSERVED_VARIABLES, "engine")
+            state.declare(decode_state(std.with_state(), "test"), "profile")
+            ghosted = window.pop("ghosted", False)
+            if ghosted:
+                state.set(("std", "ghosted", "pad"), True)
+            if window:
+                state.set(("windows", "pad"), window)
+            return [item["action"] for item in windows.corner_toggle(state.view(), "pad")]
 
-        ghosted = {"std": {"ghosted": {"pad": True}}, "windows": {"pad": {"visible": True, "configured_opacity": 0.85}}}
-        self.assertEqual(run(ghosted), ["window.set_opacity", "window.unblock_input", "state.set", "window.show"])
-        self.assertEqual(run({"windows": {"pad": {"minimized": True, "visible": True}}}), ["window.show"])
-        self.assertEqual(run({"windows": {"pad": {"visible": True}}}), ["window.hide"])
-        self.assertEqual(run({}), ["window.show"])
+        self.assertEqual(run(visible=True, ghosted=True), ["state.set", "window.show"])
+        self.assertEqual(run(visible=True, minimized=True), ["window.show"])
+        self.assertEqual(run(visible=True), ["window.hide"])
+        self.assertEqual(run(), ["window.show"])
 
 
 class PromptTests(unittest.TestCase):
@@ -315,7 +321,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(widgets["quit:yes"].objectName(), "confirmAcceptButton")
         self.assertEqual(answers, ["quit:no"])
         self.assertFalse(profile.window("quit").show_on_start)
-        self.assertEqual(profile.window("quit").minimum_size, (500, 200))
+        self.assertEqual(profile.window("quit").values.initial.minimum_size, (500, 200))
 
 
 if __name__ == "__main__":

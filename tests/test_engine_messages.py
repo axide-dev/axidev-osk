@@ -45,6 +45,7 @@ class Harness:
             attachment_kinds={},
             functions=self.engine.functions,
             check_profile=self.engine.profile.check,
+            load_state=self.engine.profile.load_state,
         )
         root = {
             "active_profile": "p",
@@ -67,12 +68,17 @@ class Harness:
 
 
 class _ProbeKind:
-    properties: dict[str, object] = {}
     callbacks: dict[str, str] = {}
     has_children = False
     widget_properties: frozenset[str] = frozenset()
 
+    def decode_structure(self, reader: object) -> None:
+        return None
+
     def decode_options(self, reader: object) -> None:
+        return None
+
+    def decode_child_placement(self, reader: object) -> None:
         return None
 
 
@@ -132,15 +138,16 @@ class ObservationTests(unittest.TestCase):
                 "pad",
                 visible=True,
                 minimized=False,
-                opacity=0.01,
-                configured_opacity=0.85,
-                input_blocked=True,
+                x=10,
+                y=20,
+                width=300,
+                height=120,
             )
         )
 
         self.assertEqual(
             harness.engine.profile.state.get(("windows", "pad")),
-            {"visible": True, "minimized": False, "opacity": 0.01, "configured_opacity": 0.85, "input_blocked": True},
+            {"visible": True, "minimized": False, "position": {"x": 10, "y": 20}, "size": {"width": 300, "height": 120}},
         )
 
 

@@ -21,7 +21,6 @@ from .decoding import (
     non_empty_string_value,
     number_value,
     require_keys,
-    string_list_value,
     string_value,
     validated_action,
     validated_event,
@@ -46,13 +45,10 @@ APP_QUIT = "app.quit"
 LINUX_OPEN_PERMISSION_SETUP = "linux.open_permission_setup"
 SECURE_INPUT_PANEL_PREPARE = "secure_input_panel.prepare"
 SECURE_INPUT_PANEL_RELEASE = "secure_input_panel.release"
-WINDOW_BLOCK_INPUT = "window.block_input"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
 WINDOW_MOVE_BY = "window.move_by"
-WINDOW_SET_OPACITY = "window.set_opacity"
 WINDOW_SHOW = "window.show"
-WINDOW_UNBLOCK_INPUT = "window.unblock_input"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,18 +80,6 @@ class AppQuitArguments:
 @dataclass(frozen=True, slots=True)
 class WindowArguments:
     window_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class WindowOpacityArguments:
-    window_id: str
-    opacity: float
-
-
-@dataclass(frozen=True, slots=True)
-class WindowBlockInputArguments:
-    window_id: str
-    allowed_node_ids: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,26 +157,6 @@ def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
     return validated_action(WINDOW_MOVE_BY, {"window": window_id, "dx": dx, "dy": dy}, decode_window_move_by)
 
 
-def window_set_opacity(window_id: str, opacity: float) -> RuntimeAction:
-    return validated_action(
-        WINDOW_SET_OPACITY,
-        {"window": window_id, "opacity": opacity},
-        decode_window_set_opacity,
-    )
-
-
-def window_block_input(window_id: str, allowed_node_ids: list[str] | None = None) -> RuntimeAction:
-    return validated_action(
-        WINDOW_BLOCK_INPUT,
-        {"window": window_id, "except": list(allowed_node_ids or [])},
-        decode_window_block_input,
-    )
-
-
-def window_unblock_input(window_id: str) -> RuntimeAction:
-    return validated_action(WINDOW_UNBLOCK_INPUT, {"window": window_id}, decode_window)
-
-
 def secure_input_panel_prepare() -> RuntimeAction:
     return validated_action(SECURE_INPUT_PANEL_PREPARE, {}, decode_empty)
 
@@ -229,22 +193,6 @@ def decode_app_quit(arguments: DataMap) -> AppQuitArguments:
 def decode_window(arguments: DataMap) -> WindowArguments:
     require_keys(arguments, ("window",))
     return WindowArguments(window_id=non_empty_string_value(arguments, "window"))
-
-
-def decode_window_set_opacity(arguments: DataMap) -> WindowOpacityArguments:
-    require_keys(arguments, ("window", "opacity"))
-    opacity = number_value(arguments, "opacity")
-    if not 0.0 <= opacity <= 1.0:
-        raise ValueError("Argument 'opacity' must be between 0.0 and 1.0")
-    return WindowOpacityArguments(window_id=non_empty_string_value(arguments, "window"), opacity=opacity)
-
-
-def decode_window_block_input(arguments: DataMap) -> WindowBlockInputArguments:
-    require_keys(arguments, ("window",), optional=("except",))
-    return WindowBlockInputArguments(
-        window_id=non_empty_string_value(arguments, "window"),
-        allowed_node_ids=frozenset(string_list_value(arguments, "except")) if "except" in arguments else frozenset(),
-    )
 
 
 def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:

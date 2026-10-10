@@ -6,7 +6,6 @@ import unittest
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent
 from axidev_osk.runtime.app_messages import window_move_by, window_show
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments, Dispatcher
-from axidev_osk.runtime.state import StateTree
 
 
 def _identity(arguments: DataMap) -> DataMap:
@@ -218,19 +217,6 @@ class RuntimeMessageTests(unittest.TestCase):
             window_show("")
         with self.assertRaisesRegex(TypeError, "must be an integer"):
             window_move_by("window:keyboard", 1.5, 0)  # type: ignore[arg-type]
-
-    def test_state_tree_copies_values_on_write_and_read(self) -> None:
-        state = StateTree()
-        source = {"nested": [1]}
-
-        state.set(("test", "value"), source)
-        source["nested"].append(2)
-        stored = state.get(("test", "value"))
-        self.assertEqual(stored, {"nested": [1]})
-
-        assert isinstance(stored, dict)
-        stored["nested"].append(3)
-        self.assertEqual(state.get(("test", "value")), {"nested": [1]})
 
     def test_event_handler_failure_skips_remaining_handlers_but_continues_queue(self) -> None:
         dispatcher = Dispatcher()

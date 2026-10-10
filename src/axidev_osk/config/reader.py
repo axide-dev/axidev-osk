@@ -4,6 +4,11 @@ Profiles are plain data plus functions, the same shape a Lua table produces.
 ``ConfigReader`` reads one map, reports errors with the full config path, and
 rejects keys the decoder did not consume so typos fail loudly. A key set to
 ``None`` counts as absent, the way a Lua table has no key set to ``nil``.
+
+A value field may be given as a binding ``fn(state) -> value``. A reader with a
+resolver evaluates such a function and checks its result like a plain value; a
+reader without one is reading fixed fields (IDs, kinds, references, children,
+placements) and rejects a function there.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from collections.abc import Callable, Mapping
 from typing import TypeVar
 
 from ..function_registry import FunctionRef, FunctionRegistry
-from ..messages import DataMap, DataValue, copy_data_value
+from ..messages import DataMap, copy_data_value
 
 T = TypeVar("T")
 
@@ -26,14 +31,22 @@ class ConfigError(ValueError):
     """A profile config value is missing, malformed, or unknown."""
 
 
-Bindable = DataValue | FunctionRef
-"""A node property given either as a plain value or as a binding function."""
+Resolver = Callable[[Callable[..., object], str], object]
+"""Evaluate one binding function found at a config path and return its plain value."""
 
 
 class ConfigReader:
     """Read typed fields from one config map at a known path."""
 
-    def __init__(self, data: object, path: str, functions: FunctionRegistry) -> None:
+    def __init__(
+        self,
+        data: object,
+        path: str,
+        functions: FunctionRegistry,
+        resolver: Resolver | None = None,
+        *,
+        consumed: set[str] | None = None,
+    ) -> None:
         if not isinstance(data, Mapping):
             raise ConfigError(f"{path} must be a map, got {type(data).__name__}")
         for key in data:
@@ -42,7 +55,18 @@ class ConfigReader:
         self._data: Mapping[str, object] = data
         self._path = path
         self._functions = functions
-        self._consumed: set[str] = set()
+        self._resolver = resolver
+        self._consumed: set[str] = consumed if consumed is not None else set()
+
+    def live(self, resolver: Resolver) -> "ConfigReader":
+        """Read this map's value fields through ``resolver``, counting them as read by this reader too."""
+
+        return ConfigReader(self._data, self._path, self._functions, resolver, consumed=self._consumed)
+
+    def fresh(self, resolver: Resolver) -> "ConfigReader":
+        """Read this map again from scratch through ``resolver``, as a binding re-run does."""
+
+        return ConfigReader(self._data, self._path, self._functions, resolver)
 
     @property
     def path(self) -> str:
@@ -55,8 +79,14 @@ class ConfigReader:
         return self._data.get(key) is not None
 
     def raw(self, key: str, default: object = _MISSING) -> object:
+        """Return a field as written, evaluating a binding function when this reader has a resolver."""
+
         self._consumed.add(key)
         value = self._data.get(key)
+        if callable(value):
+            if self._resolver is None:
+                raise ConfigError(f"{self.field_path(key)} is fixed and cannot be a function")
+            value = self._resolver(value, self.field_path(key))
         if value is not None:
             return value
         if default is _MISSING:
@@ -149,23 +179,15 @@ class ConfigReader:
         return tuple(value)
 
     def optional_function(self, key: str) -> FunctionRef | None:
-        value = self.raw(key, None)
+        """Read a callback field; its function is registered, never evaluated."""
+
+        self._consumed.add(key)
+        value = self._data.get(key)
         if value is None:
             return None
         if not callable(value):
             raise ConfigError(f"{self.field_path(key)} must be a function")
         return self._functions.register(value)
-
-    def bindable(self, key: str, default: DataValue | object = _MISSING) -> Bindable:
-        """Read a plain value or a binding function ``fn(state) -> value``."""
-
-        value = self.raw(key, default)
-        if callable(value):
-            return self._functions.register(value)
-        try:
-            return copy_data_value(value, path=self.field_path(key))
-        except (TypeError, ValueError) as exc:
-            raise ConfigError(f"{exc}; a property must be plain data or a function") from exc
 
     def string_list(self, key: str, default: list[str] | object = _MISSING) -> tuple[str, ...]:
         value = self.raw(key, default)
@@ -174,13 +196,13 @@ class ConfigReader:
         return tuple(value)
 
     def child(self, key: str) -> "ConfigReader":
-        return ConfigReader(self.raw(key), self.field_path(key), self._functions)
+        return ConfigReader(self.raw(key), self.field_path(key), self._functions, self._resolver)
 
     def optional_child(self, key: str) -> "ConfigReader | None":
         value = self.raw(key, None)
         if value is None:
             return None
-        return ConfigReader(value, self.field_path(key), self._functions)
+        return ConfigReader(value, self.field_path(key), self._functions, self._resolver)
 
     def children(self, key: str, default: object = _MISSING) -> list["ConfigReader"]:
         """Read a list of maps, skipping ``None`` items as a Lua array has no ``nil`` entries."""
@@ -189,7 +211,7 @@ class ConfigReader:
         if not isinstance(value, list):
             raise ConfigError(f"{self.field_path(key)} must be a list")
         return [
-            ConfigReader(item, f"{self.field_path(key)}[{index}]", self._functions)
+            ConfigReader(item, f"{self.field_path(key)}[{index}]", self._functions, self._resolver)
             for index, item in enumerate(value)
             if item is not None
         ]

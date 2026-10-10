@@ -25,27 +25,32 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 
 from ..function_registry import FunctionRef, FunctionRegistry
-from ..messages import DataMap, DataValue
+from ..messages import DataMap
 from .models import AlwaysOnTopWindowConfig, ChromeConfig, OverlayConfig, OverlayPlacement
-from .reader import Bindable, ConfigError, ConfigReader
+from .reader import ConfigError, ConfigReader, Resolver
+from .variables import StatePath, Variable, VariableError, decode_state
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
-class PropertySpec:
-    """One bindable node property and the plain type its values must have."""
+class Live(Generic[T]):
+    """Values that may follow state: what they decoded to at load, and how to decode them again.
 
-    value_type: type | tuple[type, ...]
-    default: DataValue = None
+    ``initial`` comes from the profile's default state. ``decode`` re-reads the
+    same config map through a resolver over current state; it raises when a
+    binding fails or its result is invalid, so the caller keeps its last value.
+    """
+
+    initial: T
+    decode: Callable[[Resolver], T]
 
 
 class NodeKindSpec(Protocol):
     """What the profile decoder needs to know about one node kind."""
-
-    @property
-    def properties(self) -> Mapping[str, PropertySpec]: ...
 
     @property
     def callbacks(self) -> Mapping[str, str]:
@@ -60,7 +65,13 @@ class NodeKindSpec(Protocol):
         """Widget properties the kind sets itself, which a profile style cannot set."""
         ...
 
-    def decode_options(self, reader: ConfigReader, /) -> object: ...
+    def decode_structure(self, reader: ConfigReader, /) -> object:
+        """Read the kind's fixed fields, such as a box's ``direction``."""
+        ...
+
+    def decode_options(self, reader: ConfigReader, /) -> object:
+        """Read the kind's values; any of them may be a binding."""
+        ...
 
     def decode_child_placement(self, reader: ConfigReader, /) -> object:
         """Read the fields this kind places its children with, such as a grid ``cell``."""
@@ -71,10 +82,16 @@ PlacementDecoder = Callable[[ConfigReader], object]
 
 
 class AttachmentKindSpec(Protocol):
+    def decode_target(self, reader: ConfigReader, /) -> str | None:
+        """Read the fixed window the attachment acts on, or ``None`` for a screen-wide one."""
+        ...
+
     def decode_options(self, reader: ConfigReader, /) -> object: ...
 
 
-ENGINE_WIDGET_PROPERTIES = frozenset({"componentType", "componentId", "classes", "pointerLocatorEnabled"})
+ENGINE_WIDGET_PROPERTIES = frozenset(
+    {"componentType", "componentId", "classes", "pointerLocatorEnabled", "passesInputBlock"}
+)
 """Widget properties the engine sets on windows and nodes, which a profile style cannot set."""
 
 
@@ -87,22 +104,37 @@ class StyleConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class NodeValues:
+    """A node's values: its kind's options and its style hooks."""
+
+    options: object
+    style: StyleConfig
+
+
+@dataclass(frozen=True, slots=True)
 class NodeConfig:
     """One decoded node.
 
-    Kind-specific settings live in ``options``. ``placement`` holds what the
-    parent kind decoded for this child, such as a grid cell; it is ``None``
-    for a window's content.
+    ``values`` holds everything that may follow state. ``structure`` holds the
+    kind's fixed fields. ``placement`` holds what the parent kind decoded for
+    this child, such as a grid cell; it is ``None`` for a window's content.
+    ``passes_input_block`` lets the node take clicks while its window blocks input.
     """
 
     kind: str
     id: str
-    style: StyleConfig
-    options: object
-    bindings: Mapping[str, Bindable]
+    values: Live[NodeValues]
     callbacks: Mapping[str, FunctionRef]
     children: tuple["NodeConfig", ...] = ()
+    structure: object = None
     placement: object = None
+    passes_input_block: bool = False
+
+    @property
+    def options(self) -> object:
+        """The kind's options as decoded from default state."""
+
+        return self.values.initial.options
 
     def walk(self) -> "list[NodeConfig]":
         nodes: list[NodeConfig] = [self]
@@ -112,31 +144,45 @@ class NodeConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class WindowConfig:
-    """One decoded window; ``_decode_window`` owns every default.
+class WindowValues:
+    """A window's values, any of which may follow state.
 
     ``default_close`` keeps the engine's close rule for this window: closing it
     closes it, and closing the last visible window asks to quit. A profile
     turns it off for a window whose close it handles itself.
+    ``input_blocked`` ignores clicks except on nodes with ``passes_input_block``.
     """
 
-    id: str
     title: str
-    content: NodeConfig
-    style: StyleConfig
     opacity: float
+    minimum_size: tuple[int, int]
+    default_close: bool
+    input_blocked: bool
+    style: StyleConfig
+
+
+@dataclass(frozen=True, slots=True)
+class WindowConfig:
+    """One decoded window: fixed identity, platform surface, and content, plus its values."""
+
+    id: str
+    content: NodeConfig
     show_on_start: bool
     overlay: OverlayConfig
     chrome: ChromeConfig
-    minimum_size: tuple[int, int]
-    default_close: bool
+    values: Live[WindowValues]
 
 
 @dataclass(frozen=True, slots=True)
 class AttachmentConfig:
     kind: str
     id: str
-    options: object
+    target: str | None
+    values: Live[object]
+
+    @property
+    def options(self) -> object:
+        return self.values.initial
 
 
 PALETTE_ROLES = frozenset(
@@ -178,9 +224,17 @@ class ThemeConfig:
 
 @dataclass(frozen=True, slots=True)
 class ProfileConfig:
+    """One decoded profile.
+
+    ``state`` holds the profile's own variable declarations, which reset when
+    it starts. ``shared`` holds the root config's declarations, which every
+    profile shares and which survive a profile switch.
+    """
+
     id: str
-    state: DataMap
-    theme: ThemeConfig
+    state: Mapping[StatePath, Variable]
+    shared: Mapping[StatePath, Variable]
+    theme: Live[ThemeConfig]
     windows: tuple[WindowConfig, ...]
     attachments: tuple[AttachmentConfig, ...]
     on: Mapping[str, tuple[FunctionRef, ...]]
@@ -198,6 +252,9 @@ class ProfileConfig:
 ProfileCheck = Callable[[ProfileConfig, str], None]
 """Engine checks a decoded profile must pass, given the profile and its config path."""
 
+LoadState = Callable[[Mapping[StatePath, Variable], Mapping[StatePath, Variable]], Resolver]
+"""Build a resolver over default state for a profile's shared and own declarations, raising on overlaps."""
+
 
 class ConfigDecoder:
     """Decode root config data with registered node and attachment kinds."""
@@ -209,11 +266,13 @@ class ConfigDecoder:
         attachment_kinds: Mapping[str, AttachmentKindSpec],
         functions: FunctionRegistry,
         check_profile: ProfileCheck,
+        load_state: LoadState,
     ) -> None:
         self._node_kinds = node_kinds
         self._attachment_kinds = attachment_kinds
         self._functions = functions
         self._check_profile = check_profile
+        self._load_state = load_state
 
     def decode_root(self, data: object) -> ProfileConfig:
         """Validate every profile in a root config and return the active one."""
@@ -221,27 +280,39 @@ class ConfigDecoder:
         reader = ConfigReader(data, "config", self._functions)
         active = reader.string("active_profile")
         profiles = reader.items("profiles")
+        shared = _declarations(reader.raw("state", {}), "config.state")
         reader.finish()
         decoded: dict[str, ProfileConfig] = {}
         for name, value in profiles:
             profile_reader = ConfigReader(value, _profile_path(name), self._functions)
-            decoded[name] = profile_reader.decode(lambda profile_data, name=name: self._decode_profile(name, profile_data))
+            decoded[name] = profile_reader.decode(
+                lambda profile_data, name=name: self._decode_profile(name, profile_data, shared)
+            )
         if active not in decoded:
             raise ConfigError(f"config.active_profile names unknown profile {active!r}")
         return decoded[active]
 
-    def decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None = None) -> NodeConfig:
-        """Decode one node; ``placement`` reads the fields its parent kind places it with."""
-
-        return reader.decode(lambda node: self._decode_node(node, placement))
-
-    def _decode_profile(self, profile_id: str, reader: ConfigReader) -> ProfileConfig:
-        state = reader.data_map("state", {})
+    def _decode_profile(
+        self,
+        profile_id: str,
+        reader: ConfigReader,
+        shared: Mapping[StatePath, Variable],
+    ) -> ProfileConfig:
+        state = _declarations(reader.raw("state", {}), reader.field_path("state"))
+        try:
+            resolver = self._load_state(shared, state)
+        except VariableError as exc:
+            raise ConfigError(f"{reader.field_path('state')}: {exc}") from exc
         theme_reader = reader.optional_child("theme")
-        theme = theme_reader.decode(_decode_theme) if theme_reader is not None else ThemeConfig()
-        windows = tuple(child.decode(self._decode_window) for child in reader.children("windows"))
+        if theme_reader is not None:
+            theme = _live(theme_reader, resolver, _decode_theme)
+            theme_reader.finish()
+        else:
+            theme = Live(ThemeConfig(), lambda _resolver: ThemeConfig())
+        windows = tuple(child.decode(lambda window: self._decode_window(window, resolver)) for child in reader.children("windows"))
         attachments = tuple(
-            child.decode(self._decode_attachment) for child in reader.children("attachments", [])
+            child.decode(lambda attachment: self._decode_attachment(attachment, resolver))
+            for child in reader.children("attachments", [])
         )
         on: dict[str, tuple[FunctionRef, ...]] = {}
         for event_name, value in reader.items("on", {}):
@@ -255,6 +326,7 @@ class ConfigDecoder:
         profile = ProfileConfig(
             id=profile_id,
             state=state,
+            shared=shared,
             theme=theme,
             windows=windows,
             attachments=attachments,
@@ -266,38 +338,34 @@ class ConfigDecoder:
         self._check_profile(profile, reader.path)
         return profile
 
-    def _decode_window(self, reader: ConfigReader) -> WindowConfig:
+    def _decode_window(self, reader: ConfigReader, resolver: Resolver) -> WindowConfig:
         overlay_reader = reader.optional_child("overlay")
         overlay = overlay_reader.decode(_decode_overlay) if overlay_reader is not None else OverlayConfig()
         chrome_reader = reader.optional_child("chrome")
         chrome = chrome_reader.decode(_decode_chrome) if chrome_reader is not None else ChromeConfig()
         return WindowConfig(
             id=reader.string("id"),
-            title=reader.string("title"),
-            content=self.decode_node(reader.child("content")),
-            style=_decode_style(reader),
-            opacity=reader.number("opacity", 1.0, minimum=0.0, maximum=1.0),
+            content=self._decode_node(reader.child("content"), None, resolver),
             show_on_start=reader.boolean("show_on_start", False),
             overlay=overlay,
             chrome=chrome,
-            minimum_size=_pair(reader.integer_list("minimum_size", (0, 0), shape="[width, height] in pixels")),
-            default_close=reader.boolean("default_close", True),
+            values=_live(reader, resolver, _decode_window_values),
         )
 
-    def _decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None) -> NodeConfig:
+    def _decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None, resolver: Resolver) -> NodeConfig:
+        return reader.decode(lambda node: self._decode_node_fields(node, placement, resolver))
+
+    def _decode_node_fields(
+        self,
+        reader: ConfigReader,
+        placement: PlacementDecoder | None,
+        resolver: Resolver,
+    ) -> NodeConfig:
         kind_name = reader.string("kind")
         kind = self._node_kinds.get(kind_name)
         if kind is None:
             raise ConfigError(f"{reader.field_path('kind')} names unknown node kind {kind_name!r}")
         node_id = reader.string("id")
-        bindings: dict[str, Bindable] = {}
-        for name, spec in kind.properties.items():
-            if not reader.has(name):
-                continue
-            value = reader.bindable(name)
-            if not isinstance(value, FunctionRef) and not isinstance(value, spec.value_type):
-                raise ConfigError(f"{reader.field_path(name)} has the wrong type for a {kind_name} node")
-            bindings[name] = value
         callbacks: dict[str, FunctionRef] = {}
         for field_name, event_name in kind.callbacks.items():
             ref = reader.optional_function(field_name)
@@ -306,25 +374,63 @@ class ConfigDecoder:
         children: tuple[NodeConfig, ...] = ()
         if kind.has_children:
             children = tuple(
-                self.decode_node(child, kind.decode_child_placement) for child in reader.children("children", [])
+                self._decode_node(child, kind.decode_child_placement, resolver)
+                for child in reader.children("children", [])
             )
+        reserved = ENGINE_WIDGET_PROPERTIES | kind.widget_properties
+        structure = kind.decode_structure(reader)
+        # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
+        child_placement = placement(reader) if placement is not None else None
         return NodeConfig(
             kind=kind_name,
             id=node_id,
-            style=_decode_style(reader, ENGINE_WIDGET_PROPERTIES | kind.widget_properties),
-            options=kind.decode_options(reader),
-            bindings=bindings,
+            values=_live(
+                reader,
+                resolver,
+                lambda values: NodeValues(options=kind.decode_options(values), style=_decode_style(values, reserved)),
+            ),
             callbacks=callbacks,
             children=children,
-            placement=placement(reader) if placement is not None else None,
+            structure=structure,
+            placement=child_placement,
+            passes_input_block=reader.boolean("passes_input_block", False),
         )
 
-    def _decode_attachment(self, reader: ConfigReader) -> AttachmentConfig:
+    def _decode_attachment(self, reader: ConfigReader, resolver: Resolver) -> AttachmentConfig:
         kind_name = reader.string("kind")
         kind = self._attachment_kinds.get(kind_name)
         if kind is None:
             raise ConfigError(f"{reader.field_path('kind')} names unknown attachment kind {kind_name!r}")
-        return AttachmentConfig(kind=kind_name, id=reader.string("id"), options=kind.decode_options(reader))
+        return AttachmentConfig(
+            kind=kind_name,
+            id=reader.string("id"),
+            target=kind.decode_target(reader),
+            values=_live(reader, resolver, kind.decode_options),
+        )
+
+
+def _live(reader: ConfigReader, resolver: Resolver, decode: Callable[[ConfigReader], T]) -> Live[T]:
+    """Decode values once from default state and keep how to decode them again."""
+
+    return Live(initial=decode(reader.live(resolver)), decode=lambda current: decode(reader.fresh(current)))
+
+
+def _declarations(data: object, path: str) -> dict[StatePath, Variable]:
+    try:
+        return decode_state(data, path)
+    except VariableError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _decode_window_values(reader: ConfigReader) -> WindowValues:
+    return WindowValues(
+        title=reader.string("title"),
+        opacity=reader.number("opacity", 1.0, minimum=0.0, maximum=1.0),
+        minimum_size=_pair(reader.integer_list("minimum_size", (0, 0), shape="[width, height] in pixels")),
+        default_close=reader.boolean("default_close", True),
+        input_blocked=reader.boolean("input_blocked", False),
+        style=_decode_style(reader),
+    )
 
 
 def _decode_theme(reader: ConfigReader) -> ThemeConfig:

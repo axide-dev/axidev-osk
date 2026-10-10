@@ -15,16 +15,11 @@ from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import (
     APP_QUIT,
     LINUX_OPEN_PERMISSION_SETUP,
-    WINDOW_BLOCK_INPUT,
     WINDOW_CLOSE,
     WINDOW_HIDE,
-    WINDOW_SET_OPACITY,
     WINDOW_SHOW,
-    WINDOW_UNBLOCK_INPUT,
     decode_app_quit,
     decode_window,
-    decode_window_block_input,
-    decode_window_set_opacity,
 )
 from axidev_osk.runtime.decoding import decode_empty
 from axidev_osk.runtime.context import Context
@@ -36,9 +31,6 @@ _APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
     WINDOW_SHOW: decode_window,
     WINDOW_HIDE: decode_window,
     WINDOW_CLOSE: decode_window,
-    WINDOW_SET_OPACITY: decode_window_set_opacity,
-    WINDOW_BLOCK_INPUT: decode_window_block_input,
-    WINDOW_UNBLOCK_INPUT: decode_window,
     APP_QUIT: decode_app_quit,
     LINUX_OPEN_PERMISSION_SETUP: decode_empty,
 }
@@ -123,6 +115,9 @@ class FakeOverlay:
 
     def handle_show(self) -> bool:
         return True
+
+    def position(self) -> tuple[int, int]:
+        return (0, 0)
 
     def move_by(self, dx: int, dy: int) -> None:
         del dx, dy

@@ -73,9 +73,13 @@ Each decision below was made by the project owner. Do not reopen one without a n
 - A variable is declared in place inside a nested `state` map with `osk.var(type, default)`, which builds `{"var": type, "default": value}`.
 - Types: `boolean`, `integer`, `number`, `string`, list of X, map of X, and record (named, typed fields). Integer and number stay distinct, as in Lua 5.3 and later.
 - The engine declares the values it observes as typed, read-only variables, replacing bare `declare_root`. Profiles cannot set them.
-- The standard library declares its own variables under `std`, for example `std.latches` and `std.ghosted` as maps of booleans.
+- The standard library declares its own variables under `std`, for example `std.latched` as a map of strings and `std.ghosted` as a map of booleans. A profile adds them with `std.with_state`.
 - Ghost sets `std.ghosted.<window>`, and the window's `opacity` and input block follow it through bindings. `std.windows.on_window_state` is no longer needed because a rebuilt window re-applies its bindings.
 - The default profile declares its opacity and all dwell options in the root `state` and binds the keyboard window and the dwell attachment to them.
+- When a state path a record read changes, the whole record (a node's options and style, a window's values, an attachment's options, or the theme) decodes again, and only the fields that differ are applied.
+- At load, every binding runs once against the default state, so a binding that reads an undeclared path or returns an invalid value rejects the config with its config path.
+- A window that blocks input still lets clicks reach nodes marked `passes_input_block`, such as the Ghost button.
+- A window's `overlay` and `chrome` are fixed as well, because changing either means rebuilding the platform surface.
 
 ### Engine Building Blocks
 
@@ -113,7 +117,7 @@ Events:
 - `process.exited {tag, code, error}`, where `error` is present only when the program could not run.
 - `window.drag_started`, `window.drag_ended`, `pointer.motion_observed`.
 - `app.activated`, `linux.permission_setup_opened`.
-- `window.state_changed {window, visible, minimized, opacity, configured_opacity, input_blocked}`.
+- `window.state_changed {window, visible, minimized, x, y, width, height}`.
 
 Observed state, written by the runtime and read-only to profiles:
 
@@ -170,7 +174,7 @@ Each step keeps the full test suite, flake8, and pyright passing.
 - [x] 5. Default profile on `osk.std` with parity tests. The app does not load it yet.
 - [x] 6. Attachments (dwell, pointer locator, hot corners, secure input panel) take references and options, each tested on its own.
 - [x] 7. Switch the app to the default profile in one step: quit flow, prompts, permission flow, and lock-screen panel. Delete dead engine code. Rewrite `AGENTS.md` to explain the architecture with practical guides for adding node kinds, attachments, actions, events, library helpers, and profiles.
-- [ ] 8. State registry: typed declarations with `osk.var`, root and profile lifetimes, strict writes and reads, `None` as reset, engine-observed variables, bindings for every value option, removal of the setter actions and redundant observations, and the default profile's settings as root variables. Update `AGENTS.md` and the parity data in `tests/test_default_profile.py` in the same step.
+- [x] 8. State registry: typed declarations with `osk.var`, root and profile lifetimes, strict writes and reads, `None` as reset, engine-observed variables, bindings for every value option, removal of the setter actions and redundant observations, and the default profile's settings as root variables. Update `AGENTS.md` and the parity data in `tests/test_default_profile.py` in the same step.
 
 ## After This PR
 

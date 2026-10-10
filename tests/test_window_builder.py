@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import unittest
 from typing import Any
 from unittest.mock import Mock, patch
@@ -9,10 +8,10 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import QLabel, QPushButton
 
-from axidev_osk.attachments.runtime import AttachmentRuntime, dwell_set_enabled
+from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.models import ChromeConfig, OverlayConfig
-from axidev_osk.config.profile import ProfileConfig
+from axidev_osk.config.profile import Live, ProfileConfig, StyleConfig, WindowValues
 from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.app_messages import (
     WINDOW_CLOSE_REQUESTED,
@@ -21,6 +20,7 @@ from axidev_osk.runtime.app_messages import (
     WindowArguments,
 )
 from axidev_osk.runtime.context import Context
+from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
@@ -30,7 +30,12 @@ from support import FakeOverlay, RecordingBackend, qt_app
 _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
 
 
-def _root(attachments: list[osk.Map] | None = None, windows: tuple[str, ...] = ("pad",), **window_fields: Any) -> osk.Map:
+def _root(
+    attachments: list[osk.Map] | None = None,
+    windows: tuple[str, ...] = ("pad",),
+    state: osk.Map | None = None,
+    **window_fields: Any,
+) -> osk.Map:
     return osk.config(
         active_profile="p",
         profiles={
@@ -52,6 +57,7 @@ def _root(attachments: list[osk.Map] | None = None, windows: tuple[str, ...] = (
                     for window in windows
                 ],
                 attachments=attachments or [],
+                state=state,
             )
         },
     )
@@ -60,16 +66,18 @@ def _root(attachments: list[osk.Map] | None = None, windows: tuple[str, ...] = (
 class WindowHarness:
     """A started profile with its attachment runtime, ready to build windows."""
 
-    def __init__(self, attachments: list[osk.Map] | None = None, windows: tuple[str, ...] = ("pad",), **window_fields: Any) -> None:
+    def __init__(
+        self,
+        attachments: list[osk.Map] | None = None,
+        windows: tuple[str, ...] = ("pad",),
+        state: osk.Map | None = None,
+        **window_fields: Any,
+    ) -> None:
         qt_app()
         self.context: Context = make_test_context(RecordingBackend())
         self.built: dict[str, RuntimeWindow] = {}
-        self.attachments = AttachmentRuntime(
-            self.context.dispatcher,
-            self.context.engine.profile,
-            window_lookup=self.built.get,
-        )
-        self.profile: ProfileConfig = start_test_profile(self.context, _root(attachments, windows, **window_fields))
+        self.attachments = AttachmentRuntime(self.context.engine.bindings, window_lookup=self.built.get)
+        self.profile: ProfileConfig = start_test_profile(self.context, _root(attachments, windows, state, **window_fields))
         self.attachments.start(self.profile)
 
     def build(self, window_id: str = "pad", overlay: object | None = None) -> RuntimeWindow:
@@ -129,6 +137,9 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         qt_app()
         context = make_test_context(RecordingBackend())
         overlay = Mock()
+        values = WindowValues(
+            title="Pad", opacity=1.0, minimum_size=(0, 0), default_close=True, input_blocked=False, style=StyleConfig()
+        )
 
         with (
             patch(_CONFIGURE_OVERLAY, return_value=overlay),
@@ -136,11 +147,9 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         ):
             RuntimeWindow(
                 window_id="pad",
-                title="Pad",
                 overlay=OverlayConfig(),
                 chrome=ChromeConfig(),
-                opacity=1.0,
-                minimum_size=(0, 0),
+                values=Live(values, lambda _resolver: values),
                 build_content=Mock(side_effect=RuntimeError("content failed")),
                 context=context,
             )
@@ -341,12 +350,6 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertTrue(window.centralWidget().property("pointerLocatorEnabled"))
         self.assertIsNone(other.findChild(PointerLocator, "pointerLocator"))
 
-    def test_runtime_window_has_no_pointer_locator_branch(self) -> None:
-        source = inspect.getsource(RuntimeWindow.__init__)
-
-        self.assertNotIn("PointerLocator", source)
-        self.assertNotIn("pointerLocatorEnabled", source)
-
     def test_window_uses_configured_overlay_placement(self) -> None:
         harness = WindowHarness(overlay={"placement": "center"})
 
@@ -376,7 +379,6 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         window = WindowHarness(opacity=0.85).build()
         self.addCleanup(window.deleteLater)
 
-        self.assertAlmostEqual(window.configured_opacity, 0.85)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
 
     def test_runtime_window_can_hide_and_restore_custom_close_control(self) -> None:
@@ -462,24 +464,44 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         window.show()
         self.assertEqual((state.get(("windows", "pad", "visible")), state.get(("windows", "pad", "minimized"))), (True, False))
 
+        self.assertEqual(
+            state.get(("windows", "pad", "size")),
+            {"width": window.width(), "height": window.height()},
+        )
+
         window.hide()
         self.assertIs(state.get(("windows", "pad", "visible")), False)
 
-    def test_opacity_and_input_block_are_reported_as_window_state(self) -> None:
-        harness = WindowHarness()
+    def test_title_opacity_and_input_block_follow_state(self) -> None:
+        harness = WindowHarness(
+            state={"faded": osk.var("boolean", False), "name": osk.var("string", "Pad")},
+            title=lambda s: s.name,
+            opacity=lambda s: 0.01 if s.faded else 0.85,
+            input_blocked=lambda s: s.faded,
+            content=osk.box(
+                id="pad:root",
+                children=[osk.button(id="pad:a", label="a"), osk.button(id="pad:ghost", label="g", passes_input_block=True)],
+            ),
+        )
         window = harness.build()
         self.addCleanup(window.deleteLater)
-        state = harness.context.engine.profile.state
+        keys = {button.property("componentId"): button for button in window.findChildren(QPushButton)}
+        press = QEvent(QEvent.Type.MouseButtonPress)
+        self.assertIsNone(window._input_blocker)
 
-        window.set_visual_opacity(0.01)
-        window.block_input(frozenset({"pad:a"}))
-        self.assertEqual(
-            [state.get(("windows", "pad", name)) for name in ("opacity", "configured_opacity", "input_blocked")],
-            [0.01, window.configured_opacity, True],
-        )
+        harness.context.dispatcher.dispatch(state_set("faded", True), state_set("name", "Faded"))
 
-        window.unblock_input()
-        self.assertIs(state.get(("windows", "pad", "input_blocked")), False)
+        self.assertEqual(window.windowTitle(), "Faded")
+        self.assertAlmostEqual(window.windowOpacity(), 0.01, delta=0.005)
+        blocker = window._input_blocker
+        assert blocker is not None
+        self.assertTrue(blocker.eventFilter(keys["pad:a"], press))
+        self.assertFalse(blocker.eventFilter(keys["pad:ghost"], press))
+
+        harness.context.dispatcher.dispatch(state_set("faded", False))
+
+        self.assertIsNone(window._input_blocker)
+        self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
 
 
 class RuntimeWindowDwellTests(unittest.TestCase):
@@ -493,23 +515,26 @@ class RuntimeWindowDwellTests(unittest.TestCase):
         self.assertIsNotNone(pad._dwell_click)
         self.assertTrue(pad._dwell_click.enabled)
         self.assertIsNone(other._dwell_click)
-        other.set_dwell_enabled(True)
-        self.assertIsNone(other._dwell_click)
 
-    def test_dwell_set_enabled_reaches_the_built_window(self) -> None:
-        harness = WindowHarness([osk.dwell(id="d", window="pad", enabled=False)])
+    def test_bound_dwell_options_reach_the_built_window(self) -> None:
+        harness = WindowHarness(
+            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
+            state={"dwell_on": osk.var("boolean", False)},
+        )
         window = harness.build()
         self.addCleanup(window.deleteLater)
         self.assertFalse(window._dwell_click.enabled)
 
-        harness.context.dispatcher.dispatch(dwell_set_enabled("d", True))
+        harness.context.dispatcher.dispatch(state_set("dwell_on", True))
 
         self.assertTrue(window._dwell_click.enabled)
 
-    def test_rebuilt_window_restores_current_dwell_state(self) -> None:
-        harness = WindowHarness([osk.dwell(id="d", window="pad", enabled=False)])
-        harness.context.dispatcher.dispatch(dwell_set_enabled("d", True))
-        self.assertIs(harness.context.engine.profile.state.get(("dwell", "d", "enabled")), True)
+    def test_rebuilt_window_starts_from_current_dwell_options(self) -> None:
+        harness = WindowHarness(
+            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
+            state={"dwell_on": osk.var("boolean", False)},
+        )
+        harness.context.dispatcher.dispatch(state_set("dwell_on", True))
 
         window = harness.build()
         self.addCleanup(window.deleteLater)

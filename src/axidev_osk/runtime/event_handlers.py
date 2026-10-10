@@ -15,24 +15,17 @@ from ..messages import MessageResult
 from .app_messages import (
     DISPLAY_CONFIGURATION_CHANGED,
     POINTER_MOTION_OBSERVED,
-    WINDOW_BLOCK_INPUT,
     WINDOW_CLOSE,
     WINDOW_DRAG_ENDED,
     WINDOW_DRAG_STARTED,
     WINDOW_HIDE,
     WINDOW_MOVE_BY,
-    WINDOW_SET_OPACITY,
     WINDOW_SHOW,
-    WINDOW_UNBLOCK_INPUT,
     PointerMotionObservedArguments,
     WindowArguments,
-    WindowBlockInputArguments,
     WindowMoveByArguments,
-    WindowOpacityArguments,
     decode_window,
-    decode_window_block_input,
     decode_window_move_by,
-    decode_window_set_opacity,
     window_move_by,
 )
 from .decoding import EmptyArguments
@@ -58,24 +51,9 @@ def register_window_actions(dispatcher: "Dispatcher", windows: "WindowManager") 
         windows.close(arguments.window_id)
         return []
 
-    def set_opacity(arguments: WindowOpacityArguments) -> MessageResult:
-        windows.set_opacity(arguments.window_id, arguments.opacity)
-        return []
-
-    def block_input(arguments: WindowBlockInputArguments) -> MessageResult:
-        windows.block_input(arguments.window_id, arguments.allowed_node_ids)
-        return []
-
-    def unblock_input(arguments: WindowArguments) -> MessageResult:
-        windows.unblock_input(arguments.window_id)
-        return []
-
     dispatcher.register_action(WINDOW_SHOW, decode_window, show)
     dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
     dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
-    dispatcher.register_action(WINDOW_SET_OPACITY, decode_window_set_opacity, set_opacity)
-    dispatcher.register_action(WINDOW_BLOCK_INPUT, decode_window_block_input, block_input)
-    dispatcher.register_action(WINDOW_UNBLOCK_INPUT, decode_window, unblock_input)
 
 
 def register_display_recovery(

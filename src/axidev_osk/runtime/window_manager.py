@@ -68,27 +68,6 @@ class WindowManager:
             _logger.info("Hiding runtime window %s", window_id)
             window.hide()
 
-    def set_opacity(self, window_id: str, opacity: float) -> None:
-        """Set one built window's visible opacity; a window that was never built keeps its config."""
-
-        window = self._built(window_id)
-        if window is not None:
-            window.set_visual_opacity(opacity)
-
-    def block_input(self, window_id: str, allowed_node_ids: frozenset[str]) -> None:
-        """Ignore pointer input on a built window except inside the allowed nodes."""
-
-        window = self._built(window_id)
-        if window is not None:
-            window.block_input(allowed_node_ids)
-
-    def unblock_input(self, window_id: str) -> None:
-        """Remove a pointer-input block installed by ``block_input``."""
-
-        window = self._built(window_id)
-        if window is not None:
-            window.unblock_input()
-
     def move_by(self, window_id: str, dx: int, dy: int) -> None:
         window = self._built(window_id)
         if window is not None:
@@ -101,7 +80,6 @@ class WindowManager:
             return
         window = self._windows.pop(window_id)
         _logger.info("Closing runtime window %s", window_id)
-        window.unblock_input()
         window.release_platform_resources()
         window.hide()
         window.deleteLater()

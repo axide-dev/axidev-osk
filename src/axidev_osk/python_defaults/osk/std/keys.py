@@ -16,7 +16,8 @@ either key lights both, and tapping the other releases the original press. The
 way.
 
 Profiles route ``keyboard.reset`` to ``on_reset`` (``std.with_handlers`` does it)
-so latches clear when the engine releases every held key.
+so latches clear when the engine releases every held key, and declare these
+variables with ``std.with_state``.
 """
 
 from __future__ import annotations
@@ -29,6 +30,13 @@ from ... import osk
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
 _SIDES = ("Left", "Right")
+
+STATE = {
+    "latched": osk.var(osk.map_of("string")),
+    "one_shot": osk.var(osk.map_of("string")),
+    "held": osk.var(osk.map_of(osk.map_of("string"))),
+}
+"""The library's key variables, merged under ``std`` by ``std.with_state``."""
 
 
 def shift_active(state: Any) -> bool:

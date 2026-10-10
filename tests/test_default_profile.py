@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import unittest
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QGridLayout, QPushButton
 
-from axidev_osk.attachments import DwellOptions, PointerLocatorOptions
 from axidev_osk.attachments.runtime import AttachmentRuntime
+from axidev_osk.config.models import DwellClickConfig, PointerLocatorConfig
 from axidev_osk.messages import RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_default_config
@@ -26,17 +27,10 @@ _MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
 
 
-def _keyboard_report(*, blocked: bool, opacity: float) -> RuntimeEvent:
-    """What the engine reports about the keyboard window once actions on it have run."""
+def _keyboard_shown() -> RuntimeEvent:
+    """What the engine reports once the keyboard window is on screen."""
 
-    return window_state_changed(
-        "keyboard",
-        visible=True,
-        minimized=False,
-        opacity=opacity,
-        configured_opacity=KEYBOARD_OPACITY,
-        input_blocked=blocked,
-    )
+    return window_state_changed("keyboard", visible=True, minimized=False, x=0, y=0, width=900, height=320)
 
 
 class DefaultProfileHarness:
@@ -46,7 +40,7 @@ class DefaultProfileHarness:
         self.context = make_test_context(self.backend)
         self.engine = self.context.engine
         self.actions = record_app_actions(self.context.dispatcher)
-        self.attachments = AttachmentRuntime(self.context.dispatcher, self.engine.profile, window_lookup=lambda _id: None)
+        self.attachments = AttachmentRuntime(self.engine.bindings, window_lookup=lambda _id: None)
         self.profile = start_test_profile(self.context, build_default_config())
         self.attachments.start(self.profile)
         self.window = build_window(test, self.profile.window("keyboard"), self.context)
@@ -113,15 +107,15 @@ class ConfigParityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.profile = make_test_context(RecordingBackend()).engine.decoder().decode_root(build_default_config())
 
-    def _options(self, attachment_id: str) -> object:
-        return next(attachment.options for attachment in self.profile.attachments if attachment.id == attachment_id)
+    def _attachment(self, attachment_id: str) -> tuple[str | None, object]:
+        attachment = next(attachment for attachment in self.profile.attachments if attachment.id == attachment_id)
+        return attachment.target, attachment.options
 
     def test_dwell_starts_disabled_with_the_original_tuning(self) -> None:
-        options = self._options("keyboard-dwell")
-        assert isinstance(options, DwellOptions)
-        settings = options.settings
+        window, settings = self._attachment("keyboard-dwell")
+        assert isinstance(settings, DwellClickConfig)
 
-        self.assertEqual(options.window, "keyboard")
+        self.assertEqual(window, "keyboard")
         self.assertEqual(
             (
                 settings.enabled,
@@ -140,18 +134,18 @@ class ConfigParityTests(unittest.TestCase):
         )
 
     def test_pointer_locator_glows_the_keyboard_with_the_original_settings(self) -> None:
-        options = self._options("keyboard-locator")
-        assert isinstance(options, PointerLocatorOptions)
+        window, settings = self._attachment("keyboard-locator")
+        assert isinstance(settings, PointerLocatorConfig)
 
-        self.assertEqual(options.window, "keyboard")
+        self.assertEqual(window, "keyboard")
         self.assertEqual(
-            (options.settings.radius_percent, options.settings.maximum_opacity_percent, options.settings.radius_standard_deviations),
+            (settings.radius_percent, settings.maximum_opacity_percent, settings.radius_standard_deviations),
             (30, 60, 3),
         )
 
     def test_keyboard_is_translucent_and_prompts_are_opaque(self) -> None:
-        self.assertEqual(self.profile.window("keyboard").opacity, KEYBOARD_OPACITY)
-        self.assertEqual({self.profile.window(window_id).opacity for window_id in _PROMPTS}, {1.0})
+        self.assertEqual(self.profile.window("keyboard").values.initial.opacity, KEYBOARD_OPACITY)
+        self.assertEqual({self.profile.window(window_id).values.initial.opacity for window_id in _PROMPTS}, {1.0})
 
     def test_permission_prompt_has_one_setup_action(self) -> None:
         node_ids = [node.id for node in self.profile.window("permission-prompt").content.walk()]
@@ -160,7 +154,7 @@ class ConfigParityTests(unittest.TestCase):
 
     def test_only_the_keyboard_handles_its_own_close(self) -> None:
         self.assertEqual(
-            [window.id for window in self.profile.windows if not window.default_close],
+            [window.id for window in self.profile.windows if not window.values.initial.default_close],
             ["keyboard"],
         )
 
@@ -213,24 +207,26 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_ghost_fades_and_restores_the_keyboard(self) -> None:
         harness = self.harness
-        harness.press("ghost")
-        harness.emit(_keyboard_report(blocked=True, opacity=GHOST_OPACITY))
-        self.assertFalse(harness.nodes["ghost"].property("latched"))
+        press = QEvent(QEvent.Type.MouseButtonPress)
         harness.press("ghost")
 
-        self.assertEqual(
-            harness.actions,
-            [
-                ("window.block_input", {"window": "keyboard", "except": ["ghost"]}),
-                ("window.set_opacity", {"window": "keyboard", "opacity": GHOST_OPACITY}),
-                ("window.set_opacity", {"window": "keyboard", "opacity": KEYBOARD_OPACITY}),
-                ("window.unblock_input", {"window": "keyboard"}),
-            ],
-        )
+        self.assertIs(harness.engine.profile.state.get(("std", "ghosted", "keyboard")), True)
+        self.assertAlmostEqual(harness.window.windowOpacity(), GHOST_OPACITY, delta=0.005)
+        blocker = harness.window._input_blocker
+        assert blocker is not None
+        self.assertTrue(blocker.eventFilter(harness.nodes["key:A"], press))
+        self.assertFalse(blocker.eventFilter(harness.nodes["ghost"], press))
+        self.assertFalse(harness.nodes["ghost"].property("latched"))
+
+        harness.press("ghost")
+
+        self.assertAlmostEqual(harness.window.windowOpacity(), KEYBOARD_OPACITY, delta=0.005)
+        self.assertIsNone(harness.window._input_blocker)
+        self.assertEqual(harness.actions, [])
 
     def test_dwell_key_toggles_the_dwell_attachment(self) -> None:
         harness = self.harness
-        enabled = ("dwell", "keyboard-dwell", "enabled")
+        enabled = ("settings", "dwell", "enabled")
 
         harness.tap("dwell")
         self.assertIs(harness.engine.profile.state.get(enabled), True)
@@ -242,7 +238,7 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_hot_corner_toggles_the_keyboard(self) -> None:
         harness = self.harness
-        harness.emit(_keyboard_report(blocked=False, opacity=KEYBOARD_OPACITY))
+        harness.emit(_keyboard_shown())
 
         harness.emit(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
 
@@ -273,19 +269,13 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_second_launch_brings_a_ghosted_keyboard_back(self) -> None:
         harness = self.harness
+        harness.emit(_keyboard_shown())
         harness.press("ghost")
-        harness.emit(_keyboard_report(blocked=True, opacity=GHOST_OPACITY))
-        harness.actions.clear()
         harness.emit(RuntimeEvent("app.activated", {}))
 
-        self.assertEqual(
-            harness.actions,
-            [
-                ("window.set_opacity", {"window": "keyboard", "opacity": KEYBOARD_OPACITY}),
-                ("window.unblock_input", {"window": "keyboard"}),
-                ("window.show", {"window": "keyboard"}),
-            ],
-        )
+        self.assertIsNone(harness.engine.profile.state.get(("std", "ghosted", "keyboard")))
+        self.assertAlmostEqual(harness.window.windowOpacity(), KEYBOARD_OPACITY, delta=0.005)
+        self.assertEqual(harness.actions, [("window.show", {"window": "keyboard"})])
 
     def test_permission_flow_offers_terminal_setup(self) -> None:
         harness = self.harness

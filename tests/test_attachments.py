@@ -7,11 +7,12 @@ from unittest.mock import patch
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QGuiApplication
 
-from axidev_osk.attachments.runtime import AttachmentRuntime, dwell_set_enabled
+from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.messages import DataMap
 from axidev_osk.python_defaults import osk
+from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
 from axidev_osk.runtime.testing import make_test_context
 from support import HOT_CORNER_COLORS, RecordingBackend, hot_corner_config, qt_app
 
@@ -39,10 +40,14 @@ class FakeHotCornerOverlay:
 
 class RecordingWindow:
     def __init__(self) -> None:
-        self.dwell: list[bool] = []
+        self.dwell: list[Any] = []
+        self.locators: list[Any] = []
 
-    def set_dwell_enabled(self, enabled: bool) -> None:
-        self.dwell.append(enabled)
+    def set_dwell(self, config: Any) -> None:
+        self.dwell.append(config)
+
+    def set_pointer_locator(self, settings: Any) -> None:
+        self.locators.append(settings)
 
 
 class RecordingHotCorners:
@@ -53,7 +58,7 @@ class RecordingHotCorners:
         self.configured.append((settings, corners))
 
 
-def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> osk.Map:
+def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",), state: osk.Map | None = None) -> osk.Map:
     return osk.config(
         active_profile="p",
         profiles={
@@ -63,28 +68,33 @@ def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> os
                     for window in windows
                 ],
                 attachments=attachments,
+                state=state,
             )
         },
     )
 
 
 class AttachmentHarness:
-    def __init__(self, attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",)) -> None:
+    def __init__(
+        self,
+        attachments: list[osk.Map],
+        windows: tuple[str, ...] = ("pad",),
+        state: osk.Map | None = None,
+    ) -> None:
         qt_app()
         self.context = make_test_context(RecordingBackend())
         self.engine = self.context.engine
         self.windows = {window: RecordingWindow() for window in windows}
         self.hot_corners = RecordingHotCorners()
         self.runtime = AttachmentRuntime(
-            self.context.dispatcher,
-            self.engine.profile,
+            self.engine.bindings,
             window_lookup=self.windows.get,
             hot_corners=self.hot_corners,
         )
-        self.profile = self.engine.decoder().decode_root(_root(attachments, windows))
+        self.profile = self.engine.decoder().decode_root(_root(attachments, windows, state))
         self.engine.profile.start(self.profile)
         self.failures: list[DataMap] = []
-        self.context.dispatcher.add_raw_event_handler("action.failed", lambda event: self.failures.append(event) or [])
+        self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: self.failures.append(event) or [])
 
     def start(self) -> None:
         self.runtime.start(self.profile)
@@ -135,26 +145,36 @@ class AttachmentRuntimeTests(unittest.TestCase):
         self.assertEqual(installed.delay_ms, 300)
         self.assertEqual(harness.hot_corners.configured, [])
 
-    def test_dwell_state_is_seeded_toggled_and_applied_to_its_window(self) -> None:
-        harness = AttachmentHarness([osk.dwell(id="d", window="pad", enabled=True, delay_ms=300)])
+    def test_dwell_options_follow_the_state_they_are_bound_to(self) -> None:
+        harness = AttachmentHarness(
+            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on, delay_ms=lambda s: s.delay)],
+            state={"dwell_on": osk.var("boolean", True), "delay": osk.var("integer", 300)},
+        )
         harness.start()
 
-        self.assertIs(harness.engine.profile.state.get(("dwell", "d", "enabled")), True)
-        harness.context.dispatcher.dispatch(dwell_set_enabled("d", False))
+        harness.context.dispatcher.dispatch(state_set("dwell_on", False), state_set("delay", 500))
 
-        self.assertIs(harness.engine.profile.state.get(("dwell", "d", "enabled")), False)
-        self.assertEqual(harness.windows["pad"].dwell, [False])
+        self.assertEqual(
+            [(config.enabled, config.delay_ms) for config in harness.windows["pad"].dwell],
+            [(True, 300), (False, 500)],
+        )
         installed = harness.runtime.for_window("pad").dwell
         assert installed is not None
-        self.assertEqual((installed.enabled, installed.delay_ms), (False, 300))
+        self.assertEqual((installed.enabled, installed.delay_ms), (False, 500))
 
-    def test_unknown_dwell_fails_the_action(self) -> None:
-        harness = AttachmentHarness([])
+    def test_an_invalid_bound_option_is_reported_and_the_last_options_stay(self) -> None:
+        harness = AttachmentHarness(
+            [osk.dwell(id="d", window="pad", delay_ms=lambda s: s.delay)],
+            state={"delay": osk.var("integer", 300)},
+        )
         harness.start()
 
-        harness.context.dispatcher.dispatch(dwell_set_enabled("nope", True))
+        harness.context.dispatcher.dispatch(state_set("delay", 0))
 
-        self.assertEqual([failure["action"] for failure in harness.failures], ["dwell.set_enabled"])
+        installed = harness.runtime.for_window("pad").dwell
+        assert installed is not None
+        self.assertEqual(installed.delay_ms, 300)
+        self.assertEqual([failure["source"] for failure in harness.failures], ["attachment:d"])
 
     def test_hot_corners_and_panel_are_configured(self) -> None:
         harness = AttachmentHarness(

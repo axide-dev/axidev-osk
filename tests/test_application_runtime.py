@@ -28,6 +28,7 @@ from axidev_osk.runtime.app_messages import (
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
 from axidev_osk.runtime.engine_messages import keyboard_reset
+from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
 from support import RecordingBackend, qt_app
@@ -294,6 +295,25 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         close.assert_not_called()
         exit_app.assert_not_called()
 
+    def test_the_theme_follows_the_state_it_reads(self) -> None:
+        root = osk.config(
+            active_profile="p",
+            profiles={
+                "p": osk.profile(
+                    state={"dark": osk.var("boolean", False)},
+                    theme={"qss": lambda s: "QWidget { color: white; }" if s.dark else "QWidget { color: black; }"},
+                    windows=[osk.window(id="pad", title="pad", content=osk.box(id="pad:root"))],
+                )
+            },
+        )
+        runtime = _runtime_without_platform_services(root)
+        _start(self, runtime)
+        self.assertEqual(qt_app().styleSheet(), "QWidget { color: black; }")
+
+        runtime.context.dispatcher.dispatch(state_set("dark", True))
+
+        self.assertEqual(qt_app().styleSheet(), "QWidget { color: white; }")
+
     def test_quit_action_shuts_down_with_exit_code(self) -> None:
         runtime = _runtime_without_platform_services()
         callback = Mock()
@@ -427,9 +447,6 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
             osk.window.show("typo"),
             osk.window.hide("typo"),
             osk.window.close("typo"),
-            osk.window.set_opacity("typo", 0.5),
-            osk.window.block_input("typo", []),
-            osk.window.unblock_input("typo"),
         ]
 
         for action in actions:
@@ -445,7 +462,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         _start(self, runtime)
         failures = _record_failures(runtime)
 
-        for action in (osk.window.hide("pad"), osk.window.close("pad"), osk.window.set_opacity("pad", 0.5)):
+        for action in (osk.window.hide("pad"), osk.window.close("pad")):
             runtime.context.dispatcher.dispatch(RuntimeAction(action["action"], action["arguments"]))
 
         self.assertEqual(failures, [])

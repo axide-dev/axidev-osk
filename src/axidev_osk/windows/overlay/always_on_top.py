@@ -453,6 +453,22 @@ class AlwaysOnTopWindowController:
             margins=self._layer_shell_margins,
         )
 
+    def position(self) -> tuple[int, int]:
+        """Return the window's top-left corner in screen coordinates.
+
+        A layer surface is placed by margins from the screen's left and bottom
+        edges, so Qt does not know its position; it is computed from them.
+        """
+
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL and self._layer_shell_position_initialized:
+            screen = self._current_screen_geometry(for_layer_shell=True)
+            return (
+                screen.x() + self._layer_shell_left_margin,
+                screen.y() + screen.height() - self._layer_shell_bottom_margin - self._window.height(),
+            )
+        position = self._window.pos()
+        return (position.x(), position.y())
+
     def move_by(self, dx: int, dy: int) -> None:
         """Move the overlay by a bounded delta."""
 
@@ -746,6 +762,12 @@ class PlainWindowController:
         """Return false because plain windows need no pre-show adjustment."""
 
         return False
+
+    def position(self) -> tuple[int, int]:
+        """Return the window's top-left corner in screen coordinates."""
+
+        position = self._window.pos()
+        return (position.x(), position.y())
 
     def move_by(self, _dx: int, _dy: int) -> None:
         """Ignore overlay move requests for plain windows."""

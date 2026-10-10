@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
-from PySide6.QtGui import QCloseEvent, QHideEvent, QShowEvent
+from PySide6.QtGui import QCloseEvent, QHideEvent, QMoveEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
 from ..attachments.runtime import WindowAttachments
-from ..components.pointer_locator import install_pointer_locator
-from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig
-from ..config.profile import StyleConfig, WindowConfig
+from ..components.pointer_locator import PointerLocator, install_pointer_locator
+from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, PointerLocatorConfig
+from ..config.profile import Live, WindowConfig, WindowValues
 from ..nodes import apply_style
 from ..runtime.app_messages import window_close_requested, window_drag_ended, window_drag_started
 from ..runtime.context import Context
@@ -24,7 +24,7 @@ from .surface import RootSurface
 
 
 class _WindowInputBlocker(QObject):
-    """Swallow mouse input inside one window except within the allowed nodes."""
+    """Swallow mouse input inside one window except within nodes that pass the block."""
 
     _BLOCKED_EVENTS = {
         QEvent.Type.MouseButtonPress,
@@ -35,11 +35,10 @@ class _WindowInputBlocker(QObject):
         QEvent.Type.ContextMenu,
     }
 
-    def __init__(self, window: QWidget, allowed_component_ids: frozenset[str]) -> None:
+    def __init__(self, window: QWidget) -> None:
         # Parented to the window, so Qt drops the filter when the window is deleted.
         super().__init__(window)
         self._window = window
-        self._allowed_component_ids = allowed_component_ids
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         """Return true for blocked mouse events within the target window."""
@@ -51,7 +50,7 @@ class _WindowInputBlocker(QObject):
 
         current: QWidget | None = watched
         while current is not None:
-            if current.property("componentId") in self._allowed_component_ids:
+            if current.property("passesInputBlock"):
                 return False
             if current is self._window:
                 break
@@ -62,9 +61,10 @@ class _WindowInputBlocker(QObject):
 class RuntimeWindow(QMainWindow):
     """Generic host window around configured content.
 
-    The class owns Qt event interception, overlay show handling, its opacity,
-    and its input block, and reports them as ``window.state_changed``. Window
-    identity, title, content, chrome, and overlay behavior all come from config.
+    The class owns Qt event interception and overlay show handling, and reports
+    what the window looks like on screen as ``window.state_changed``. Window
+    identity, content, chrome, and overlay behavior come from config; its title,
+    opacity, minimum size, input block, and style follow state through bindings.
     Closing the window never closes it directly: it sends
     ``window.close_requested`` through the queue, and the window manager closes
     windows by hiding and deleting them.
@@ -74,36 +74,32 @@ class RuntimeWindow(QMainWindow):
         self,
         *,
         window_id: str,
-        title: str,
         overlay: OverlayConfig,
         chrome: ChromeConfig,
-        opacity: float,
-        minimum_size: tuple[int, int],
+        values: Live[WindowValues],
         build_content: Callable[[], QWidget],
         context: Context,
         dwell: DwellClickConfig | None = None,
-        style: StyleConfig | None = None,
     ) -> None:
         """Create a generic runtime window around content built by ``build_content``.
 
         Side effects:
-            Builds child widgets and configures platform overlay behavior.
+            Builds child widgets, configures platform overlay behavior, and
+            binds the window's values to state.
         """
 
         super().__init__()
         self._window_id = window_id
         self._context = context
-        self._configured_opacity = opacity
-        self._current_opacity = opacity
+        self._values: WindowValues | None = None
         self._input_blocker: _WindowInputBlocker | None = None
-        self._minimum_size = minimum_size
+        self._minimum_size = values.initial.minimum_size
         self._chrome_widgets: OverlayChromeWidgets | None = None
         self._dwell_click: DwellClickController | None = None
+        self._pointer_locators: dict[str, PointerLocator] = {}
         self.setProperty("componentType", "window")
         self.setProperty("componentId", window_id)
-        self.setWindowTitle(title)
-        if style is not None:
-            apply_style(self, style)
+        self.setWindowTitle(values.initial.title)
 
         if overlay.always_on_top:
             self._overlay = configure_always_on_top_window(self, config=overlay.config)
@@ -119,7 +115,7 @@ class RuntimeWindow(QMainWindow):
                         central_layout,
                         title=self.windowTitle(),
                         parent=central,
-                        on_move=self._overlay.move_by,
+                        on_move=self.move_by,
                         on_resize=self._overlay.resize_by,
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
@@ -136,13 +132,58 @@ class RuntimeWindow(QMainWindow):
             self.setCentralWidget(central)
             if dwell is not None:
                 self._dwell_click = DwellClickController(self, central, dwell)
-                self._dwell_click.set_enabled(dwell.enabled)
             self._opacity = WindowOpacityController(self)
-            self.set_visual_opacity(opacity)
-            self.apply_startup_size(minimum_size=minimum_size)
+            unbind = context.engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
+            self.destroyed.connect(lambda _object=None: unbind())
+            self.apply_startup_size(minimum_size=self._minimum_size)
         except Exception:
             self.release_platform_resources()
             raise
+
+    def install_pointer_locator(self, settings: PointerLocatorConfig) -> None:
+        """Add pointer feedback behind this window's content."""
+
+        central = self.centralWidget()
+        assert isinstance(central, RootSurface)
+        self._pointer_locators[settings.id] = install_pointer_locator(central, settings)
+
+    def set_pointer_locator(self, settings: PointerLocatorConfig) -> None:
+        """Apply new settings to an installed pointer locator."""
+
+        locator = self._pointer_locators.get(settings.id)
+        if locator is not None:
+            locator.set_settings(settings)
+
+    def set_dwell(self, config: DwellClickConfig) -> None:
+        """Apply new dwell settings, including whether dwell is enabled."""
+
+        if self._dwell_click is not None:
+            self._dwell_click.set_config(config)
+
+    @property
+    def default_close(self) -> bool:
+        """Whether closing this window follows the engine's close rule."""
+
+        values = self._values
+        return values.default_close if values is not None else True
+
+    def _apply_values(self, values: WindowValues) -> None:
+        previous = self._values
+        if previous is None or values.title != previous.title:
+            self.setWindowTitle(values.title)
+            if self._chrome_widgets is not None:
+                self._chrome_widgets.title_bar.set_title(values.title)
+        apply_style(self, values.style, previous.style if previous is not None else None)
+        if previous is None or values.opacity != previous.opacity:
+            self._opacity.set_opacity(values.opacity)
+        if values.input_blocked and self._input_blocker is None:
+            self._install_input_blocker()
+        elif not values.input_blocked:
+            self._remove_input_blocker()
+        self._values = values
+        if previous is not None and values.minimum_size != previous.minimum_size:
+            self._minimum_size = values.minimum_size
+            self.apply_startup_size(minimum_size=values.minimum_size)
 
     @property
     def window_id(self) -> str:
@@ -150,41 +191,12 @@ class RuntimeWindow(QMainWindow):
 
         return self._window_id
 
-    @property
-    def configured_opacity(self) -> float:
-        """Return the opacity this window was configured with."""
-
-        return self._configured_opacity
-
-    @property
-    def input_blocked(self) -> bool:
-        """Whether pointer input is blocked outside the allowed nodes."""
-
-        return self._input_blocker is not None
-
-    def set_visual_opacity(self, opacity: float) -> None:
-        """Set opacity through the platform-supported window implementation."""
-
-        self._opacity.set_opacity(opacity)
-        self._current_opacity = opacity
-        self._report_state()
-
-    def block_input(self, allowed_node_ids: frozenset[str]) -> None:
-        """Ignore pointer input on this window except inside the allowed nodes."""
-
+    def _install_input_blocker(self) -> None:
         app = QApplication.instance()
         if app is None:
             raise RuntimeError("Blocking window input requires a QApplication")
-        self._remove_input_blocker()
-        self._input_blocker = _WindowInputBlocker(self, allowed_node_ids)
+        self._input_blocker = _WindowInputBlocker(self)
         app.installEventFilter(self._input_blocker)
-        self._report_state()
-
-    def unblock_input(self) -> None:
-        """Remove a pointer-input block installed by ``block_input``."""
-
-        if self._remove_input_blocker():
-            self._report_state()
 
     def _remove_input_blocker(self) -> bool:
         blocker = self._input_blocker
@@ -197,16 +209,11 @@ class RuntimeWindow(QMainWindow):
         blocker.deleteLater()
         return True
 
-    def set_dwell_enabled(self, enabled: bool) -> None:
-        """Set whether pointer dwell activates components in this window."""
-
-        if self._dwell_click is not None:
-            self._dwell_click.set_enabled(enabled)
-
     def move_by(self, dx: int, dy: int) -> None:
         """Move this window through its selected overlay backend."""
 
         self._overlay.move_by(dx, dy)
+        self._report_state()
 
     def refresh_screen_configuration(self) -> None:
         """Apply display recovery through the selected overlay backend."""
@@ -222,8 +229,9 @@ class RuntimeWindow(QMainWindow):
             self._chrome_widgets.title_bar.set_close_enabled(enabled)
 
     def release_platform_resources(self) -> None:
-        """Release native resources before Qt destroys this window."""
+        """Release native resources and the input block before Qt destroys this window."""
 
+        self._remove_input_blocker()
         release = getattr(self._overlay, "release_resources", None)
         if release is not None:
             release()
@@ -291,15 +299,25 @@ class RuntimeWindow(QMainWindow):
         if event.type() == QEvent.Type.WindowStateChange:
             self._report_state()
 
+    def moveEvent(self, event: QMoveEvent) -> None:  # type: ignore[override]
+        super().moveEvent(event)
+        self._report_state()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._report_state()
+
     def _report_state(self) -> None:
+        x, y = self._overlay.position()
         self._context.dispatcher.dispatch(
             window_state_changed(
                 self._window_id,
                 visible=self.isVisible(),
                 minimized=self.isMinimized(),
-                opacity=self._current_opacity,
-                configured_opacity=self._configured_opacity,
-                input_blocked=self.input_blocked,
+                x=x,
+                y=y,
+                width=self.width(),
+                height=self.height(),
             )
         )
 
@@ -313,7 +331,7 @@ def build_profile_window(
     """Build a runtime window whose content is a profile node tree.
 
     ``attachments`` names the dwell settings and pointer locators this window
-    installs; the attachment runtime provides them.
+    installs; the attachment runtime provides them and applies later changes.
     """
 
     installed = attachments or WindowAttachments()
@@ -328,19 +346,17 @@ def build_profile_window(
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(context.engine.node_builder.build(config.content))
-        for locator in installed.pointer_locators:
-            install_pointer_locator(surface, locator)
         return surface
 
-    return RuntimeWindow(
+    window = RuntimeWindow(
         window_id=config.id,
-        title=config.title,
         overlay=config.overlay,
         chrome=config.chrome,
-        opacity=config.opacity,
-        minimum_size=config.minimum_size,
+        values=config.values,
         build_content=build_content,
         context=context,
         dwell=installed.dwell,
-        style=config.style,
     )
+    for locator in installed.pointer_locators:
+        window.install_pointer_locator(locator)
+    return window

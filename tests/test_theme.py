@@ -29,7 +29,7 @@ class ThemeTests(unittest.TestCase):
         self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
         profile = make_test_context(RecordingBackend()).engine.decoder().decode_root(build_default_config())
 
-        apply_theme(app, profile.theme)
+        apply_theme(app, profile.theme.initial)
 
         self.assertEqual(app.styleSheet(), DEFAULT_QSS)
         self.assertEqual(app.palette().color(QPalette.ColorRole.Window), QColor("#0B0B10"))
@@ -50,7 +50,7 @@ class ThemeTests(unittest.TestCase):
     def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
         qt_app()
         context = make_test_context(RecordingBackend())
-        attachments = AttachmentRuntime(context.dispatcher, context.engine.profile, window_lookup=lambda _id: None)
+        attachments = AttachmentRuntime(context.engine.bindings, window_lookup=lambda _id: None)
         profile = start_test_profile(context, build_default_config())
         attachments.start(profile)
         window = build_window(

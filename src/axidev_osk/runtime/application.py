@@ -92,10 +92,8 @@ class ApplicationRuntime:
         engine = build_engine(self._dispatcher, keyboard=self._keyboard, processes=processes)
         self.context = Context(dispatcher=self._dispatcher, engine=engine)
         hot_corners = self._services.find("hot_corner")
-        # Built before decoding: it declares the dwell root every profile is checked against.
         self._attachments = AttachmentRuntime(
-            self._dispatcher,
-            engine.profile,
+            engine.bindings,
             window_lookup=lambda window_id: self._window_manager.get(window_id),
             hot_corners=hot_corners if isinstance(hot_corners, HotCornerService) else None,
         )
@@ -136,8 +134,14 @@ class ApplicationRuntime:
         teardown.
         """
 
-        apply_theme(self._app, self._profile.theme)
         self.context.engine.profile.start(self._profile)
+        theme = self._profile.theme
+        self.context.engine.bindings.bind(
+            theme.decode,
+            "theme",
+            lambda values: apply_theme(self._app, values),
+            fallback=theme.initial,
+        )
         self._attachments.start(self._profile)
         for service in self._services.autostart_services():
             service.start(self.context)
@@ -173,7 +177,12 @@ class ApplicationRuntime:
         quit instead. Profile handlers for ``window.close_requested`` run too.
         """
 
-        if not self._profile.window(event.window_id).default_close:
+        window = self._window_manager.get(event.window_id)
+        # A window that was never built has no current values yet, so it follows its load-time ones.
+        default_close = (
+            window.default_close if window is not None else self._profile.window(event.window_id).values.initial.default_close
+        )
+        if not default_close:
             return []
         others_visible = any(
             window.isVisible() for window in self._window_manager.all_windows() if window.window_id != event.window_id

@@ -1,8 +1,10 @@
 """Node kinds: the curated widgets and containers profiles compose.
 
 A node kind declares everything about one widget type in one place: its
-bindable properties, its callback fields and events, how its options decode,
-how it builds a widget, and how a property value is applied to that widget.
+callback fields and events, how its fixed fields and its values decode, how it
+builds a widget, and how a set of values is applied to that widget. Any value
+may be a binding; the builder decodes a node's values again whenever the state
+they read changes and hands the kind the new values with the previous ones.
 """
 
 from __future__ import annotations
@@ -13,18 +15,20 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QWidget
 
-from ..config.profile import NodeConfig, PropertySpec, StyleConfig
+from ..config.profile import NodeConfig, NodeValues, StyleConfig
 from ..config.reader import ConfigReader
 from ..kind_registry import KindRegistry
-from ..messages import DataMap, DataValue, RuntimeEvent
+from ..messages import DataMap, RuntimeEvent
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
 
 if TYPE_CHECKING:
-    from ..runtime.dispatcher import Dispatcher, Unsubscribe
+    from ..runtime.dispatcher import Dispatcher
     from ..runtime.profile_runtime import BindingTracker
 
 NodeBuild = Callable[[NodeConfig, "NodeBuilder"], QWidget]
-NodeApply = Callable[[QWidget, str, DataValue], None]
+"""Build a node's widget and children from its fixed fields; its values are applied afterwards."""
+NodeApply = Callable[[QWidget, object, object | None], None]
+"""Apply a kind's options to its widget, given the options applied before or ``None`` the first time."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,12 +56,12 @@ class NodeKind:
     name: str
     build: NodeBuild
     apply: NodeApply
-    properties: Mapping[str, PropertySpec] = field(default_factory=dict)
+    decode_options: Callable[[ConfigReader], object]
     callbacks: Mapping[str, str] = field(default_factory=dict)
     has_children: bool = False
     widget_properties: frozenset[str] = frozenset()
     """Widget properties ``build`` and ``apply`` set, which a profile style cannot set."""
-    decode_options: Callable[[ConfigReader], object] = _no_options
+    decode_structure: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
 
     @property
@@ -89,7 +93,7 @@ class NodeKindRegistry(KindRegistry[NodeKind]):
 
 
 class NodeBuilder:
-    """Build widgets for decoded nodes and keep their bindings live."""
+    """Build widgets for decoded nodes and keep their values following state."""
 
     def __init__(
         self,
@@ -106,52 +110,46 @@ class NodeBuilder:
         widget = kind.build(node, self)
         widget.setProperty("componentType", node.kind)
         widget.setProperty("componentId", node.id)
-        apply_style(widget, node.style)
-        unbinds: list["Unsubscribe"] = []
-        for name, spec in kind.properties.items():
-            if name in node.bindings:
-                value = node.bindings[name]
-            elif spec.default is not None:
-                value = spec.default
-            else:
-                continue
-            unbinds.append(
-                self._bindings.bind(
-                    value,
-                    f"{node.id}.{name}",
-                    lambda resolved, name=name, spec=spec: kind.apply(widget, name, _checked(node, name, spec, resolved)),
-                )
-            )
-        widget.destroyed.connect(lambda _object=None: [unbind() for unbind in unbinds])
+        if node.passes_input_block:
+            widget.setProperty("passesInputBlock", True)
+        applied: list[NodeValues] = []
+
+        def apply(values: NodeValues) -> None:
+            previous = applied[0] if applied else None
+            apply_style(widget, values.style, previous.style if previous is not None else None)
+            kind.apply(widget, values.options, previous.options if previous is not None else None)
+            applied[:] = [values]
+
+        unbind = self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial)
+        widget.destroyed.connect(lambda _object=None: unbind())
         return widget
 
     def emit(self, event_name: str, node_id: str) -> None:
         self._dispatcher.dispatch(node_event(event_name, node_id))
 
 
-def _checked(node: NodeConfig, name: str, spec: PropertySpec, value: DataValue) -> DataValue:
-    """Give a property its default for ``None`` and reject any other value of the wrong type.
+def apply_style(widget: QWidget, style: StyleConfig, previous: StyleConfig | None = None) -> None:
+    """Apply profile style hooks that QSS can target, undoing the ones a previous style set."""
 
-    Plain values were checked when the profile was decoded; binding results are
-    checked here, so a wrong result becomes ``callback.failed`` instead of a
-    silent conversion.
-    """
-
-    if value is None:
-        return spec.default
-    if not isinstance(value, spec.value_type):
-        raise TypeError(f"{node.kind} {node.id!r} property {name!r} got {type(value).__name__}")
-    return value
-
-
-def apply_style(widget: QWidget, style: StyleConfig) -> None:
-    """Apply profile style hooks that QSS can target."""
-
+    if previous is not None and style == previous:
+        return
     if style.object_name is not None:
         widget.setObjectName(style.object_name)
-    if style.classes:
-        widget.setProperty("classes", list(style.classes))
+    elif previous is not None and previous.object_name is not None:
+        widget.setObjectName("")
+    if style.classes or (previous is not None and previous.classes):
+        widget.setProperty("classes", list(style.classes) if style.classes else None)
+    if previous is not None:
+        for name in previous.properties:
+            if name not in style.properties:
+                widget.setProperty(name, None)
     for name, value in style.properties.items():
         widget.setProperty(name, value)
     if style.qss is not None:
         widget.setStyleSheet(style.qss)
+    elif previous is not None and previous.qss is not None:
+        widget.setStyleSheet("")
+    if previous is not None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()

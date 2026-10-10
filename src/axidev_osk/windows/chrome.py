@@ -62,6 +62,7 @@ class OverlayTitleBar(QFrame):
         layout.setSpacing(8)
 
         title_label = QLabel(title, self)
+        self._title_label = title_label
         title_label.setObjectName("layerShellTitleLabel")
         title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(title_label)
@@ -79,6 +80,11 @@ class OverlayTitleBar(QFrame):
         """Insert a control before the close button."""
 
         self._layout.insertWidget(self._layout.indexOf(self._close_button), widget)
+
+    def set_title(self, title: str) -> None:
+        """Show a new window title."""
+
+        self._title_label.setText(title)
 
     def set_close_enabled(self, enabled: bool) -> None:
         """Set whether the title bar exposes its close control."""

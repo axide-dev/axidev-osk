@@ -15,7 +15,7 @@ from ..windows.surface import RootSurface
 _GRADIENT_SEGMENTS = 32
 
 
-def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> QWidget:
+def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> "PointerLocator":
     """Install pointer feedback behind a root surface's content."""
 
     host.setProperty("pointerLocatorEnabled", True)
@@ -172,6 +172,12 @@ class PointerLocator(QWidget):
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._poll_cursor)
         self._host.installEventFilter(self)
+
+    def set_settings(self, config: PointerLocatorConfig) -> None:
+        """Paint with new glow settings from the next frame on."""
+
+        self._config = config
+        self.update()
 
     @property
     def current_color(self) -> QColor:

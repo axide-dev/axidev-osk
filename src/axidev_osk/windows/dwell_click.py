@@ -139,6 +139,11 @@ class DwellClickIndicator(QWidget):
         )
         self.hide()
 
+    def set_visible_from_progress(self, progress: float) -> None:
+        """Show the dot only once progress reaches ``progress``."""
+
+        self._visible_from_progress = progress
+
     @property
     def progress(self) -> float:
         """Return the displayed progress from zero through one."""
@@ -266,6 +271,13 @@ class DwellClickController(QObject):
         """Return whether dwell activation is currently enabled."""
 
         return self._enabled
+
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Use new dwell settings from the next sample on, enabling or disabling dwell as they say."""
+
+        self._config = config
+        self.indicator.set_visible_from_progress(config.indicator_start_progress)
+        self.set_enabled(config.enabled)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable dwell activation at runtime."""

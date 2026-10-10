@@ -24,6 +24,7 @@ class Engine:
     nodes: NodeKindRegistry
     node_builder: NodeBuilder
     attachments: AttachmentKindRegistry
+    bindings: BindingTracker
 
     def decoder(self) -> ConfigDecoder:
         """Return a decoder for root configs using this engine's registered kinds."""
@@ -33,6 +34,7 @@ class Engine:
             attachment_kinds=self.attachments,
             functions=self.functions,
             check_profile=self.profile.check,
+            load_state=self.profile.load_state,
         )
 
 
@@ -67,4 +69,5 @@ def build_engine(
         nodes=nodes,
         node_builder=NodeBuilder(nodes, dispatcher, bindings),
         attachments=attachments,
+        bindings=bindings,
     )

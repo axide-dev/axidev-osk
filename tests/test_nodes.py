@@ -12,6 +12,7 @@ from axidev_osk.config.profile import ProfileConfig
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.messages import DataMap
 from axidev_osk.nodes import NodeKind
+from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.engine_messages import keyboard_status_changed
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
@@ -59,7 +60,7 @@ class NodeTests(unittest.TestCase):
                     _button("plain", label="Plain", cell={"row": 0, "column": 1, "column_span": 2}),
                 ],
             },
-            state={"shift": False},
+            state={"shift": osk.var("boolean", False)},
         )
         window = self._window(profile)
         key = self._find(window, "a")
@@ -125,22 +126,23 @@ class NodeTests(unittest.TestCase):
         failures: list[DataMap] = []
         self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
-            {"kind": "box", "id": "row", "children": [_button("a", latched=lambda s: s.mode)]},
-            state={"mode": True},
+            {"kind": "box", "id": "row", "children": [_button("a", latched=lambda s: s.mode == "on" or s.mode)]},
+            state={"mode": osk.var("string", "on")},
         )
         key = self._find(self._window(profile), "a")
 
         self.context.dispatcher.dispatch(state_set("mode", "no"))
 
         self.assertTrue(key.property("latched"))
-        self.assertEqual([failure["source"] for failure in failures], ["a.latched"])
+        self.assertEqual([failure["source"] for failure in failures], ["node:a"])
+        self.assertIn("latched must be a boolean", str(failures[0]["message"]))
 
     def test_a_kind_added_later_gets_its_events_and_collisions_are_rejected(self) -> None:
         nodes = self.engine.nodes
-        nodes.register(NodeKind(name="dial", build=lambda node, builder: QWidget(), apply=lambda *args: None, callbacks={"on_turn": "dial.turned"}))
+        nodes.register(NodeKind(name="dial", build=lambda node, builder: QWidget(), apply=lambda *args: None, decode_options=lambda reader: None, callbacks={"on_turn": "dial.turned"}))
         self.assertTrue(self.context.dispatcher.has_event("dial.turned"))
 
-        clash = NodeKind(name="clash", build=lambda node, builder: QWidget(), apply=lambda *args: None, callbacks={"on_x": "app.activated"})
+        clash = NodeKind(name="clash", build=lambda node, builder: QWidget(), apply=lambda *args: None, decode_options=lambda reader: None, callbacks={"on_x": "app.activated"})
         with self.assertRaisesRegex(ValueError, "already registered elsewhere: app.activated"):
             nodes.register(clash)
         self.assertNotIn("clash", nodes)
@@ -148,7 +150,7 @@ class NodeTests(unittest.TestCase):
     def test_press_and_release_run_node_callbacks_with_the_node_event(self) -> None:
         def on_press(ctx: CallbackContext, event: DataMap) -> list[object]:
             self.pressed.append(event)
-            return [{"action": "state.set", "arguments": {"path": "count", "value": (ctx.state.count or 0) + 1}}]
+            return [{"action": "state.set", "arguments": {"path": "count", "value": ctx.state.count + 1}}]
 
         profile = self._profile(
             {
@@ -156,10 +158,11 @@ class NodeTests(unittest.TestCase):
                 "id": "root",
                 "direction": "horizontal",
                 "children": [
-                    _button("cow", label=lambda s: f"Moo {s.count or 0}", on_press=on_press),
+                    _button("cow", label=lambda s: f"Moo {s.count}", on_press=on_press),
                     _button("quiet"),
                 ],
-            }
+            },
+            state={"count": osk.var("integer", 0)},
         )
         window = self._window(profile)
         cow = self._find(window, "cow")
@@ -179,12 +182,13 @@ class NodeTests(unittest.TestCase):
                 "children": [
                     {"kind": "label", "id": "status", "text": lambda s: s.keyboard.status, "word_wrap": True,
                      "style": {"object_name": "statusLabel", "classes": ["muted"]}},
-                    {"kind": "stack", "id": "pages", "current": lambda s: s.page or "one", "children": [
+                    {"kind": "stack", "id": "pages", "current": lambda s: s.page, "children": [
                         {"kind": "label", "id": "one", "text": "One"},
                         {"kind": "label", "id": "two", "text": "Two"},
                     ]},
                 ],
-            }
+            },
+            state={"page": osk.var("string", "one")},
         )
         self.context.dispatcher.dispatch(keyboard_status_changed(True, "ready", False, ""))
         window = self._window(profile)
@@ -197,13 +201,26 @@ class NodeTests(unittest.TestCase):
         self.context.dispatcher.dispatch(state_set("page", "two"))
         self.assertEqual(pages.currentWidget().property("componentId"), "two")
 
+    def test_style_hooks_follow_state(self) -> None:
+        profile = self._profile(
+            {"kind": "label", "id": "status", "text": "Status",
+             "style": lambda s: {"classes": ["warning"] if s.alert else [], "properties": {"level": s.level}}},
+            state={"alert": osk.var("boolean", False), "level": osk.var("integer", 1)},
+        )
+        status = self._find(self._window(profile), "status")
+
+        self.context.dispatcher.dispatch(state_set("alert", True), state_set("level", 2))
+
+        self.assertEqual((status.property("classes"), status.property("level")), (["warning"], 2))
+
     def test_a_stack_page_that_does_not_exist_is_reported(self) -> None:
         failures: list[DataMap] = []
         self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
-            {"kind": "stack", "id": "pages", "current": lambda s: s.page or "one", "children": [
+            {"kind": "stack", "id": "pages", "current": lambda s: s.page, "children": [
                 {"kind": "label", "id": "one", "text": "One"},
-            ]}
+            ]},
+            state={"page": osk.var("string", "one")},
         )
         pages = self._find(self._window(profile), "pages")
         assert isinstance(pages, QStackedWidget)

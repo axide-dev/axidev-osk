@@ -1,38 +1,16 @@
-"""Install a profile's attachments and route the actions they own."""
+"""Install a profile's attachments and apply their options as state changes."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Protocol
 
 from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
-from ..config.profile import ProfileConfig
-from ..messages import DataMap, MessageResult, RuntimeAction
-from ..runtime.decoding import bool_value, non_empty_string_value, require_keys, validated_action
-from ..runtime.dispatcher import Dispatcher
-from ..runtime.profile_runtime import ProfileRuntime
-from . import DwellOptions, HotCornersOptions, PointerLocatorOptions, SecureInputPanelOptions
-
-DWELL_SET_ENABLED = "dwell.set_enabled"
-
-
-@dataclass(frozen=True, slots=True)
-class DwellSetEnabledArguments:
-    dwell: str
-    enabled: bool
-
-
-def dwell_set_enabled(dwell: str, enabled: bool) -> RuntimeAction:
-    return validated_action(DWELL_SET_ENABLED, {"dwell": dwell, "enabled": enabled}, decode_dwell_set_enabled)
-
-
-def decode_dwell_set_enabled(arguments: DataMap) -> DwellSetEnabledArguments:
-    require_keys(arguments, ("dwell", "enabled"))
-    return DwellSetEnabledArguments(
-        dwell=non_empty_string_value(arguments, "dwell"),
-        enabled=bool_value(arguments, "enabled"),
-    )
+from ..config.profile import AttachmentConfig, ProfileConfig
+from ..runtime.dispatcher import Unsubscribe
+from ..runtime.profile_runtime import BindingTracker
+from . import HotCornersOptions
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,8 +21,10 @@ class WindowAttachments:
     pointer_locators: tuple[PointerLocatorConfig, ...] = ()
 
 
-class DwellTarget(Protocol):
-    def set_dwell_enabled(self, enabled: bool) -> None: ...
+class AttachmentWindow(Protocol):
+    def set_dwell(self, config: DwellClickConfig) -> None: ...
+
+    def set_pointer_locator(self, settings: PointerLocatorConfig) -> None: ...
 
 
 class HotCornerTarget(Protocol):
@@ -52,90 +32,110 @@ class HotCornerTarget(Protocol):
 
 
 class AttachmentRuntime:
-    """Hold the active profile's attachments and own ``dwell.set_enabled``."""
+    """Hold the active profile's attachments and keep their options following state."""
 
     def __init__(
         self,
-        dispatcher: Dispatcher,
-        profile_runtime: ProfileRuntime,
+        bindings: BindingTracker,
         *,
-        window_lookup: Callable[[str], DwellTarget | None],
+        window_lookup: Callable[[str], AttachmentWindow | None],
         hot_corners: HotCornerTarget | None = None,
     ) -> None:
-        self._dispatcher = dispatcher
-        self._profile_runtime = profile_runtime
+        self._bindings = bindings
         self._window_lookup = window_lookup
         self._hot_corners = hot_corners
-        self._dwell: dict[str, DwellOptions] = {}
-        self._dwell_by_window: dict[str, str] = {}
-        self._locators: dict[str, list[PointerLocatorConfig]] = {}
+        self._dwell: dict[str, DwellClickConfig] = {}
+        self._locators: dict[str, dict[str, PointerLocatorConfig]] = {}
         self._secure_input_panel_window: str | None = None
-        profile_runtime.declare_root("dwell", {})
-        dispatcher.register_action(DWELL_SET_ENABLED, decode_dwell_set_enabled, self._set_dwell_enabled)
+        self._unbinds: list[Unsubscribe] = []
 
     @property
     def secure_input_panel_window(self) -> str | None:
         return self._secure_input_panel_window
 
     def start(self, profile: ProfileConfig) -> None:
-        """Validate references and prepare attachments for ``profile``.
+        """Validate references, then bind every attachment's options for ``profile``.
 
         Every check runs before anything changes, so a rejected profile leaves
         the current attachments as they were.
         """
 
         window_ids = {window.id for window in profile.windows}
-        dwell: dict[str, DwellOptions] = {}
-        dwell_by_window: dict[str, str] = {}
-        locators: dict[str, list[PointerLocatorConfig]] = {}
-        hot_corners: list[HotCornersOptions] = []
-        panels: list[SecureInputPanelOptions] = []
+        dwell_windows: set[str] = set()
+        by_kind: dict[str, list[AttachmentConfig]] = {}
         for attachment in profile.attachments:
-            options = attachment.options
-            target = getattr(options, "window", None)
-            if target is not None and target not in window_ids:
-                raise ValueError(f"Attachment {attachment.id!r} targets unknown window {target!r}")
-            if isinstance(options, DwellOptions):
-                if options.window in dwell_by_window:
-                    raise ValueError(f"Window {options.window!r} has more than one dwell attachment")
-                dwell[attachment.id] = options
-                dwell_by_window[options.window] = attachment.id
-            elif isinstance(options, PointerLocatorOptions):
-                locators.setdefault(options.window, []).append(options.settings)
-            elif isinstance(options, HotCornersOptions):
-                hot_corners.append(options)
-            elif isinstance(options, SecureInputPanelOptions):
-                panels.append(options)
-        if len(hot_corners) > 1:
+            if attachment.target is not None and attachment.target not in window_ids:
+                raise ValueError(f"Attachment {attachment.id!r} targets unknown window {attachment.target!r}")
+            if attachment.kind == "dwell":
+                assert attachment.target is not None
+                if attachment.target in dwell_windows:
+                    raise ValueError(f"Window {attachment.target!r} has more than one dwell attachment")
+                dwell_windows.add(attachment.target)
+            by_kind.setdefault(attachment.kind, []).append(attachment)
+        if len(by_kind.get("hot_corners", [])) > 1:
             raise ValueError("A profile can have at most one hot_corners attachment")
-        if len(panels) > 1:
+        if len(by_kind.get("secure_input_panel", [])) > 1:
             raise ValueError("A profile can have at most one secure_input_panel attachment")
-        self._dwell = dwell
-        self._dwell_by_window = dwell_by_window
-        self._locators = locators
-        self._secure_input_panel_window = panels[0].window if panels else None
-        if hot_corners and self._hot_corners is not None:
-            self._hot_corners.configure(hot_corners[0].settings, hot_corners[0].corners)
-        observed: MessageResult = []
-        for dwell_id, options in self._dwell.items():
-            observed.extend(self._profile_runtime.set_observed(("dwell", dwell_id, "enabled"), options.settings.enabled))
-        self._dispatcher.dispatch(*observed)
+        self.stop()
+        panels = by_kind.get("secure_input_panel", [])
+        self._secure_input_panel_window = panels[0].target if panels else None
+        for attachment in by_kind.get("dwell", []):
+            self._bind(attachment, self._dwell_applier(attachment.target or ""))
+        for attachment in by_kind.get("pointer_locator", []):
+            self._bind(attachment, self._locator_applier(attachment.target or ""))
+        if self._hot_corners is not None:
+            for attachment in by_kind.get("hot_corners", []):
+                self._bind(attachment, self._hot_corners_applier(self._hot_corners))
+
+    def stop(self) -> None:
+        for unbind in self._unbinds:
+            unbind()
+        self._unbinds.clear()
+        self._dwell.clear()
+        self._locators.clear()
 
     def for_window(self, window_id: str) -> WindowAttachments:
-        """Return the attachments a window installs, with dwell's current enabled state."""
+        """Return the attachments a window installs, with their current options."""
 
-        dwell: DwellClickConfig | None = None
-        dwell_id = self._dwell_by_window.get(window_id)
-        if dwell_id is not None:
-            enabled = bool(self._profile_runtime.state.get(("dwell", dwell_id, "enabled")))
-            dwell = replace(self._dwell[dwell_id].settings, enabled=enabled)
-        return WindowAttachments(dwell=dwell, pointer_locators=tuple(self._locators.get(window_id, ())))
+        return WindowAttachments(
+            dwell=self._dwell.get(window_id),
+            pointer_locators=tuple(self._locators.get(window_id, {}).values()),
+        )
 
-    def _set_dwell_enabled(self, arguments: DwellSetEnabledArguments) -> MessageResult:
-        options = self._dwell.get(arguments.dwell)
-        if options is None:
-            raise ValueError(f"No dwell attachment named {arguments.dwell!r}")
-        window = self._window_lookup(options.window)
-        if window is not None:
-            window.set_dwell_enabled(arguments.enabled)
-        return self._profile_runtime.set_observed(("dwell", arguments.dwell, "enabled"), arguments.enabled)
+    def _bind(self, attachment: AttachmentConfig, apply: Callable[[object], None]) -> None:
+        self._unbinds.append(
+            self._bindings.bind(
+                attachment.values.decode,
+                f"attachment:{attachment.id}",
+                apply,
+                fallback=attachment.values.initial,
+            )
+        )
+
+    def _dwell_applier(self, window_id: str) -> Callable[[object], None]:
+        def apply(options: object) -> None:
+            assert isinstance(options, DwellClickConfig)
+            self._dwell[window_id] = options
+            window = self._window_lookup(window_id)
+            if window is not None:
+                window.set_dwell(options)
+
+        return apply
+
+    def _locator_applier(self, window_id: str) -> Callable[[object], None]:
+        def apply(options: object) -> None:
+            assert isinstance(options, PointerLocatorConfig)
+            self._locators.setdefault(window_id, {})[options.id] = options
+            window = self._window_lookup(window_id)
+            if window is not None:
+                window.set_pointer_locator(options)
+
+        return apply
+
+    @staticmethod
+    def _hot_corners_applier(target: HotCornerTarget) -> Callable[[object], None]:
+        def apply(options: object) -> None:
+            assert isinstance(options, HotCornersOptions)
+            target.configure(options.settings, options.corners)
+
+        return apply

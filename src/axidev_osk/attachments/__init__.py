@@ -1,8 +1,9 @@
 """Attachments: Python-owned feature primitives that profiles attach by reference.
 
 An attachment owns its own loop (dwell timing, pointer glow, corner sensors,
-lock-screen supervision). A profile only names its target and options, then
-talks to it through actions, events, and observed state.
+lock-screen supervision). A profile names its fixed target window and its
+options; any option may be a binding, and the attachment applies new options
+whenever the state they read changes.
 """
 
 from __future__ import annotations
@@ -21,31 +22,17 @@ SettingsT = TypeVar("SettingsT")
 
 
 @dataclass(frozen=True, slots=True)
-class DwellOptions:
-    window: str
-    settings: DwellClickConfig
-
-
-@dataclass(frozen=True, slots=True)
-class PointerLocatorOptions:
-    window: str
-    settings: PointerLocatorConfig
-
-
-@dataclass(frozen=True, slots=True)
 class HotCornersOptions:
     corners: frozenset[str]
     settings: HotCornerConfig
 
 
 @dataclass(frozen=True, slots=True)
-class SecureInputPanelOptions:
-    window: str
-
-
-@dataclass(frozen=True, slots=True)
 class AttachmentKind:
+    """How one attachment kind reads its fixed target window and its options."""
+
     name: str
+    decode_target: Callable[[ConfigReader], str | None]
     decode_options: Callable[[ConfigReader], object]
 
 
@@ -53,10 +40,22 @@ AttachmentKindRegistry = KindRegistry[AttachmentKind]
 
 
 def register_builtin_attachments(registry: AttachmentKindRegistry) -> None:
-    registry.register(AttachmentKind("dwell", _decode_dwell))
-    registry.register(AttachmentKind("pointer_locator", _decode_pointer_locator))
-    registry.register(AttachmentKind("hot_corners", _decode_hot_corners))
-    registry.register(AttachmentKind("secure_input_panel", _decode_secure_input_panel))
+    registry.register(AttachmentKind("dwell", _window_target, _decode_dwell))
+    registry.register(AttachmentKind("pointer_locator", _window_target, _decode_pointer_locator))
+    registry.register(AttachmentKind("hot_corners", _no_target, _decode_hot_corners))
+    registry.register(AttachmentKind("secure_input_panel", _window_target, _no_options))
+
+
+def _window_target(reader: ConfigReader) -> str:
+    return reader.string("window")
+
+
+def _no_target(reader: ConfigReader) -> None:
+    del reader
+
+
+def _no_options(reader: ConfigReader) -> None:
+    del reader
 
 
 def _settings(reader: ConfigReader, build: Callable[[], SettingsT]) -> SettingsT:
@@ -70,9 +69,9 @@ def _settings(reader: ConfigReader, build: Callable[[], SettingsT]) -> SettingsT
         raise ConfigError(f"{reader.path}: {exc}") from exc
 
 
-def _decode_dwell(reader: ConfigReader) -> DwellOptions:
+def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
     defaults = DwellClickConfig()
-    settings = _settings(
+    return _settings(
         reader,
         lambda: DwellClickConfig(
             enabled=reader.boolean("enabled", defaults.enabled),
@@ -91,12 +90,11 @@ def _decode_dwell(reader: ConfigReader) -> DwellOptions:
             velocity_release_ms=reader.integer("velocity_release_ms", defaults.velocity_release_ms),
         ),
     )
-    return DwellOptions(window=reader.string("window"), settings=settings)
 
 
-def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorOptions:
+def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorConfig:
     attachment_id = reader.string("id")
-    settings = _settings(
+    return _settings(
         reader,
         lambda: PointerLocatorConfig(
             id=attachment_id,
@@ -106,7 +104,6 @@ def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorOptions:
             gap_color=reader.color("gap_color"),
         ),
     )
-    return PointerLocatorOptions(window=reader.string("window"), settings=settings)
 
 
 def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
@@ -128,7 +125,3 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
             indicator_margin_px=reader.integer("indicator_margin_px", 14, minimum=0),
         ),
     )
-
-
-def _decode_secure_input_panel(reader: ConfigReader) -> SecureInputPanelOptions:
-    return SecureInputPanelOptions(window=reader.string("window"))
