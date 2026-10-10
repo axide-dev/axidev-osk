@@ -25,30 +25,9 @@ from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
-from support import RecordingBackend, qt_app
+from support import FakeOverlay, RecordingBackend, qt_app
 
 _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
-
-
-class FakeOverlayController:
-    def __init__(self, *, uses_custom_chrome: bool = True, uses_runtime_pointer_drag: bool = False) -> None:
-        self.uses_custom_chrome = uses_custom_chrome
-        self.uses_runtime_pointer_drag = uses_runtime_pointer_drag
-
-    def prepare_show(self) -> bool:
-        return True
-
-    def move_by(self, dx: int, dy: int) -> None:
-        return None
-
-    def resize_by(self, dx: int, dy: int) -> None:
-        return None
-
-    def handle_show(self) -> bool:
-        return True
-
-    def apply_configured_position(self) -> None:
-        return None
 
 
 def _root(attachments: list[osk.Map] | None = None, windows: tuple[str, ...] = ("pad",), **window_fields: Any) -> osk.Map:
@@ -94,7 +73,7 @@ class WindowHarness:
         self.attachments.start(self.profile)
 
     def build(self, window_id: str = "pad", overlay: object | None = None) -> RuntimeWindow:
-        with patch(_CONFIGURE_OVERLAY, return_value=overlay or FakeOverlayController()):
+        with patch(_CONFIGURE_OVERLAY, return_value=overlay or FakeOverlay(uses_custom_chrome=True)):
             window = build_profile_window(
                 self.profile.window(window_id),
                 self.context,
@@ -127,7 +106,7 @@ class RuntimeWindowCloseTests(unittest.TestCase):
 
     def test_removed_output_close_does_not_request_application_quit(self) -> None:
         harness = WindowHarness()
-        overlay = FakeOverlayController()
+        overlay = FakeOverlay(uses_custom_chrome=True)
         overlay.has_removed_output = Mock(return_value=True)  # type: ignore[attr-defined]
         window = harness.build(overlay=overlay)
         self.addCleanup(window.deleteLater)
@@ -188,7 +167,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
     def test_custom_chrome_is_skipped_when_disabled_or_unsupported(self) -> None:
         disabled = WindowHarness(chrome={"enabled": False}).build()
-        unsupported = WindowHarness().build(overlay=FakeOverlayController(uses_custom_chrome=False))
+        unsupported = WindowHarness().build(overlay=FakeOverlay())
         for window in (disabled, unsupported):
             self.addCleanup(window.deleteLater)
             with self.subTest(window=window):
@@ -197,7 +176,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
     def test_runtime_pointer_drag_reports_drag_events_for_the_window(self) -> None:
         harness = WindowHarness()
-        window = harness.build(overlay=FakeOverlayController(uses_runtime_pointer_drag=True))
+        window = harness.build(overlay=FakeOverlay(uses_custom_chrome=True, uses_runtime_pointer_drag=True))
         self.addCleanup(window.deleteLater)
         events: list[tuple[str, WindowArguments]] = []
         for name in (WINDOW_DRAG_STARTED, WINDOW_DRAG_ENDED):
@@ -349,7 +328,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertEqual(window.size(), window.minimumSize())
 
     def test_window_installs_pointer_locator_from_its_attachment(self) -> None:
-        harness = WindowHarness([osk.pointer_locator(id="glow", window="pad")], windows=("pad", "other"))
+        harness = WindowHarness([osk.pointer_locator(id="glow", window="pad", gap_color="#242424")], windows=("pad", "other"))
         window = harness.build("pad")
         other = harness.build("other")
         self.addCleanup(window.deleteLater)
@@ -371,7 +350,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
     def test_window_uses_configured_overlay_placement(self) -> None:
         harness = WindowHarness(overlay={"placement": "center"})
 
-        with patch(_CONFIGURE_OVERLAY, return_value=FakeOverlayController()) as configure_overlay:
+        with patch(_CONFIGURE_OVERLAY, return_value=FakeOverlay(uses_custom_chrome=True)) as configure_overlay:
             window = build_profile_window(harness.profile.window("pad"), harness.context)
         self.addCleanup(window.deleteLater)
 
@@ -384,7 +363,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
             patch(_CONFIGURE_OVERLAY) as configure_overlay,
             patch(
                 "axidev_osk.windows.builder.configure_plain_window",
-                return_value=FakeOverlayController(uses_custom_chrome=False),
+                return_value=FakeOverlay(),
             ) as configure_plain,
         ):
             window = build_profile_window(harness.profile.window("pad"), harness.context)

@@ -43,7 +43,7 @@ def merge(defaults: Mapping[str, Any], opts: Mapping[str, Any] | None = None) ->
 
 
 def read(state: Any, path: str | list[str]) -> Any:
-    """Read a state path, returning ``None`` when any part is absent.
+    """Read a state path, returning ``None`` when any part is absent or is not a map.
 
     ``path`` is ``"a.b.c"`` or ``["a", "b", "c"]``; use the list form when a
     segment comes from a name that may contain dots, such as a key or node ID.
@@ -51,7 +51,7 @@ def read(state: Any, path: str | list[str]) -> Any:
 
     value = state
     for segment in path.split(".") if isinstance(path, str) else path:
-        if value is None:
+        if value is None or isinstance(value, (str, int, float, list, tuple)):
             return None
         value = value[segment]
     return value

@@ -29,6 +29,8 @@ DEFAULT_FONT = {
     "weight": "medium",
 }
 
+POINTER_LOCATOR = {"gap_color": "#242424"}
+
 HOT_CORNER_INDICATOR = {
     "indicator_background": "#0B0B10",
     "indicator_track": "#242433",

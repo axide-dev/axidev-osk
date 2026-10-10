@@ -133,7 +133,7 @@ def prompt_window(
             ],
         )
     ]
-    if hint:
+    if hint is not None:
         rows.append(
             osk.label(id=f"{id}:hint", text=hint, word_wrap=True, align="top_left", style={"qss": _HINT_QSS})
         )

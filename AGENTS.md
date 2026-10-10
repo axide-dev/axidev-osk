@@ -44,9 +44,9 @@ osk.config(
 )
 ```
 
-Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error. A key set to `None` counts as absent, the way a Lua table has no key set to `nil`.
+Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error. Every profile in the root config is decoded and checked, not only the active one. A key set to `None` counts as absent, the way a Lua table has no key set to `nil`.
 
-A profile's `theme` holds its stylesheet (`qss`), Qt palette colors by role (`palette`), and its font (`font`). The engine owns no colors or font families.
+A profile's `theme` holds its stylesheet (`qss`), Qt palette colors by role (`palette`), and its font (`font`). The engine owns no colors or font families: attachments that draw, such as `hot_corners` and `pointer_locator`, take their colors as required options.
 
 Two kinds of function appear in a profile.
 
@@ -87,15 +87,15 @@ Widgets render state; they are never its source of truth. Only purely visual, mo
 
 ## Building Blocks
 
-Node kinds are the curated widgets a profile composes: `window` (top level), `grid`, `box`, `stack`, `button`, `label`, `spacer`. Each kind declares its bindable properties, its callback fields and the events they map to, how its options decode, how it builds a widget, and how a property value is applied. Every built widget carries `componentType` and `componentId` properties, and profile style hooks (`object_name`, `classes`, `properties`, `qss`) are applied to it, so QSS can target any of them. Buttons never take keyboard focus, because an on-screen keyboard must not steal typing from the target app.
+Node kinds are the curated widgets a profile composes: `window` (top level), `grid`, `box`, `stack`, `button`, `label`, `spacer`. Each kind declares its bindable properties, its callback fields and the events they map to, how its options decode, how it builds a widget, and how a property value is applied. Every built widget carries `componentType` and `componentId` properties, and profile style hooks (`object_name`, `classes`, `properties`, `qss`) are applied to it, so QSS can target any of them. A style cannot set a property the engine or the node kind sets itself, such as `componentId` or a button's `latched`. Buttons never take keyboard focus, because an on-screen keyboard must not steal typing from the target app.
 
 Every window keeps the engine's close rule unless it sets `default_close` to false: closing the window closes it, and closing the last visible window asks to quit. A profile's own `window.close_requested` handler runs as well, so a window whose close the profile handles itself, like the default keyboard, turns the rule off.
 
 Attachments are Python-owned features that run their own loop and are attached to a target by reference: `dwell` and `pointer_locator` on a window, `hot_corners` for the screen, `secure_input_panel` naming the window shown on the Plasma lock screen. A profile sets their options and talks to them through actions, events, and observed state. They do not call profile functions per pointer movement.
 
-Engine effects include `keyboard.down/up/tap/type_text`, window actions (`show`, `hide`, `close`, `move_by`, `set_opacity`, `block_input`, `unblock_input`), `dwell.set_enabled`, `state.set`, `process.spawn` with an argument list (never a shell string), `log.info/warn/error`, `app.quit`, and `linux.open_permission_setup`. A keyboard action that cannot run, for example because output is not ready, reports `action.failed`.
+Engine effects include `keyboard.down/up/tap/type_text`, window actions (`show`, `hide`, `close`, `move_by`, `set_opacity`, `block_input`, `unblock_input`), `dwell.set_enabled`, `state.set`, `process.spawn` with an argument list (never a shell string), `log.info/warn/error`, `app.quit`, and `linux.open_permission_setup`. A keyboard action that cannot run, for example because output is not ready, reports `action.failed`, and so does a window action naming a window the profile does not define.
 
-Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other quit requests become `app.quit_requested` with their reason, `signal`, `stdin_closed`, or `window_closed`, when the profile handles it; shutdown stops the profile before tearing anything down, and a step that fails is logged without stopping the exit), the lock-screen supervisor protocol, display recovery, and the background lane where spawned programs report `process.exited`.
+Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other quit requests become `app.quit_requested` with their reason, `signal`, `stdin_closed`, or `window_closed`, when the profile handles it; `app.quit` waits until no other message is queued, then shutdown closes the queue, stops the profile, and tears everything down, and a step that fails is logged without stopping the exit), the lock-screen supervisor protocol, display recovery, and the background lane where spawned programs report `process.exited`.
 
 ## How To Add Things
 

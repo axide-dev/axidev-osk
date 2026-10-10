@@ -35,6 +35,7 @@ from .app_messages import (
     WINDOW_CLOSE_REQUESTED,
     AppQuitArguments,
     WindowArguments,
+    app_quit,
     app_quit_requested,
     decode_app_quit,
     linux_permission_setup_opened,
@@ -79,6 +80,7 @@ class ApplicationRuntime:
 
         self._app = app
         self._show_startup_windows = show_startup_windows
+        self._panel_prepared = False
         self._dispatcher = Dispatcher()
         self._dispatcher_wake = QtDispatcherWake(self._dispatcher, parent=app)
         self._services = services or ServiceRegistry()
@@ -88,16 +90,17 @@ class ApplicationRuntime:
         processes = ProcessService(parent=app)
         self._services.register("processes", processes)
         engine = build_engine(self._dispatcher, keyboard=self._keyboard, processes=processes)
-        self.context = Context(dispatcher=self._dispatcher, keyboard=self._keyboard, engine=engine)
-        self._profile: ProfileConfig = engine.decoder().decode_root(
-            root_config if root_config is not None else build_default_config()
-        )
+        self.context = Context(dispatcher=self._dispatcher, engine=engine)
         hot_corners = self._services.find("hot_corner")
+        # Built before decoding: it declares the dwell root every profile is checked against.
         self._attachments = AttachmentRuntime(
             self._dispatcher,
             engine.profile,
             window_lookup=lambda window_id: self._window_manager.get(window_id),
             hot_corners=hot_corners if isinstance(hot_corners, HotCornerService) else None,
+        )
+        self._profile: ProfileConfig = engine.decoder().decode_root(
+            root_config if root_config is not None else build_default_config()
         )
         self._window_manager = WindowManager(
             {window.id: self._window_factory(window.id) for window in self._profile.windows}
@@ -106,6 +109,7 @@ class ApplicationRuntime:
         asks = confirm_quit and APP_QUIT_REQUESTED in self._profile.on
         self._quit_controller = ApplicationQuitController(
             app,
+            send_quit=lambda: self._dispatcher.dispatch(app_quit()),
             ask_to_quit=self._ask_to_quit if asks else None,
             parent=app,
         )
@@ -128,7 +132,8 @@ class ApplicationRuntime:
 
         Startup windows are shown through the queue, so every window is built
         inside a queue drain like the windows profiles show later. Shutdown
-        stops the profile first, so its callbacks never see teardown.
+        closes the queue, then stops the profile, so its callbacks never see
+        teardown.
         """
 
         apply_theme(self._app, self._profile.theme)
@@ -140,6 +145,7 @@ class ApplicationRuntime:
             self._dispatcher.dispatch(
                 *(window_show(window.id) for window in self._profile.windows if window.show_on_start)
             )
+        self._quit_controller.register_quit_callback(self._dispatcher.close)
         self._quit_controller.register_quit_callback(self.context.engine.profile.stop)
         for service in self._services.services():
             self._quit_controller.register_quit_callback(service.stop)
@@ -178,6 +184,10 @@ class ApplicationRuntime:
         return []
 
     def _quit(self, arguments: AppQuitArguments) -> MessageResult:
+        """Shut down once nothing else is waiting, so every earlier request finishes first."""
+
+        if self._dispatcher.has_pending():
+            return [app_quit(arguments.exit_code)]
         self._quit_controller.shutdown(arguments.exit_code)
         return []
 
@@ -194,15 +204,16 @@ class ApplicationRuntime:
     def _prepare_secure_input_panel(self, arguments: EmptyArguments) -> MessageResult:
         """Start keyboard output and show the profile's lock-screen window.
 
-        The panel counts as prepared while its window is live and visible.
-        Keyboard output that cannot start fails the preparation, so the
-        supervisor hears ``ERROR`` instead of a panel that cannot type.
+        Only prepare and release change whether the panel is prepared. A
+        prepared panel is shown again, in case the profile hid or closed its
+        window. Keyboard output that cannot start fails the preparation, so
+        the supervisor hears ``ERROR`` instead of a panel that cannot type.
         """
 
         del arguments
         window_id = self._secure_input_panel_window()
-        existing = self._window_manager.get(window_id)
-        if existing is not None and existing.isVisible():
+        if self._panel_prepared:
+            self._window_manager.show(window_id).set_close_enabled(False)
             return [secure_input_panel_prepared()]
         try:
             self._keyboard.start(self.context)
@@ -221,6 +232,7 @@ class ApplicationRuntime:
             except Exception:
                 _logger.exception("Failed to shut down keyboard output after panel preparation failed")
             raise
+        self._panel_prepared = True
         return [secure_input_panel_prepared()]
 
     def _release_secure_input_panel(self, arguments: EmptyArguments) -> MessageResult:
@@ -228,8 +240,9 @@ class ApplicationRuntime:
 
         del arguments
         window_id = self._secure_input_panel_window()
-        if self._window_manager.get(window_id) is None:
+        if not self._panel_prepared:
             return [secure_input_panel_released()]
+        self._panel_prepared = False
         try:
             self._keyboard.reset_state()
         finally:

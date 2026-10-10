@@ -13,7 +13,6 @@ from ..config.models import PointerLocatorConfig
 from ..windows.surface import RootSurface
 
 _GRADIENT_SEGMENTS = 32
-_GAP_COLOR = QColor("#242424")
 
 
 def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> QWidget:
@@ -226,7 +225,7 @@ class PointerLocator(QWidget):
             (target for target in self._color_targets if target[1].contains(local_position)),
             None,
         )
-        self._color = QColor(target[2] if target is not None else _GAP_COLOR)
+        self._color = QColor(target[2] if target is not None else self._config.gap_color)
         self._cursor_position = local_position
         if self.geometry() != self._host.rect():
             self.setGeometry(self._host.rect())

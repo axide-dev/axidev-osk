@@ -17,6 +17,7 @@ return so callers can treat layer-shell as an optional optimization.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import re
 import shutil
@@ -31,6 +32,7 @@ from PySide6.QtCore import QMargins, QObject, QLibraryInfo
 from PySide6.QtGui import QWindow
 from PySide6.QtWidgets import QWidget
 
+_logger = logging.getLogger(__name__)
 
 ANCHOR_TOP = 1
 ANCHOR_BOTTOM = 2
@@ -102,7 +104,8 @@ def attach_wayland_layer_shell(window: QWidget) -> bool:
     """Make ``window`` a layer surface; call it before the window is first shown.
 
     The attachment survives hiding, showing, and Qt recreating the native
-    window. Properties are set later with ``apply_wayland_layer_shell``.
+    window. Properties are set later with ``apply_wayland_layer_shell``. A
+    failure is logged: the window then shows as an ordinary window.
     """
 
     if not is_wayland_session():
@@ -111,7 +114,11 @@ def attach_wayland_layer_shell(window: QWidget) -> bool:
     if handle is None:
         window.winId()
         handle = window.windowHandle()
-    return handle is not None and _layer_shell_window(handle) is not None
+    attached = handle is not None and _layer_shell_window(handle) is not None
+    if not attached:
+        _logger.warning("Could not make %s a layer-shell surface; it shows as an ordinary window", type(window).__name__)
+    return attached
+
 
 def apply_wayland_layer_shell(
     window: QWidget,

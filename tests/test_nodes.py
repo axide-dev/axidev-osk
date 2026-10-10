@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel, QStackedWidget, QWidget
 
@@ -12,11 +12,11 @@ from axidev_osk.config.profile import ProfileConfig
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.messages import DataMap
 from axidev_osk.nodes import NodeKind
+from axidev_osk.runtime.engine_messages import keyboard_status_changed
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
-from axidev_osk.windows.builder import build_profile_window
-from support import FakeOverlay, RecordingBackend, qt_app
+from support import RecordingBackend, build_window, find_node, qt_app
 
 
 def _button(node_id: str, **fields: object) -> dict[str, object]:
@@ -38,17 +38,12 @@ class NodeTests(unittest.TestCase):
         )
 
     def _window(self, profile: ProfileConfig) -> QWidget:
-        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
-            window = build_profile_window(profile.window("pad"), self.context)
-        self.addCleanup(window.deleteLater)
+        window = build_window(self, profile.window("pad"), self.context)
         window.show()
         return window
 
     def _find(self, window: QWidget, node_id: str) -> QWidget:
-        for child in window.findChildren(QWidget):
-            if child.property("componentId") == node_id:
-                return child
-        raise AssertionError(f"node {node_id!r} not found")
+        return find_node(window, node_id)
 
     def test_buttons_bind_labels_and_states_to_profile_state(self) -> None:
         def legend(state: object) -> str:
@@ -77,6 +72,29 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(self._find(window, "plain").text(), "Plain")  # type: ignore[attr-defined]
         self.assertEqual(key.focusPolicy(), Qt.FocusPolicy.NoFocus)
         self.assertEqual(window.objectName(), "padWindow")
+
+    def test_button_labels_show_ampersands_as_written(self) -> None:
+        profile = self._profile(
+            {"kind": "box", "id": "row", "children": [_button("and", label="&"), _button("save", label="S&ave")]}
+        )
+        window = self._window(profile)
+
+        for node_id in ("and", "save"):
+            with self.subTest(node_id):
+                key = self._find(window, node_id)
+                assert isinstance(key, Button)
+                self.assertTrue(QKeySequence.mnemonic(key.text()).isEmpty())
+
+    def test_a_spacer_keeps_its_minimum_size_and_lets_clicks_through(self) -> None:
+        profile = self._profile(
+            {"kind": "box", "id": "row", "direction": "horizontal", "children": [
+                {"kind": "spacer", "id": "gap", "min_width": 30, "min_height": 10},
+            ]}
+        )
+        gap = self._find(self._window(profile), "gap")
+
+        self.assertEqual((gap.minimumWidth(), gap.minimumHeight()), (30, 10))
+        self.assertTrue(gap.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents))
 
     def test_built_nodes_never_become_windows_of_their_own(self) -> None:
         profile = self._profile(
@@ -168,7 +186,7 @@ class NodeTests(unittest.TestCase):
                 ],
             }
         )
-        self.engine.profile.set_observed(("keyboard", "status"), "ready")
+        self.context.dispatcher.dispatch(keyboard_status_changed(True, "ready", False, ""))
         window = self._window(profile)
         status = self._find(window, "status")
         pages = self._find(window, "pages")
@@ -178,6 +196,44 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(pages.currentWidget().property("componentId"), "one")
         self.context.dispatcher.dispatch(state_set("page", "two"))
         self.assertEqual(pages.currentWidget().property("componentId"), "two")
+
+    def test_a_stack_page_that_does_not_exist_is_reported(self) -> None:
+        failures: list[DataMap] = []
+        self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
+        profile = self._profile(
+            {"kind": "stack", "id": "pages", "current": lambda s: s.page or "one", "children": [
+                {"kind": "label", "id": "one", "text": "One"},
+            ]}
+        )
+        pages = self._find(self._window(profile), "pages")
+        assert isinstance(pages, QStackedWidget)
+
+        self.context.dispatcher.dispatch(state_set("page", "nope"))
+
+        self.assertEqual([failure["message"] for failure in failures], ["Stack 'pages' has no page 'nope'"])
+        self.assertEqual(pages.currentWidget().property("componentId"), "one")
+
+    def test_stack_pages_cannot_set_visible(self) -> None:
+        for visible in (True, lambda s: s.show):
+            with self.subTest(visible=visible), self.assertRaisesRegex(
+                ConfigError, r"children\[1\]\.visible cannot be set on a stack page"
+            ):
+                self._profile(
+                    {"kind": "stack", "id": "pages", "current": "one", "children": [
+                        {"kind": "label", "id": "one", "text": "One"},
+                        {"kind": "label", "id": "two", "text": "Two", "visible": visible},
+                    ]}
+                )
+
+    def test_styles_cannot_set_the_properties_the_engine_sets(self) -> None:
+        cases = {
+            "componentId": {"kind": "label", "id": "a"},
+            "latched": _button("a"),
+        }
+        for name, node in cases.items():
+            content = {**node, "style": {"properties": {name: "x"}}}
+            with self.subTest(name), self.assertRaisesRegex(ConfigError, f"cannot set engine properties: {name}"):
+                self._profile(content)
 
     def test_placement_fields_are_checked_where_the_parent_reads_them(self) -> None:
         cell = {"row": 0, "column": 0}

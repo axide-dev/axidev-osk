@@ -23,6 +23,7 @@ def _locator_config(**overrides: object) -> PointerLocatorConfig:
         "radius_percent": 30,
         "maximum_opacity_percent": 60,
         "radius_standard_deviations": 3,
+        "gap_color": "#242424",
     }
     values.update(overrides)
     return PointerLocatorConfig(**values)

@@ -1,11 +1,16 @@
-"""Shared test doubles: the Qt application, a recording keyboard backend, an overlay, and app-action recorders."""
+"""Shared test doubles and helpers: the Qt application, a recording keyboard backend, an overlay, window building, and app-action recorders."""
 
 from __future__ import annotations
 
+import unittest
 from collections.abc import Callable
+from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
+from axidev_osk.attachments.runtime import WindowAttachments
+from axidev_osk.config.models import HotCornerConfig
+from axidev_osk.config.profile import WindowConfig
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import (
     APP_QUIT,
@@ -22,8 +27,10 @@ from axidev_osk.runtime.app_messages import (
     decode_window_set_opacity,
 )
 from axidev_osk.runtime.decoding import decode_empty
+from axidev_osk.runtime.context import Context
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.services.keyboard.io import KeyPressHandle
+from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 
 _APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
     WINDOW_SHOW: decode_window,
@@ -35,6 +42,19 @@ _APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
     APP_QUIT: decode_app_quit,
     LINUX_OPEN_PERMISSION_SETUP: decode_empty,
 }
+
+
+HOT_CORNER_COLORS = {
+    "indicator_background": "#000000",
+    "indicator_track": "#808080",
+    "indicator_progress": "#FFFFFF",
+    "indicator_center": "#404040",
+}
+"""Indicator colors for tests; profiles always give their own."""
+
+
+def hot_corner_config(**fields: int) -> HotCornerConfig:
+    return HotCornerConfig(**HOT_CORNER_COLORS, **fields)
 
 
 def qt_app() -> QApplication:
@@ -57,6 +77,7 @@ class RecordingBackend:
         self.sent: list[tuple[object, ...]] = []
         self.observers: list[Callable[[object], None]] = []
         self.initialized = 0
+        self.shutdowns = 0
         self._canonical = canonical
 
     def initialize(self) -> bool:
@@ -64,7 +85,13 @@ class RecordingBackend:
         return self.ready
 
     def shutdown(self) -> None:
-        return None
+        self.shutdowns += 1
+
+    def observe(self, observation: object) -> None:
+        """Deliver a key observation to every listener, as the listener thread does."""
+
+        for listener in tuple(self.observers):
+            listener(observation)
 
     def add_observation_listener(self, listener: Callable[[object], None]) -> Callable[[], None]:
         self.observers.append(listener)
@@ -90,7 +117,9 @@ class RecordingBackend:
 class FakeOverlay:
     """An overlay controller that does nothing platform-specific."""
 
-    uses_custom_chrome = False
+    def __init__(self, *, uses_custom_chrome: bool = False, uses_runtime_pointer_drag: bool = False) -> None:
+        self.uses_custom_chrome = uses_custom_chrome
+        self.uses_runtime_pointer_drag = uses_runtime_pointer_drag
 
     def handle_show(self) -> bool:
         return True
@@ -100,6 +129,39 @@ class FakeOverlay:
 
     def resize_by(self, dx: int, dy: int) -> None:
         del dx, dy
+
+
+def build_window(
+    test: unittest.TestCase,
+    config: WindowConfig,
+    context: Context,
+    *,
+    attachments: WindowAttachments | None = None,
+    overlay: object | None = None,
+) -> RuntimeWindow:
+    """Build a profile window with a fake overlay; the window is deleted when ``test`` ends."""
+
+    with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=overlay or FakeOverlay()):
+        window = build_profile_window(config, context, attachments=attachments)
+    test.addCleanup(window.deleteLater)
+    return window
+
+
+def nodes_by_id(root: QWidget) -> dict[str, QWidget]:
+    """Every widget built for a node under ``root``, by node ID."""
+
+    return {
+        str(child.property("componentId")): child
+        for child in root.findChildren(QWidget)
+        if child.property("componentId") is not None
+    }
+
+
+def find_node(root: QWidget, node_id: str) -> QWidget:
+    widget = nodes_by_id(root).get(node_id)
+    if widget is None:
+        raise AssertionError(f"node {node_id!r} not found")
+    return widget
 
 
 def record_app_actions(dispatcher: Dispatcher) -> list[tuple[str, DataMap]]:

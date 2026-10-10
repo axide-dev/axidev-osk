@@ -157,12 +157,14 @@ class PointerLocatorConfig:
         radius_percent: Glow radius as a percentage of the surface's shorter side.
         maximum_opacity_percent: Glow opacity at the pointer position.
         radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
+        gap_color: Glow color while the pointer is between buttons.
     """
 
     id: str
     radius_percent: float
     maximum_opacity_percent: float
     radius_standard_deviations: float
+    gap_color: str
 
     def __post_init__(self) -> None:
         """Reject values that cannot define a visible glow."""
@@ -177,26 +179,29 @@ class PointerLocatorConfig:
 
 @dataclass(frozen=True, slots=True)
 class HotCornerConfig:
-    """Hot-corner sensor timing and size.
+    """Hot-corner sensor timing, size, and indicator colors.
+
+    The colors have no defaults: the profile gives them, as the engine owns no
+    colors.
 
     Attributes:
+        indicator_background: Fill of the indicator disc.
+        indicator_track: Color of the ring the progress runs along.
+        indicator_progress: Color of the progress arc.
+        indicator_center: Fill of the center, which strengthens as the dwell completes.
         dwell_ms: Cursor dwell time required before a corner triggers.
         poll_interval_ms: Cursor/sensor polling interval in milliseconds.
         corner_size_px: Edge length of each hot-corner sensor region.
         indicator_size_px: Edge length of the visual dwell indicator.
         indicator_margin_px: Pixel margin between the indicator and screen edges.
-        indicator_background: Fill of the indicator disc.
-        indicator_track: Color of the ring the progress runs along.
-        indicator_progress: Color of the progress arc.
-        indicator_center: Fill of the center, which strengthens as the dwell completes.
     """
 
+    indicator_background: str
+    indicator_track: str
+    indicator_progress: str
+    indicator_center: str
     dwell_ms: int = 200
     poll_interval_ms: int = 25
     corner_size_px: int = 20
     indicator_size_px: int = 52
     indicator_margin_px: int = 14
-    indicator_background: str = "#000000"
-    indicator_track: str = "#808080"
-    indicator_progress: str = "#FFFFFF"
-    indicator_center: str = "#808080"

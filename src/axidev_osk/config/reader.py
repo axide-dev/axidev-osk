@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from typing import TypeVar
 
 from ..function_registry import FunctionRef, FunctionRegistry
-from ..messages import DataMap, DataValue, copy_data_map, copy_data_value
+from ..messages import DataMap, DataValue, copy_data_value
 
 T = TypeVar("T")
 
@@ -47,10 +47,6 @@ class ConfigReader:
     @property
     def path(self) -> str:
         return self._path
-
-    @property
-    def functions(self) -> FunctionRegistry:
-        return self._functions
 
     def field_path(self, key: str) -> str:
         return f"{self._path}.{key}"
@@ -128,17 +124,29 @@ class ConfigReader:
         return value
 
     def data_map(self, key: str, default: DataMap | object = _MISSING) -> DataMap:
-        value = self.raw(key, default)
-        try:
-            return copy_data_map(value)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError(f"{self.field_path(key)} must be plain data: {exc}") from exc
+        """Read a map of plain data, leaving out keys set to ``None`` at every depth."""
 
-    def function(self, key: str) -> FunctionRef:
-        value = self.raw(key)
-        if not callable(value):
-            raise ConfigError(f"{self.field_path(key)} must be a function")
-        return self._functions.register(value)
+        value = self.raw(key, default)
+        if not isinstance(value, Mapping):
+            raise ConfigError(f"{self.field_path(key)} must be a map")
+        try:
+            copied = copy_data_value(value, path=self.field_path(key))
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(str(exc)) from exc
+        assert isinstance(copied, dict)
+        return _without_none(copied)
+
+    def integer_list(self, key: str, default: tuple[int, ...], *, shape: str) -> tuple[int, ...]:
+        """Read a list of non-negative integers as long as ``default``; ``shape`` names its items in errors."""
+
+        value = self.raw(key, list(default))
+        if (
+            not isinstance(value, list)
+            or len(value) != len(default)
+            or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in value)
+        ):
+            raise ConfigError(f"{self.field_path(key)} must be {shape}")
+        return tuple(value)
 
     def optional_function(self, key: str) -> FunctionRef | None:
         value = self.raw(key, None)
@@ -155,9 +163,9 @@ class ConfigReader:
         if callable(value):
             return self._functions.register(value)
         try:
-            return copy_data_value(value)
+            return copy_data_value(value, path=self.field_path(key))
         except (TypeError, ValueError) as exc:
-            raise ConfigError(f"{self.field_path(key)} must be plain data or a function: {exc}") from exc
+            raise ConfigError(f"{exc}; a property must be plain data or a function") from exc
 
     def string_list(self, key: str, default: list[str] | object = _MISSING) -> tuple[str, ...]:
         value = self.raw(key, default)
@@ -211,3 +219,11 @@ class ConfigReader:
         unknown = sorted(key for key, value in self._data.items() if value is not None and key not in self._consumed)
         if unknown:
             raise ConfigError(f"{self._path} has unknown keys: {', '.join(unknown)}")
+
+
+def _without_none(data: DataMap) -> DataMap:
+    return {
+        key: _without_none(value) if isinstance(value, dict) else value
+        for key, value in data.items()
+        if value is not None
+    }

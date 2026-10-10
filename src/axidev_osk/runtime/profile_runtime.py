@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..config.profile import ProfileConfig
-from ..config.reader import Bindable
+from ..config.reader import Bindable, ConfigError
 from ..function_registry import FunctionRef, FunctionRegistry
 from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent, data_equal
 from .decoding import (
@@ -137,26 +137,38 @@ class ProfileRuntime:
     def state(self) -> StateTree:
         return self._state
 
+    def check(self, profile: ProfileConfig, path: str) -> None:
+        """Reject a profile that handles unknown events or sets a runtime-owned root.
+
+        The config decoder runs this on every profile it decodes.
+        """
+
+        unknown = sorted(name for name in profile.on if not self._dispatcher.has_event(name))
+        if unknown:
+            raise ConfigError(f"{path}.on handles unknown events: {', '.join(unknown)}")
+        reserved = sorted(name for name in profile.state if name in self._runtime_roots)
+        if reserved:
+            raise ConfigError(f"{path}.state cannot define runtime roots: {', '.join(reserved)}")
+
     def start(self, profile: ProfileConfig) -> None:
         """Load profile state and install its ``on`` callbacks.
 
-        Every check runs before anything changes, so a rejected profile leaves
-        the running one untouched.
+        Starting replaces a running profile. Every top-level state key whose
+        value differs afterwards is reported with ``state.changed`` before the
+        new callbacks are installed, so bindings already built re-run.
         """
 
-        path = f"config.profiles.{profile.id}"
-        unknown = sorted(name for name in profile.on if not self._dispatcher.has_event(name))
-        if unknown:
-            raise ValueError(f"{path}.on handles unknown events: {', '.join(unknown)}")
-        reserved = sorted(name for name in profile.state if name in self._runtime_roots)
-        if reserved:
-            raise ValueError(f"{path}.state cannot define runtime roots: {', '.join(reserved)}")
         self.stop()
+        before = self._state.get(())
         runtime_state = {root: self._state.get((root,)) for root in self._runtime_roots}
         self._state.reset(profile.state)
         for root, value in runtime_state.items():
             if value is not None:
                 self._state.set((root,), value)
+        after = self._state.get(())
+        assert isinstance(before, dict) and isinstance(after, dict)
+        changed = sorted(key for key in before.keys() | after.keys() if not data_equal(before.get(key), after.get(key)))
+        self._dispatcher.dispatch(*(state_changed((key,)) for key in changed))
         for event_name, refs in profile.on.items():
             self._unsubscribes.append(
                 self._dispatcher.add_raw_event_handler(event_name, self._callback_runner(event_name, refs))

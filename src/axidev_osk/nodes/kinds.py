@@ -102,6 +102,7 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
                 **_VISIBLE,
             },
             callbacks={"on_press": BUTTON_PRESSED, "on_release": BUTTON_RELEASED},
+            widget_properties=frozenset({"pressed", "latched", "interactionState"}),
             decode_options=_decode_size,
         )
     )
@@ -144,6 +145,7 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             apply=_apply_stack,
             properties={"current": PropertySpec(str), **_VISIBLE},
             has_children=True,
+            decode_child_placement=_decode_stack_page,
         )
     )
 
@@ -166,14 +168,8 @@ def _decode_label(reader: ConfigReader) -> LabelOptions:
 
 
 def _decode_margins(reader: ConfigReader) -> tuple[int, int, int, int]:
-    margins = reader.raw("margins", [0, 0, 0, 0])
-    if (
-        not isinstance(margins, list)
-        or len(margins) != 4
-        or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in margins)
-    ):
-        raise ConfigError(f"{reader.field_path('margins')} must be [left, top, right, bottom] in pixels")
-    return (margins[0], margins[1], margins[2], margins[3])
+    left, top, right, bottom = reader.integer_list("margins", (0, 0, 0, 0), shape="[left, top, right, bottom] in pixels")
+    return (left, top, right, bottom)
 
 
 def _decode_grid(reader: ConfigReader) -> GridOptions:
@@ -204,6 +200,13 @@ def _decode_box_placement(reader: ConfigReader) -> BoxPlacement:
     return BoxPlacement(stretch=reader.integer("stretch", 0, minimum=0))
 
 
+def _decode_stack_page(reader: ConfigReader) -> None:
+    """A stack shows its ``current`` page, so its pages cannot set ``visible``."""
+
+    if reader.has("visible"):
+        raise ConfigError(f"{reader.field_path('visible')} cannot be set on a stack page; the stack's current chooses the page")
+
+
 def _apply_common(widget: QWidget, name: str, value: DataValue) -> None:
     if name == "visible":
         if not value:
@@ -221,9 +224,6 @@ def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     options.apply(button)
-    button.setProperty("pressed", False)
-    button.setProperty("latched", False)
-    button.setProperty("interactionState", "idle")
     button.pressed.connect(lambda: builder.emit(BUTTON_PRESSED, node.id))
     button.released.connect(lambda: builder.emit(BUTTON_RELEASED, node.id))
     return button
@@ -232,7 +232,8 @@ def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
 def _apply_button(widget: QWidget, name: str, value: DataValue) -> None:
     if name == "label":
         assert isinstance(widget, Button)
-        widget.setText("" if value is None else str(value))
+        # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
+        widget.setText(str(value).replace("&", "&&"))
         return
     if name == "enabled":
         widget.setEnabled(bool(value))
@@ -273,7 +274,7 @@ def _build_label(node: NodeConfig, builder: NodeBuilder) -> QWidget:
 def _apply_label(widget: QWidget, name: str, value: DataValue) -> None:
     if name == "text":
         assert isinstance(widget, QLabel)
-        widget.setText("" if value is None else str(value))
+        widget.setText(str(value))
         return
     _apply_common(widget, name, value)
 
@@ -342,5 +343,5 @@ def _apply_stack(widget: QWidget, name: str, value: DataValue) -> None:
             if page is not None and page.property("componentId") == value:
                 widget.setCurrentWidget(page)
                 return
-        return
+        raise ValueError(f"Stack {widget.property('componentId')!r} has no page {value!r}")
     _apply_common(widget, name, value)

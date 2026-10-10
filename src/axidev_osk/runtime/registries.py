@@ -32,8 +32,10 @@ class ServiceRegistry:
         self._deferred: set[str] = set()
 
     def register(self, name: str, service: RuntimeService, *, autostart: bool = True) -> None:
-        """Register a runtime service under a stable name."""
+        """Register a runtime service under a stable name; a name can be registered once."""
 
+        if name in self._services:
+            raise ValueError(f"Service {name!r} is already registered")
         self._services[name] = service
         if autostart:
             self._deferred.discard(name)

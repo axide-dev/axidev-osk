@@ -66,7 +66,8 @@ class Dispatcher:
     sent from any other thread wait in a locked inbox, and the ``wake``
     callback set with ``set_wake`` asks the owner thread to call
     ``process_pending``. The dispatcher owns ``action.failed``, the event it
-    reports when an action fails.
+    reports when an action fails. Once closed, it drops every waiting and
+    later message.
     """
 
     def __init__(self) -> None:
@@ -78,6 +79,7 @@ class Dispatcher:
         self._inbox: deque[RuntimeMessage] = deque()
         self._inbox_lock = threading.Lock()
         self._wake: Wake | None = None
+        self._closed = False
         self.register_event(ACTION_FAILED, decode_action_failed)
 
     def set_wake(self, wake: Wake | None) -> None:
@@ -143,6 +145,23 @@ class Dispatcher:
     def has_event(self, name: str) -> bool:
         return name in self._events
 
+    def has_pending(self) -> bool:
+        """Whether any message is waiting, in the queue or in the inbox."""
+
+        with self._inbox_lock:
+            return bool(self._queue or self._inbox)
+
+    def close(self) -> None:
+        """Drop every waiting message and refuse later ones; used once the app shuts down."""
+
+        self._closed = True
+        with self._inbox_lock:
+            dropped = len(self._queue) + len(self._inbox)
+            self._inbox.clear()
+        self._queue.clear()
+        if dropped:
+            _logger.info("Dropped %d runtime messages at shutdown", dropped)
+
     def _subscribe(self, name: str, handler: Callable[[object], MessageResult], *, raw: bool) -> Unsubscribe:
         definition = self._events.get(name)
         if definition is None:
@@ -163,6 +182,9 @@ class Dispatcher:
         thread drains.
         """
 
+        if self._closed:
+            _logger.info("Dropped %d runtime messages sent after shutdown", len(messages))
+            return
         if threading.get_ident() != self._owner_thread:
             with self._inbox_lock:
                 self._inbox.extend(messages)
@@ -183,7 +205,7 @@ class Dispatcher:
         self._draining = True
         processed = 0
         try:
-            while True:
+            while not self._closed:
                 if not self._queue:
                     self._take_inbox()
                     if not self._queue:
@@ -232,10 +254,12 @@ class Dispatcher:
                 return
 
     def _append_results(self, messages: MessageResult) -> None:
-        for message in messages:
+        results = list(messages)
+        for message in results:
             if not isinstance(message, (RuntimeAction, RuntimeEvent)):
                 raise TypeError(f"Message handlers must return runtime messages, got {type(message).__name__}")
-        self._queue.extend(messages)
+        if not self._closed:
+            self._queue.extend(results)
 
     def _fail_action(self, action: RuntimeAction, *, stage: str, error: Exception) -> None:
         _logger.error(
@@ -246,6 +270,8 @@ class Dispatcher:
             type(error).__name__,
             error,
         )
+        if self._closed:
+            return
         self._queue.append(
             RuntimeEvent(
                 event=ACTION_FAILED,

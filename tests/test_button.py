@@ -1,24 +1,18 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
 from axidev_osk.components.button import Button
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
-from axidev_osk.windows.builder import build_profile_window
 from axidev_osk.windows.chrome import OverlayTitleBar
-from support import FakeOverlay, RecordingBackend, qt_app
-
-
-def _find_button(parent: QWidget, node_id: str) -> Button:
-    return next(child for child in parent.findChildren(Button) if child.property("componentId") == node_id)
+from support import RecordingBackend, build_window, find_node, qt_app
 
 
 class ButtonTests(unittest.TestCase):
@@ -82,12 +76,10 @@ class ButtonTests(unittest.TestCase):
                 },
             },
         )
-        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
-            window = build_profile_window(profile.window("pad"), context)
-        self.addCleanup(window.deleteLater)
+        window = build_window(self, profile.window("pad"), context)
         window.show()
 
-        QTest.mouseClick(_find_button(window, "moo"), Qt.MouseButton.RightButton)
+        QTest.mouseClick(find_node(window, "moo"), Qt.MouseButton.RightButton)
 
         self.assertEqual(events, [(BUTTON_PRESSED, {"node": "moo"}), (BUTTON_RELEASED, {"node": "moo"})])
 

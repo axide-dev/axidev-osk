@@ -1,14 +1,17 @@
+import re
 import unittest
 
 from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtWidgets import QWidget
 
+from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.python_defaults import osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.python_defaults.theme import DEFAULT_FONT, DEFAULT_QSS
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.runtime.testing import make_test_context, start_test_profile
 from axidev_osk.styles.theme import apply_theme
-from support import RecordingBackend, qt_app
+from support import FakeOverlay, RecordingBackend, build_window, qt_app
 
 
 def _decode(theme: osk.Map) -> object:
@@ -44,16 +47,26 @@ class ThemeTests(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 _decode(theme)
 
-    def test_default_stylesheet_targets_the_keyboard_and_interaction_states(self) -> None:
-        self.assertIn("QWidget#keyboard {", DEFAULT_QSS)
-        self.assertIn('QPushButton[interactionState="pressed"]', DEFAULT_QSS)
-        self.assertIn('QPushButton[interactionState="latched_pressed"]', DEFAULT_QSS)
+    def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
+        qt_app()
+        context = make_test_context(RecordingBackend())
+        attachments = AttachmentRuntime(context.dispatcher, context.engine.profile, window_lookup=lambda _id: None)
+        profile = start_test_profile(context, build_default_config())
+        attachments.start(profile)
+        window = build_window(
+            self,
+            profile.window("keyboard"),
+            context,
+            attachments=attachments.for_window("keyboard"),
+            overlay=FakeOverlay(uses_custom_chrome=True),
+        )
+        widgets = [window, *window.findChildren(QWidget)]
+        object_names = {widget.objectName() for widget in widgets}
+        properties = {bytes(name.data()).decode() for widget in widgets for name in widget.dynamicPropertyNames()}
+        selectors = "".join(re.findall(r"([^{}]+)\{", DEFAULT_QSS))
 
-    def test_pointer_locator_surface_uses_translucent_button_backgrounds(self) -> None:
-        self.assertIn('QWidget[pointerLocatorEnabled="true"] QPushButton', DEFAULT_QSS)
-        self.assertIn("rgba(18, 18, 26, 153)", DEFAULT_QSS)
-        self.assertIn("rgba(16, 16, 24, 153)", DEFAULT_QSS)
-
+        self.assertEqual(set(re.findall(r"#([A-Za-z_][\w-]*)", selectors)) - object_names, set())
+        self.assertEqual(set(re.findall(r"\[([A-Za-z_]\w*)", selectors)) - properties, set())
 
 if __name__ == "__main__":
     unittest.main()

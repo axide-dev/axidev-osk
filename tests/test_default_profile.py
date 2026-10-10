@@ -8,21 +8,19 @@ engine-built keyboard widget before it was deleted. Each grid row is
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
-from PySide6.QtWidgets import QGridLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QGridLayout, QPushButton
 
 from axidev_osk.attachments import DwellOptions, PointerLocatorOptions
-from axidev_osk.attachments.runtime import DWELL_SET_ENABLED, decode_dwell_set_enabled
-from axidev_osk.messages import MessageResult, RuntimeEvent
+from axidev_osk.attachments.runtime import AttachmentRuntime
+from axidev_osk.messages import RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_default_config
 from axidev_osk.python_defaults.osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
 from axidev_osk.runtime.testing import make_test_context, start_test_profile
-from axidev_osk.windows.builder import build_profile_window
-from support import FakeOverlay, RecordingBackend, qt_app, record_app_actions
+from support import RecordingBackend, build_window, nodes_by_id, qt_app, record_app_actions
 
 _MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "SuperRight", "AltLeft", "AltRight"}
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
@@ -42,25 +40,17 @@ def _keyboard_report(*, blocked: bool, opacity: float) -> RuntimeEvent:
 
 
 class DefaultProfileHarness:
-    def __init__(self) -> None:
+    def __init__(self, test: unittest.TestCase) -> None:
         qt_app()
         self.backend = RecordingBackend()
         self.context = make_test_context(self.backend)
         self.engine = self.context.engine
         self.actions = record_app_actions(self.context.dispatcher)
-        self.context.dispatcher.register_action(DWELL_SET_ENABLED, decode_dwell_set_enabled, self._record_dwell)
+        self.attachments = AttachmentRuntime(self.context.dispatcher, self.engine.profile, window_lookup=lambda _id: None)
         self.profile = start_test_profile(self.context, build_default_config())
-        with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=FakeOverlay()):
-            self.window = build_profile_window(self.profile.window("keyboard"), self.context)
-        self.nodes = {
-            child.property("componentId"): child
-            for child in self.window.findChildren(QWidget)
-            if child.property("componentId") is not None
-        }
-
-    def _record_dwell(self, arguments: object) -> MessageResult:
-        self.actions.append((DWELL_SET_ENABLED, {"dwell": arguments.dwell, "enabled": arguments.enabled}))  # type: ignore[attr-defined]
-        return []
+        self.attachments.start(self.profile)
+        self.window = build_window(test, self.profile.window("keyboard"), self.context)
+        self.nodes = nodes_by_id(self.window)
 
     def press(self, node_id: str) -> None:
         self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
@@ -89,7 +79,7 @@ class DefaultProfileHarness:
 
 class LayoutParityTests(unittest.TestCase):
     def test_grid_matches_the_original_keyboard_exactly(self) -> None:
-        harness = DefaultProfileHarness()
+        harness = DefaultProfileHarness(self)
         layout = harness.nodes["keyboard-grid"].layout()
         assert isinstance(layout, QGridLayout)
         measured = []
@@ -104,7 +94,7 @@ class LayoutParityTests(unittest.TestCase):
         self.assertEqual(sum(1 for row in range(layout.rowCount()) if layout.rowStretch(row)), 6)
 
     def test_every_key_sends_the_original_output(self) -> None:
-        harness = DefaultProfileHarness()
+        harness = DefaultProfileHarness(self)
 
         for node_id in harness.key_ids():
             if node_id in {"ghost", "dwell"}:
@@ -177,7 +167,7 @@ class ConfigParityTests(unittest.TestCase):
 
 class BehaviorParityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = DefaultProfileHarness()
+        self.harness = DefaultProfileHarness(self)
 
     def test_modifiers_hold_their_key_until_tapped_again_and_legends_follow(self) -> None:
         harness = self.harness
@@ -240,23 +230,19 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_dwell_key_toggles_the_dwell_attachment(self) -> None:
         harness = self.harness
-        harness.engine.profile.declare_root("dwell", {})
+        enabled = ("dwell", "keyboard-dwell", "enabled")
+
         harness.tap("dwell")
-        harness.emit(*harness.engine.profile.set_observed(("dwell", "keyboard-dwell", "enabled"), True))
+        self.assertIs(harness.engine.profile.state.get(enabled), True)
         self.assertTrue(harness.nodes["dwell"].property("latched"))
         harness.tap("dwell")
 
-        self.assertEqual(
-            harness.actions,
-            [
-                ("dwell.set_enabled", {"dwell": "keyboard-dwell", "enabled": True}),
-                ("dwell.set_enabled", {"dwell": "keyboard-dwell", "enabled": False}),
-            ],
-        )
+        self.assertIs(harness.engine.profile.state.get(enabled), False)
+        self.assertFalse(harness.nodes["dwell"].property("latched"))
 
     def test_hot_corner_toggles_the_keyboard(self) -> None:
         harness = self.harness
-        harness.engine.profile.set_observed(("windows", "keyboard", "visible"), True)
+        harness.emit(_keyboard_report(blocked=False, opacity=KEYBOARD_OPACITY))
 
         harness.emit(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
 

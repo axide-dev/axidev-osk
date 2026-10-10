@@ -55,6 +55,11 @@ class NodeKindSpec(Protocol):
     @property
     def has_children(self) -> bool: ...
 
+    @property
+    def widget_properties(self) -> frozenset[str]:
+        """Widget properties the kind sets itself, which a profile style cannot set."""
+        ...
+
     def decode_options(self, reader: ConfigReader, /) -> object: ...
 
     def decode_child_placement(self, reader: ConfigReader, /) -> object:
@@ -67,6 +72,10 @@ PlacementDecoder = Callable[[ConfigReader], object]
 
 class AttachmentKindSpec(Protocol):
     def decode_options(self, reader: ConfigReader, /) -> object: ...
+
+
+ENGINE_WIDGET_PROPERTIES = frozenset({"componentType", "componentId", "classes", "pointerLocatorEnabled"})
+"""Widget properties the engine sets on windows and nodes, which a profile style cannot set."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +195,10 @@ class ProfileConfig:
         return [node for window in self.windows for node in window.content.walk()]
 
 
+ProfileCheck = Callable[[ProfileConfig, str], None]
+"""Engine checks a decoded profile must pass, given the profile and its config path."""
+
+
 class ConfigDecoder:
     """Decode root config data with registered node and attachment kinds."""
 
@@ -195,10 +208,12 @@ class ConfigDecoder:
         node_kinds: Mapping[str, NodeKindSpec],
         attachment_kinds: Mapping[str, AttachmentKindSpec],
         functions: FunctionRegistry,
+        check_profile: ProfileCheck,
     ) -> None:
         self._node_kinds = node_kinds
         self._attachment_kinds = attachment_kinds
         self._functions = functions
+        self._check_profile = check_profile
 
     def decode_root(self, data: object) -> ProfileConfig:
         """Validate every profile in a root config and return the active one."""
@@ -248,6 +263,7 @@ class ConfigDecoder:
         _require_unique((window.id for window in windows), f"{reader.path}.windows")
         _require_unique((node.id for node in profile.nodes()), f"{reader.path} nodes")
         _require_unique((attachment.id for attachment in attachments), f"{reader.path}.attachments")
+        self._check_profile(profile, reader.path)
         return profile
 
     def _decode_window(self, reader: ConfigReader) -> WindowConfig:
@@ -264,7 +280,7 @@ class ConfigDecoder:
             show_on_start=reader.boolean("show_on_start", False),
             overlay=overlay,
             chrome=chrome,
-            minimum_size=_size(reader, "minimum_size", (0, 0)),
+            minimum_size=_pair(reader.integer_list("minimum_size", (0, 0), shape="[width, height] in pixels")),
             default_close=reader.boolean("default_close", True),
         )
 
@@ -295,7 +311,7 @@ class ConfigDecoder:
         return NodeConfig(
             kind=kind_name,
             id=node_id,
-            style=_decode_style(reader),
+            style=_decode_style(reader, ENGINE_WIDGET_PROPERTIES | kind.widget_properties),
             options=kind.decode_options(reader),
             bindings=bindings,
             callbacks=callbacks,
@@ -333,16 +349,20 @@ def _decode_font(reader: ConfigReader) -> FontConfig:
     )
 
 
-def _decode_style(reader: ConfigReader) -> StyleConfig:
+def _decode_style(reader: ConfigReader, reserved: frozenset[str] = ENGINE_WIDGET_PROPERTIES) -> StyleConfig:
     style_reader = reader.optional_child("style")
     if style_reader is None:
         return StyleConfig()
 
     def decode(style: ConfigReader) -> StyleConfig:
+        properties = style.data_map("properties", {})
+        taken = sorted(name for name in properties if name in reserved)
+        if taken:
+            raise ConfigError(f"{style.field_path('properties')} cannot set engine properties: {', '.join(taken)}")
         return StyleConfig(
             object_name=style.optional_string("object_name"),
             classes=style.string_list("classes", []),
-            properties=style.data_map("properties", {}),
+            properties=properties,
             qss=style.optional_string("qss"),
         )
 
@@ -376,15 +396,8 @@ def _profile_path(name: str) -> str:
     return f"config.profiles[{name!r}]" if "." in name else f"config.profiles.{name}"
 
 
-def _size(reader: ConfigReader, key: str, default: tuple[int, int]) -> tuple[int, int]:
-    value = reader.raw(key, list(default))
-    if (
-        not isinstance(value, list)
-        or len(value) != 2
-        or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in value)
-    ):
-        raise ConfigError(f"{reader.field_path(key)} must be [width, height] in pixels")
-    return (value[0], value[1])
+def _pair(values: tuple[int, ...]) -> tuple[int, int]:
+    return (values[0], values[1])
 
 
 def _require_unique(ids: Iterable[str], scope: str) -> None:

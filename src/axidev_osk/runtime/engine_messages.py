@@ -167,7 +167,12 @@ def keyboard_reset() -> RuntimeEvent:
 
 
 def process_exited(tag: str, code: int, error: str | None = None) -> RuntimeEvent:
-    return validated_event(PROCESS_EXITED, {"tag": tag, "code": code, "error": error}, decode_process_exited)
+    """``error`` is left out when the program ran, as Lua leaves out ``nil``."""
+
+    arguments: DataMap = {"tag": tag, "code": code}
+    if error is not None:
+        arguments["error"] = error
+    return validated_event(PROCESS_EXITED, arguments, decode_process_exited)
 
 
 def window_state_changed(

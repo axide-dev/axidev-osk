@@ -7,14 +7,13 @@ from unittest.mock import patch
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtWidgets import QApplication
 
-from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.hot_corner.service import HotCornerService
 from axidev_osk.messages import MessageResult
 from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
-from support import RecordingBackend
+from support import RecordingBackend, hot_corner_config
 
 
 class FakeOverlayController:
@@ -73,7 +72,7 @@ class HotCornerEventTests(unittest.TestCase):
         ):
             controller = HotCornerWindowToggleController(
                 context.dispatcher,
-                config=HotCornerConfig(dwell_ms=1),
+                config=hot_corner_config(dwell_ms=1),
             )
 
         try:
@@ -109,7 +108,7 @@ class HotCornerServiceTests(unittest.TestCase):
     def test_configured_start_runs_controller_with_profile_settings(self) -> None:
         context = make_test_context(RecordingBackend())
         service = HotCornerService()
-        settings = HotCornerConfig(dwell_ms=150)
+        settings = hot_corner_config(dwell_ms=150)
         corners = frozenset({"top_left", "bottom_right"})
         service.configure(settings, corners)
 
@@ -135,8 +134,8 @@ class HotCornerServiceTests(unittest.TestCase):
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
             service.start(context)
-            service.configure(HotCornerConfig(dwell_ms=150), frozenset({"top_left"}))
-            service.configure(HotCornerConfig(dwell_ms=300), frozenset({"top_left"}))
+            service.configure(hot_corner_config(dwell_ms=150), frozenset({"top_left"}))
+            service.configure(hot_corner_config(dwell_ms=300), frozenset({"top_left"}))
             service.stop()
             service.refresh_screen_configuration()
 

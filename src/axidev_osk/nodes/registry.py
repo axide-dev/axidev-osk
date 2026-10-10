@@ -55,6 +55,8 @@ class NodeKind:
     properties: Mapping[str, PropertySpec] = field(default_factory=dict)
     callbacks: Mapping[str, str] = field(default_factory=dict)
     has_children: bool = False
+    widget_properties: frozenset[str] = frozenset()
+    """Widget properties ``build`` and ``apply`` set, which a profile style cannot set."""
     decode_options: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
 

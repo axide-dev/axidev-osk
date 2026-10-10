@@ -6,8 +6,11 @@ from unittest.mock import call, patch
 
 from axidev_osk.messages import MessageResult
 from axidev_osk.runtime.app_messages import (
+    APP_QUIT,
     SECURE_INPUT_PANEL_PREPARE,
     SECURE_INPUT_PANEL_RELEASE,
+    AppQuitArguments,
+    decode_app_quit,
     register_app_events,
     secure_input_panel_prepared,
     secure_input_panel_released,
@@ -80,6 +83,24 @@ class SecureInputPanelWorkerServiceTests(unittest.TestCase):
             self.dispatcher.dispatch(secure_input_panel_prepared())
 
         respond.assert_not_called()
+
+    def test_supervisor_closing_or_failing_stdin_quits_through_the_queue(self) -> None:
+        quits: list[int] = []
+
+        def quit_app(arguments: AppQuitArguments) -> MessageResult:
+            quits.append(arguments.exit_code)
+            return []
+
+        self.dispatcher.register_action(APP_QUIT, decode_app_quit, quit_app)
+        with patch("axidev_osk.services.secure_input_panel.os.read", return_value=b""):
+            self.service._read_commands()
+        with (
+            patch("axidev_osk.services.secure_input_panel.os.read", side_effect=OSError("gone")),
+            self.assertLogs("axidev_osk.services.secure_input_panel", "ERROR"),
+        ):
+            self.service._read_commands()
+
+        self.assertEqual(quits, [0, 1])
 
 
 if __name__ == "__main__":

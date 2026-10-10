@@ -17,11 +17,10 @@ from .state import StateTree
 
 @dataclass(frozen=True, slots=True)
 class Engine:
-    """State, profile functions, and bindings shared by every subsystem."""
+    """State, profile functions, node kinds, and attachment kinds shared by every subsystem."""
 
     functions: FunctionRegistry
     profile: ProfileRuntime
-    bindings: BindingTracker
     nodes: NodeKindRegistry
     node_builder: NodeBuilder
     attachments: AttachmentKindRegistry
@@ -29,7 +28,12 @@ class Engine:
     def decoder(self) -> ConfigDecoder:
         """Return a decoder for root configs using this engine's registered kinds."""
 
-        return ConfigDecoder(node_kinds=self.nodes, attachment_kinds=self.attachments, functions=self.functions)
+        return ConfigDecoder(
+            node_kinds=self.nodes,
+            attachment_kinds=self.attachments,
+            functions=self.functions,
+            check_profile=self.profile.check,
+        )
 
 
 def build_engine(
@@ -60,7 +64,6 @@ def build_engine(
     return Engine(
         functions=functions,
         profile=profile,
-        bindings=bindings,
         nodes=nodes,
         node_builder=NodeBuilder(nodes, dispatcher, bindings),
         attachments=attachments,

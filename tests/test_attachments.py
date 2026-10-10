@@ -13,7 +13,7 @@ from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, Sc
 from axidev_osk.messages import DataMap
 from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.testing import make_test_context
-from support import RecordingBackend, qt_app
+from support import HOT_CORNER_COLORS, RecordingBackend, hot_corner_config, qt_app
 
 
 class FakeHotCornerOverlay:
@@ -95,10 +95,12 @@ class DecodeTests(unittest.TestCase):
         qt_app()
         engine = make_test_context(RecordingBackend()).engine
         cases = {
-            "unknown corners: middle": osk.hot_corners(id="hc", corners=["middle"]),
+            "unknown corners: middle": osk.hot_corners(id="hc", corners=["middle"], **HOT_CORNER_COLORS),
             "delay": osk.dwell(id="d", window="pad", delay_ms=0),
-            "radius": osk.pointer_locator(id="l", window="pad", radius_percent=0),
+            "radius": osk.pointer_locator(id="l", window="pad", radius_percent=0, gap_color="#242424"),
             "window is required": osk.secure_input_panel(id="s"),
+            "indicator_background is required": osk.hot_corners(id="hc"),
+            "gap_color is required": osk.pointer_locator(id="l", window="pad"),
         }
         for message, attachment in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
@@ -111,6 +113,27 @@ class AttachmentRuntimeTests(unittest.TestCase):
             AttachmentHarness([osk.dwell(id="d", window="ghost")]).start()
         with self.assertRaisesRegex(ValueError, "more than one dwell"):
             AttachmentHarness([osk.dwell(id="d1", window="pad"), osk.dwell(id="d2", window="pad")]).start()
+
+    def test_a_rejected_profile_keeps_the_previous_attachments(self) -> None:
+        harness = AttachmentHarness([osk.dwell(id="d", window="pad", delay_ms=300)])
+        harness.start()
+        cases = {
+            "at most one hot_corners": [osk.hot_corners(id="a", **HOT_CORNER_COLORS), osk.hot_corners(id="b", **HOT_CORNER_COLORS)],
+            "at most one secure_input_panel": [
+                osk.secure_input_panel(id="a", window="pad"),
+                osk.secure_input_panel(id="b", window="pad"),
+            ],
+        }
+
+        for message, attachments in cases.items():
+            rejected = harness.engine.decoder().decode_root(_root([osk.dwell(id="new", window="pad"), *attachments]))
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                harness.runtime.start(rejected)
+
+        installed = harness.runtime.for_window("pad").dwell
+        assert installed is not None
+        self.assertEqual(installed.delay_ms, 300)
+        self.assertEqual(harness.hot_corners.configured, [])
 
     def test_dwell_state_is_seeded_toggled_and_applied_to_its_window(self) -> None:
         harness = AttachmentHarness([osk.dwell(id="d", window="pad", enabled=True, delay_ms=300)])
@@ -136,7 +159,7 @@ class AttachmentRuntimeTests(unittest.TestCase):
     def test_hot_corners_and_panel_are_configured(self) -> None:
         harness = AttachmentHarness(
             [
-                osk.hot_corners(id="hc", corners=["top_left", "bottom_right"], dwell_ms=150),
+                osk.hot_corners(id="hc", corners=["top_left", "bottom_right"], dwell_ms=150, **HOT_CORNER_COLORS),
                 osk.secure_input_panel(id="lock", window="pad"),
             ]
         )
@@ -155,7 +178,7 @@ class HotCornerFilterTests(unittest.TestCase):
         context = make_test_context(RecordingBackend())
 
         with patch("axidev_osk.hot_corner.controller.configure_hot_corner_overlay", return_value=FakeHotCornerOverlay()):
-            controller = HotCornerWindowToggleController(context.dispatcher, corners=frozenset({"top_left"}))
+            controller = HotCornerWindowToggleController(context.dispatcher, config=hot_corner_config(), corners=frozenset({"top_left"}))
             handles = controller._create_sensor_handles([screen])
 
         self.assertEqual([handle.corner for handle in handles], [ScreenCorner.TOP_LEFT])

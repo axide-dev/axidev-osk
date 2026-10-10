@@ -30,20 +30,9 @@ from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
 from axidev_osk.runtime.engine_messages import keyboard_reset
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
-from support import qt_app
+from support import RecordingBackend, qt_app
 
 _KEYBOARD_WINDOW = "keyboard"
-
-
-def _keyboard_backend() -> Mock:
-    backend = Mock()
-    backend.initialize.return_value = True
-    backend.add_observation_listener.return_value = lambda: None
-    backend.ready = True
-    backend.status_text = "ready"
-    backend.needs_permission_setup = False
-    backend.permission_setup_text = ""
-    return backend
 
 
 def _runtime_without_platform_services(
@@ -51,7 +40,7 @@ def _runtime_without_platform_services(
     **options: Any,
 ) -> ApplicationRuntime:
     services = ServiceRegistry()
-    services.register("keyboard", KeyboardService(_keyboard_backend()), autostart=False)
+    services.register("keyboard", KeyboardService(RecordingBackend()), autostart=False)
     return ApplicationRuntime(
         qt_app(),
         root_config=root_config,
@@ -61,11 +50,20 @@ def _runtime_without_platform_services(
     )
 
 
-def _start_profile(runtime: ApplicationRuntime) -> None:
-    """Start the profile and attachments the way ``start`` does, without the Qt loop."""
+def _start(test: unittest.TestCase, runtime: ApplicationRuntime) -> None:
+    """Run ``ApplicationRuntime.start`` without the Qt event loop or OS signal handlers.
 
-    runtime.context.engine.profile.start(runtime.profile)
-    runtime._attachments.start(runtime.profile)
+    The app's stylesheet, palette, and font are restored when the test ends.
+    """
+
+    app = qt_app()
+    previous = (app.styleSheet(), app.palette(), app.font())
+    test.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
+    with (
+        patch.object(app, "exec", return_value=0),
+        patch.object(runtime._quit_controller, "install_signal_handlers"),
+    ):
+        runtime.start()
 
 
 def _bare_root(on: dict[str, Any] | None = None) -> osk.Map:
@@ -205,7 +203,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
     def _runtime_with_pointer_service(self) -> tuple[ApplicationRuntime, Mock, Mock]:
         service = Mock()
         services = ServiceRegistry()
-        services.register("keyboard", KeyboardService(_keyboard_backend()), autostart=False)
+        services.register("keyboard", KeyboardService(RecordingBackend()), autostart=False)
         services.register("relative-pointer", service, autostart=False)
         runtime = ApplicationRuntime(qt_app(), services=services, show_startup_windows=False)
         window = Mock()
@@ -231,7 +229,7 @@ class ApplicationRuntimeProfileTests(unittest.TestCase):
             return []
 
         runtime = _runtime_without_platform_services(_bare_root({"app.activated": on_activated}))
-        _start_profile(runtime)
+        _start(self, runtime)
 
         runtime.context.dispatcher.dispatch(app_activated())
 
@@ -256,7 +254,7 @@ class ApplicationRuntimeProfileTests(unittest.TestCase):
 class ApplicationRuntimeQuitTests(unittest.TestCase):
     def test_confirmed_quit_asks_profile_without_shutting_down(self) -> None:
         runtime = _runtime_without_platform_services()
-        _start_profile(runtime)
+        _start(self, runtime)
         requests = _record_raw_events(runtime, APP_QUIT_REQUESTED)
 
         with (
@@ -270,7 +268,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
     def test_default_profile_shows_quit_prompt_on_quit_request(self) -> None:
         runtime = _runtime_without_platform_services()
-        _start_profile(runtime)
+        _start(self, runtime)
 
         with (
             patch.object(runtime._window_manager, "show") as show,
@@ -283,7 +281,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
     def test_default_profile_shows_quit_prompt_when_keyboard_close_is_requested(self) -> None:
         runtime = _runtime_without_platform_services()
-        _start_profile(runtime)
+        _start(self, runtime)
 
         with (
             patch.object(runtime._window_manager, "show") as show,
@@ -309,7 +307,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
     def test_profile_without_quit_handlers_quits_on_request(self) -> None:
         runtime = _runtime_without_platform_services(_bare_root())
-        _start_profile(runtime)
+        _start(self, runtime)
 
         with patch.object(qt_app(), "exit") as exit_app:
             runtime._quit_controller.request_quit("signal")
@@ -318,7 +316,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
     def test_profile_without_close_handler_quits_on_window_close_request(self) -> None:
         runtime = _runtime_without_platform_services(_bare_root())
-        _start_profile(runtime)
+        _start(self, runtime)
 
         with patch.object(qt_app(), "exit") as exit_app:
             runtime.context.dispatcher.dispatch(window_close_requested("pad"))
@@ -329,7 +327,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         runtime = _runtime_without_platform_services(
             _bare_root({"app.quit_requested": lambda ctx, event: []})
         )
-        _start_profile(runtime)
+        _start(self, runtime)
         requests = _record_raw_events(runtime, APP_QUIT_REQUESTED)
 
         with patch.object(qt_app(), "exit") as exit_app:
@@ -343,22 +341,38 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         runtime = _runtime_without_platform_services(
             _bare_root({"keyboard.reset": lambda ctx, event: resets.append(event) or []})
         )
-        app = qt_app()
-        previous = (app.styleSheet(), app.palette(), app.font())
-        self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
-        with (
-            patch.object(app, "exec", return_value=0),
-            patch.object(runtime._quit_controller, "install_signal_handlers"),
-        ):
-            runtime.start()
+        _start(self, runtime)
         runtime.context.dispatcher.dispatch(keyboard_reset())
         self.assertEqual(len(resets), 1)
 
-        with patch.object(app, "exit") as exit_app:
+        with patch.object(qt_app(), "exit") as exit_app:
             runtime._quit_controller.shutdown()
 
         self.assertEqual(len(resets), 1)
         exit_app.assert_called_once_with(0)
+
+    def test_quitting_waits_for_queued_work_and_nothing_runs_after_shutdown(self) -> None:
+        reopened: list[DataMap] = []
+
+        def reopen(ctx: Any, event: DataMap) -> list[osk.Map]:
+            del ctx
+            reopened.append(event)
+            return [osk.window.show("pad")]
+
+        runtime = _runtime_without_platform_services(_bare_root({"window.close_requested": reopen}))
+        _start(self, runtime)
+        self.addCleanup(runtime._window_manager.close_all)
+        dispatcher = runtime.context.dispatcher
+        dispatcher.dispatch(window_show("pad"))
+
+        with patch.object(qt_app(), "exit") as exit_app:
+            dispatcher.dispatch(window_close_requested("pad"))
+            dispatcher.dispatch(window_show("pad"))
+
+        exit_app.assert_called_once_with(0)
+        self.assertEqual(len(reopened), 1)
+        self.assertEqual(runtime._window_manager.all_windows(), [])
+        self.assertFalse(dispatcher.has_pending())
 
     def test_profile_without_close_handler_closes_only_that_window_while_another_is_visible(self) -> None:
         root = osk.config(
@@ -373,7 +387,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
             },
         )
         runtime = _runtime_without_platform_services(root)
-        _start_profile(runtime)
+        _start(self, runtime)
         dispatcher = runtime.context.dispatcher
         dispatcher.dispatch(window_show("pad"))
         dispatcher.dispatch(window_show("tool"))
@@ -390,7 +404,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
     def test_window_close_action_closes_the_window_and_show_rebuilds_one(self) -> None:
         runtime = _runtime_without_platform_services(_bare_root())
-        _start_profile(runtime)
+        _start(self, runtime)
         dispatcher = runtime.context.dispatcher
         dispatcher.dispatch(window_show("pad"))
         first = runtime._window_manager.get("pad")
@@ -405,10 +419,42 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         self.assertIsNot(second, first)
         self.assertTrue(second.isVisible())
 
+    def test_every_window_action_reports_an_unknown_window(self) -> None:
+        runtime = _runtime_without_platform_services(_bare_root())
+        _start(self, runtime)
+        failures = _record_failures(runtime)
+        actions = [
+            osk.window.show("typo"),
+            osk.window.hide("typo"),
+            osk.window.close("typo"),
+            osk.window.set_opacity("typo", 0.5),
+            osk.window.block_input("typo", []),
+            osk.window.unblock_input("typo"),
+        ]
+
+        for action in actions:
+            runtime.context.dispatcher.dispatch(RuntimeAction(action["action"], action["arguments"]))
+
+        self.assertEqual(
+            [(failure.action, failure.message) for failure in failures],
+            [(action["action"], "No window named 'typo' in the active profile") for action in actions],
+        )
+
+    def test_window_actions_on_a_defined_window_that_is_not_built_do_nothing(self) -> None:
+        runtime = _runtime_without_platform_services(_bare_root())
+        _start(self, runtime)
+        failures = _record_failures(runtime)
+
+        for action in (osk.window.hide("pad"), osk.window.close("pad"), osk.window.set_opacity("pad", 0.5)):
+            runtime.context.dispatcher.dispatch(RuntimeAction(action["action"], action["arguments"]))
+
+        self.assertEqual(failures, [])
+        self.assertEqual(runtime._window_manager.all_windows(), [])
+
 
 class SecureInputPanelLifecycleTests(unittest.TestCase):
-    def _runtime(self, root_config: osk.Map | None = None) -> tuple[ApplicationRuntime, Mock, KeyboardService]:
-        backend = _keyboard_backend()
+    def _runtime(self, root_config: osk.Map | None = None) -> tuple[ApplicationRuntime, RecordingBackend, KeyboardService]:
+        backend = RecordingBackend()
         keyboard = KeyboardService(backend)
         services = ServiceRegistry()
         services.register("keyboard", keyboard, autostart=False)
@@ -418,7 +464,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             services=services,
             show_startup_windows=False,
         )
-        _start_profile(runtime)
+        _start(self, runtime)
         self.addCleanup(runtime._window_manager.close_all)
         return runtime, backend, keyboard
 
@@ -441,8 +487,8 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
 
         self.assertTrue(self._panel_visible(runtime))
         self.assertIsNot(runtime._window_manager.get(_KEYBOARD_WINDOW), first)
-        self.assertEqual(backend.initialize.call_count, 2)
-        backend.shutdown.assert_not_called()
+        self.assertEqual(backend.initialized, 2)
+        self.assertEqual(backend.shutdowns, 0)
         reset_state.assert_called_once_with()
 
     def test_prepare_shows_a_panel_the_profile_hid(self) -> None:
@@ -454,6 +500,27 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         dispatcher.dispatch(secure_input_panel_prepare())
 
         self.assertTrue(self._panel_visible(runtime))
+
+    def test_prepare_starts_the_keyboard_even_if_the_profile_already_shows_the_window(self) -> None:
+        runtime, backend, _keyboard = self._runtime()
+        dispatcher = runtime.context.dispatcher
+        dispatcher.dispatch(window_show(_KEYBOARD_WINDOW))
+
+        dispatcher.dispatch(secure_input_panel_prepare())
+
+        self.assertEqual(backend.initialized, 1)
+        self.assertTrue(self._panel_visible(runtime))
+
+    def test_release_resets_held_keys_even_if_the_profile_closed_the_window(self) -> None:
+        runtime, _backend, keyboard = self._runtime()
+        dispatcher = runtime.context.dispatcher
+        dispatcher.dispatch(secure_input_panel_prepare())
+        dispatcher.dispatch(window_close(_KEYBOARD_WINDOW))
+
+        with patch.object(keyboard, "reset_state") as reset_state:
+            dispatcher.dispatch(secure_input_panel_release())
+
+        reset_state.assert_called_once_with()
 
     def test_prepare_fails_when_keyboard_output_cannot_start(self) -> None:
         runtime, backend, _keyboard = self._runtime()
@@ -468,7 +535,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             ["Keyboard output is unavailable: permission denied"],
         )
         self.assertIsNone(runtime._window_manager.get(_KEYBOARD_WINDOW))
-        backend.shutdown.assert_called_once_with()
+        self.assertEqual(backend.shutdowns, 1)
 
     def test_shutdown_completes_after_a_panel_prepare_and_release_cycle(self) -> None:
         runtime, _backend, _keyboard = self._runtime()
@@ -496,7 +563,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             [failure.message for failure in failures],
             ["The active profile has no secure_input_panel attachment"],
         )
-        backend.initialize.assert_not_called()
+        self.assertEqual(backend.initialized, 0)
         self.assertEqual(runtime._window_manager.all_windows(), [])
 
     def test_failed_panel_creation_rolls_back_and_remains_retryable(self) -> None:
@@ -519,8 +586,8 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             runtime.context.dispatcher.dispatch(secure_input_panel_prepare())
 
         self.assertTrue(self._panel_visible(runtime))
-        self.assertEqual(backend.initialize.call_count, 2)
-        backend.shutdown.assert_called_once_with()
+        self.assertEqual(backend.initialized, 2)
+        self.assertEqual(backend.shutdowns, 1)
 
     def test_failed_key_reset_still_closes_released_panel(self) -> None:
         runtime, _backend, keyboard = self._runtime()
@@ -545,7 +612,7 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
             runtime.context.dispatcher.dispatch(secure_input_panel_prepare())
 
         self.assertEqual([failure.message for failure in failures], ["window failed"])
-        backend.shutdown.assert_called_once_with()
+        self.assertEqual(backend.shutdowns, 1)
         logger.exception.assert_called_once_with("Failed to close a partially prepared secure input panel")
 
 

@@ -377,13 +377,13 @@ class HotCornerWindowToggleController(QObject):
         self,
         dispatcher: Dispatcher,
         *,
-        config: HotCornerConfig | None = None,
+        config: HotCornerConfig,
         corners: frozenset[str] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._dispatcher = dispatcher
-        self._config = config or HotCornerConfig()
+        self._config = config
         self._corners = frozenset(corner for corner in ScreenCorner if corners is None or corner.value in corners)
         self._active_corner: ScreenCorner | None = None
         self._active_screen: QScreen | None = None
@@ -532,15 +532,16 @@ class HotCornerWindowToggleController(QObject):
         in_top = y <= geometry.top() + corner_size - 1
         in_bottom = y >= geometry.bottom() - corner_size + 1
 
+        corner = None
         if in_left and in_top:
-            return ScreenCorner.TOP_LEFT
-        if in_right and in_top:
-            return ScreenCorner.TOP_RIGHT
-        if in_left and in_bottom:
-            return ScreenCorner.BOTTOM_LEFT
-        if in_right and in_bottom:
-            return ScreenCorner.BOTTOM_RIGHT
-        return None
+            corner = ScreenCorner.TOP_LEFT
+        elif in_right and in_top:
+            corner = ScreenCorner.TOP_RIGHT
+        elif in_left and in_bottom:
+            corner = ScreenCorner.BOTTOM_LEFT
+        elif in_right and in_bottom:
+            corner = ScreenCorner.BOTTOM_RIGHT
+        return corner if corner in self._corners else None
 
     def _show_indicator(
         self,

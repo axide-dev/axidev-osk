@@ -78,13 +78,16 @@ class AttachmentRuntime:
         return self._secure_input_panel_window
 
     def start(self, profile: ProfileConfig) -> None:
-        """Validate references and prepare attachments for ``profile``."""
+        """Validate references and prepare attachments for ``profile``.
+
+        Every check runs before anything changes, so a rejected profile leaves
+        the current attachments as they were.
+        """
 
         window_ids = {window.id for window in profile.windows}
-        self._dwell.clear()
-        self._dwell_by_window.clear()
-        self._locators.clear()
-        self._secure_input_panel_window = None
+        dwell: dict[str, DwellOptions] = {}
+        dwell_by_window: dict[str, str] = {}
+        locators: dict[str, list[PointerLocatorConfig]] = {}
         hot_corners: list[HotCornersOptions] = []
         panels: list[SecureInputPanelOptions] = []
         for attachment in profile.attachments:
@@ -93,22 +96,26 @@ class AttachmentRuntime:
             if target is not None and target not in window_ids:
                 raise ValueError(f"Attachment {attachment.id!r} targets unknown window {target!r}")
             if isinstance(options, DwellOptions):
-                if options.window in self._dwell_by_window:
+                if options.window in dwell_by_window:
                     raise ValueError(f"Window {options.window!r} has more than one dwell attachment")
-                self._dwell[attachment.id] = options
-                self._dwell_by_window[options.window] = attachment.id
+                dwell[attachment.id] = options
+                dwell_by_window[options.window] = attachment.id
             elif isinstance(options, PointerLocatorOptions):
-                self._locators.setdefault(options.window, []).append(options.settings)
+                locators.setdefault(options.window, []).append(options.settings)
             elif isinstance(options, HotCornersOptions):
                 hot_corners.append(options)
             elif isinstance(options, SecureInputPanelOptions):
                 panels.append(options)
-        if len(hot_corners) > 1 or len(panels) > 1:
-            raise ValueError("A profile can have at most one hot_corners and one secure_input_panel attachment")
+        if len(hot_corners) > 1:
+            raise ValueError("A profile can have at most one hot_corners attachment")
+        if len(panels) > 1:
+            raise ValueError("A profile can have at most one secure_input_panel attachment")
+        self._dwell = dwell
+        self._dwell_by_window = dwell_by_window
+        self._locators = locators
+        self._secure_input_panel_window = panels[0].window if panels else None
         if hot_corners and self._hot_corners is not None:
             self._hot_corners.configure(hot_corners[0].settings, hot_corners[0].corners)
-        if panels:
-            self._secure_input_panel_window = panels[0].window
         observed: MessageResult = []
         for dwell_id, options in self._dwell.items():
             observed.extend(self._profile_runtime.set_observed(("dwell", dwell_id, "enabled"), options.settings.enabled))

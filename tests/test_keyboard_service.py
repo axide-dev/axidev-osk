@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import unittest
-from dataclasses import dataclass
 
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.engine_messages import (
@@ -11,70 +10,37 @@ from axidev_osk.runtime.engine_messages import (
     KEYBOARD_RESET,
     KEYBOARD_STATUS_CHANGED,
 )
-from axidev_osk.runtime.testing import make_test_context
-from axidev_osk.services.keyboard.io import KeyObservation
+from axidev_osk.runtime.testing import make_keyboard_test_context
+from axidev_osk.services.keyboard.io import KeyObservation, KeyPressHandle
+from support import RecordingBackend
 
 
-@dataclass(frozen=True)
-class PressHandle:
-    key_name: str
+def _upper_letters(key: str) -> str:
+    return key.upper() if len(key) == 1 else key
 
 
-class FakeKeyboardBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = ""
-
-    def __init__(self) -> None:
-        self.initialize_calls = 0
-        self.shutdown_calls = 0
-        self.listeners: list[object] = []
-        self.sent: list[tuple[object, ...]] = []
-
-    def initialize(self) -> bool:
-        self.initialize_calls += 1
-        return True
-
-    def shutdown(self) -> None:
-        self.shutdown_calls += 1
-
-    def add_observation_listener(self, listener):
-        self.listeners.append(listener)
-        return lambda: self.listeners.remove(listener)
-
-    def canonical_key(self, key: str) -> str:
-        return key.upper() if len(key) == 1 else key
-
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> PressHandle:
-        self.sent.append(("down", key, mods, repeat))
-        return PressHandle(key)
-
-    def key_up(self, handle: object | None) -> None:
-        self.sent.append(("up", handle))
-
-    def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        self.sent.append(("tap", key, mods))
-
-    def type_text(self, text: str) -> None:
-        self.sent.append(("text", text))
-
-    def observe(self, observation: KeyObservation) -> None:
-        for listener in tuple(self.listeners):
-            listener(observation)  # type: ignore[operator]
-
-
-class RefusingKeyboardBackend(FakeKeyboardBackend):
-    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> object:
+class RefusingKeyboardBackend(RecordingBackend):
+    def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle:
         self.sent.append(("down", key, mods, repeat))
         raise RuntimeError("Keyboard output is not ready")
 
 
+class FailingReleaseBackend(RecordingBackend):
+    """Fails the first release, as a backend that lost its output would."""
+
+    failures = 1
+
+    def key_up(self, press: KeyPressHandle) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("key_up failed")
+        super().key_up(press)
+
+
 class KeyboardServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.backend = FakeKeyboardBackend()
-        self.context = make_test_context(self.backend)
-        self.service = self.context.keyboard
+        self.backend = RecordingBackend(canonical=_upper_letters)
+        self.context, self.service = make_keyboard_test_context(self.backend)
         self.events: list[tuple[str, DataMap]] = []
         for name in (INPUT_KEY, KEYBOARD_RESET, KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED):
             self.context.dispatcher.add_raw_event_handler(name, self._recorder(name))
@@ -93,8 +59,8 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.start(self.context)
         self.service.bind_context(self.context)
 
-        self.assertEqual(self.backend.initialize_calls, 1)
-        self.assertEqual(len(self.backend.listeners), 1)
+        self.assertEqual(self.backend.initialized, 1)
+        self.assertEqual(len(self.backend.observers), 1)
         self.assertEqual(self.events, [])
 
     def test_press_and_release_send_canonical_key_with_explicit_mods_and_repeat(self) -> None:
@@ -103,7 +69,7 @@ class KeyboardServiceTests(unittest.TestCase):
 
         self.assertEqual(
             self.backend.sent,
-            [("down", "A", ("Shift",), False), ("up", PressHandle("A"))],
+            [("down", "A", ("Shift",), False), ("up", "A")],
         )
 
     def test_releasing_an_unheld_key_does_nothing(self) -> None:
@@ -112,7 +78,7 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.release("a")
         self.service.release("a")
 
-        self.assertEqual(self.backend.sent, [("down", "A", (), True), ("up", PressHandle("A"))])
+        self.assertEqual(self.backend.sent, [("down", "A", (), True), ("up", "A")])
 
     def test_pressing_a_held_key_again_releases_the_previous_press(self) -> None:
         self.service.press("a", (), True)
@@ -123,15 +89,15 @@ class KeyboardServiceTests(unittest.TestCase):
             self.backend.sent,
             [
                 ("down", "A", (), True),
-                ("up", PressHandle("A")),
+                ("up", "A"),
                 ("down", "A", ("Shift",), True),
-                ("up", PressHandle("A")),
+                ("up", "A"),
             ],
         )
 
     def test_refused_press_holds_nothing(self) -> None:
-        backend = RefusingKeyboardBackend()
-        service = make_test_context(backend).keyboard
+        backend = RefusingKeyboardBackend(canonical=_upper_letters)
+        service = make_keyboard_test_context(backend)[1]
 
         with self.assertRaisesRegex(RuntimeError, "not ready"):
             service.press("a", (), True)
@@ -139,11 +105,23 @@ class KeyboardServiceTests(unittest.TestCase):
 
         self.assertEqual(backend.sent, [("down", "A", (), True)])
 
+    def test_a_key_whose_release_failed_stays_held_until_a_release_succeeds(self) -> None:
+        backend = FailingReleaseBackend(canonical=_upper_letters)
+        service = make_keyboard_test_context(backend)[1]
+        service.press("a", (), True)
+
+        with self.assertRaisesRegex(RuntimeError, "key_up failed"):
+            service.release("a")
+        service.reset_state()
+        service.reset_state()
+
+        self.assertEqual(backend.sent, [("down", "A", (), True), ("up", "A")])
+
     def test_tap_and_type_text_pass_through_to_the_backend(self) -> None:
         self.service.tap("Enter", ("Ctrl",))
         self.service.type_text("moo")
 
-        self.assertEqual(self.backend.sent, [("tap", "Enter", ("Ctrl",)), ("text", "moo")])
+        self.assertEqual(self.backend.sent, [("tap", "Enter", ("Ctrl",)), ("type", "moo")])
 
     def test_reset_releases_held_keys_and_reports_reset(self) -> None:
         self.service.press("a", (), True)
@@ -152,7 +130,7 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.reset_state()
         self.service.release("a")
 
-        self.assertEqual(self.backend.sent[2:], [("up", PressHandle("A")), ("up", PressHandle("ShiftLeft"))])
+        self.assertEqual(self.backend.sent[2:], [("up", "A"), ("up", "ShiftLeft")])
         self.assertEqual(self._event_names(), [KEYBOARD_RESET])
 
     def test_shutdown_releases_held_keys_and_runs_once(self) -> None:
@@ -161,8 +139,8 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.shutdown()
         self.service.shutdown()
 
-        self.assertEqual(self.backend.sent[1:], [("up", PressHandle("A"))])
-        self.assertEqual(self.backend.shutdown_calls, 1)
+        self.assertEqual(self.backend.sent[1:], [("up", "A")])
+        self.assertEqual(self.backend.shutdowns, 1)
         self.assertEqual(self._event_names(), [KEYBOARD_RESET])
 
     def test_initialize_after_shutdown_allows_another_shutdown(self) -> None:
@@ -170,7 +148,7 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.initialize()
         self.service.shutdown()
 
-        self.assertEqual(self.backend.shutdown_calls, 2)
+        self.assertEqual(self.backend.shutdowns, 2)
 
     def test_publish_status_reports_readiness(self) -> None:
         self.service.publish_status()

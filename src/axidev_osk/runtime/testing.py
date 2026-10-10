@@ -30,18 +30,27 @@ class RecordingProcesses:
 def make_test_context(keyboard_backend: Any) -> Context:
     """Build a runtime ``Context`` wrapping a test keyboard backend.
 
-    The keyboard service is bound to the context but not started, so tests
-    decide when output initializes. The dispatcher has every built-in event,
-    the engine actions, node kinds, and attachment kinds registered; the
-    window and app actions belong to ``ApplicationRuntime``.
+    The dispatcher has every built-in event, the engine actions, node kinds,
+    and attachment kinds registered; the window and app actions belong to
+    ``ApplicationRuntime``.
+    """
+
+    return make_keyboard_test_context(keyboard_backend)[0]
+
+
+def make_keyboard_test_context(keyboard_backend: Any) -> tuple[Context, KeyboardService]:
+    """Build a test ``Context`` and return the keyboard service its engine sends key effects to.
+
+    The service is bound to the context but not started, so tests decide when
+    output initializes.
     """
 
     dispatcher = Dispatcher()
     keyboard = KeyboardService(cast(Any, keyboard_backend))
     engine = build_engine(dispatcher, keyboard=keyboard, processes=RecordingProcesses())
-    context = Context(dispatcher=dispatcher, keyboard=keyboard, engine=engine)
+    context = Context(dispatcher=dispatcher, engine=engine)
     keyboard.bind_context(context)
-    return context
+    return context, keyboard
 
 
 def start_test_profile(context: Context, root_config: Mapping[str, Any]) -> ProfileConfig:

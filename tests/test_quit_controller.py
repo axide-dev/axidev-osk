@@ -10,29 +10,31 @@ from support import qt_app
 
 class ApplicationQuitControllerTests(unittest.TestCase):
     def test_stdin_eof_handler_allows_windowed_executable_without_stdin(self) -> None:
-        controller = ApplicationQuitController(qt_app())
+        controller = ApplicationQuitController(qt_app(), send_quit=Mock())
 
         with patch("axidev_osk.application.quit_controller.sys.stdin", None):
             controller._install_stdin_eof_handler()
 
         self.assertIsNone(controller._stdin_notifier)
 
-    def test_request_without_confirmation_runs_callbacks_and_exits(self) -> None:
+    def test_request_without_confirmation_sends_the_quit_instead_of_shutting_down(self) -> None:
         app = qt_app()
+        send_quit = Mock()
         callback = Mock()
-        controller = ApplicationQuitController(app)
+        controller = ApplicationQuitController(app, send_quit=send_quit)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
             controller.request_quit("signal")
 
-        callback.assert_called_once_with()
-        exit_app.assert_called_once_with(0)
+        send_quit.assert_called_once_with()
+        callback.assert_not_called()
+        exit_app.assert_not_called()
 
     def test_a_failing_shutdown_step_is_logged_and_the_app_still_exits(self) -> None:
         app = qt_app()
         after = Mock()
-        controller = ApplicationQuitController(app)
+        controller = ApplicationQuitController(app, send_quit=Mock())
         controller.register_quit_callback(Mock(side_effect=RuntimeError("stop failed")))
         controller.register_quit_callback(after)
 
@@ -46,7 +48,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         app = qt_app()
         ask = Mock()
         callback = Mock()
-        controller = ApplicationQuitController(app, ask_to_quit=ask)
+        controller = ApplicationQuitController(app, send_quit=Mock(), ask_to_quit=ask)
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
@@ -61,28 +63,23 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         callback.assert_called_once_with()
         exit_app.assert_called_once_with(3)
 
-    def test_sigterm_skips_confirmation_and_runs_callbacks(self) -> None:
-        app = qt_app()
+    def test_sigterm_skips_confirmation_and_sends_the_quit(self) -> None:
         ask = Mock()
-        callback = Mock()
-        controller = ApplicationQuitController(app, ask_to_quit=ask)
-        controller.register_quit_callback(callback)
+        send_quit = Mock()
+        controller = ApplicationQuitController(qt_app(), send_quit=send_quit, ask_to_quit=ask)
 
         with patch("axidev_osk.application.quit_controller.QTimer.singleShot") as single_shot:
             controller._handle_signal(signal.SIGTERM, None)
         scheduled_quit = single_shot.call_args.args[1]
-
-        with patch.object(app, "exit") as exit_app:
-            scheduled_quit()
+        scheduled_quit()
 
         ask.assert_not_called()
-        callback.assert_called_once_with()
-        exit_app.assert_called_once_with(0)
+        send_quit.assert_called_once_with()
 
     def test_sigint_keeps_confirmation(self) -> None:
         app = qt_app()
         ask = Mock()
-        controller = ApplicationQuitController(app, ask_to_quit=ask)
+        controller = ApplicationQuitController(app, send_quit=Mock(), ask_to_quit=ask)
 
         with patch("axidev_osk.application.quit_controller.QTimer.singleShot") as single_shot:
             controller._handle_signal(signal.SIGINT, None)

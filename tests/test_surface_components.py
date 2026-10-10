@@ -17,6 +17,7 @@ def _config() -> PointerLocatorConfig:
         radius_percent=30,
         maximum_opacity_percent=60,
         radius_standard_deviations=3,
+        gap_color="#242424",
     )
 
 

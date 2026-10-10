@@ -65,6 +65,42 @@ class RuntimeMessageTests(unittest.TestCase):
 
         self.assertEqual(order, ["a", "b", "a-child", "b-child"])
 
+    def test_follow_ups_returned_as_a_generator_run(self) -> None:
+        dispatcher = Dispatcher()
+        order: list[str] = []
+
+        def run(arguments: DataMap) -> MessageResult:
+            name = str(arguments["name"])
+            order.append(name)
+            return (RuntimeAction("test.step", {"name": child}) for child in ("b", "c") if name == "a")
+
+        dispatcher.register_action("test.step", _identity, run)
+        dispatcher.dispatch(RuntimeAction("test.step", {"name": "a"}))
+
+        self.assertEqual(order, ["a", "b", "c"])
+
+    def test_a_closed_dispatcher_drops_waiting_and_later_messages(self) -> None:
+        dispatcher = Dispatcher()
+        order: list[str] = []
+
+        def run(arguments: DataMap) -> MessageResult:
+            name = str(arguments["name"])
+            order.append(name)
+            if name == "close":
+                dispatcher.close()
+                return [RuntimeAction("test.step", {"name": "follow-up"})]
+            return []
+
+        dispatcher.register_action("test.step", _identity, run)
+        with self.assertLogs("axidev_osk.runtime.dispatcher", level="INFO"):
+            dispatcher.dispatch(
+                RuntimeAction("test.step", {"name": "close"}), RuntimeAction("test.step", {"name": "waiting"})
+            )
+            dispatcher.dispatch(RuntimeAction("test.step", {"name": "later"}))
+
+        self.assertEqual(order, ["close"])
+        self.assertFalse(dispatcher.has_pending())
+
     def test_handler_results_keep_fifo_order(self) -> None:
         dispatcher = Dispatcher()
         order: list[str] = []

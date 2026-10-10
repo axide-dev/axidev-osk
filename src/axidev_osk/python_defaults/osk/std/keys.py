@@ -5,6 +5,8 @@ Library state lives under ``std``:
 - ``std.latched.<latch>``: the output a latched modifier holds down.
 - ``std.one_shot.<latch>``: the output a one-shot modifier adds to the next
   key press, which holds that real modifier key down around it.
+- ``std.held.<node>``: the one-shot modifiers a key's press held down, by
+  latch, so its release lets go of exactly those.
 
 A modifier's latch is shared by the left and right keys of one modifier when
 nothing else about them differs: ``ShiftLeft`` and ``ShiftRight`` both labelled
@@ -61,19 +63,25 @@ def one_shot_keys(state: Any) -> list[str]:
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
     """A momentary key: press sends ``output`` down, release sends it up."""
 
-    repeat = bool((opts or {}).get("repeat", True))
+    repeat = _flag(opts, "repeat", True)
 
     def on_press(ctx: Any, event: Any) -> list[osk.Map]:
-        del event
-        held = [osk.keyboard.down(name, repeat=False) for name in one_shot_keys(ctx.state)]
-        return [*held, osk.keyboard.down(output, repeat=repeat)]
+        held = _one_shot(ctx.state)
+        actions = [osk.keyboard.down(name, repeat=False) for _latch, name in sorted(held.items())]
+        actions.append(osk.keyboard.down(output, repeat=repeat))
+        if held:
+            actions.append(osk.state.set(["std", "held", event["node"]], held))
+        return actions
 
     def on_release(ctx: Any, event: Any) -> list[osk.Map]:
-        del event
         actions = [osk.keyboard.up(output)]
-        for latch, name in sorted(_one_shot(ctx.state).items()):
-            actions.append(osk.keyboard.up(name))
+        held = osk.read(ctx.state, ["std", "held", event["node"]])
+        if held is None:
+            return actions
+        for latch in sorted(held):
+            actions.append(osk.keyboard.up(held[latch]))
             actions.append(osk.state.set(["std", "one_shot", latch], None))
+        actions.append(osk.state.set(["std", "held", event["node"]], None))
         return actions
 
     defaults = {
@@ -112,10 +120,10 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
     for how keys share a latch.
     """
 
-    options = dict(opts or {})
-    mode = options.pop("mode", "held")
-    repeat = bool(options.pop("repeat", True))
-    latch = options.pop("latch", None) or _default_latch(label, output, mode, repeat)
+    repeat = _flag(opts, "repeat", True)
+    options = _without(opts, "mode", "repeat", "latch")
+    mode = (opts or {}).get("mode") or "held"
+    latch = (opts or {}).get("latch") or _default_latch(label, output, mode, repeat)
     if mode not in {"held", "one_shot"}:
         raise ValueError(f"Unknown modifier mode {mode!r}")
     latch_path = ["std", "one_shot" if mode == "one_shot" else "latched", latch]
@@ -181,7 +189,11 @@ def on_reset(ctx: Any, event: Any) -> list[osk.Map]:
     """Clear library latches after the engine released every held key."""
 
     del ctx, event
-    return [osk.state.set("std.latched", None), osk.state.set("std.one_shot", None)]
+    return [
+        osk.state.set("std.latched", None),
+        osk.state.set("std.one_shot", None),
+        osk.state.set("std.held", None),
+    ]
 
 
 def _default_latch(label: str, output: str, mode: str, repeat: bool) -> str:
@@ -189,6 +201,13 @@ def _default_latch(label: str, output: str, mode: str, repeat: bool) -> str:
 
     side = next((side for side in _SIDES if output.endswith(side) and len(output) > len(side)), "")
     return f"{output[: len(output) - len(side)]}|{label}|{mode}|{repeat}"
+
+
+def _flag(opts: Mapping[str, Any] | None, name: str, default: bool) -> bool:
+    """Read a boolean option, where ``None`` counts as absent as Lua's ``nil`` does."""
+
+    value = (opts or {}).get(name)
+    return default if value is None else bool(value)
 
 
 def _without(opts: Mapping[str, Any] | None, *names: str) -> dict[str, Any]:

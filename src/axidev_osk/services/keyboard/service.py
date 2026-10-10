@@ -106,21 +106,25 @@ class KeyboardService:
         """Hold a key down until ``release`` names the same key.
 
         Pressing a held key again releases the earlier press first. A failure
-        raises, so the action reports ``action.failed``.
+        raises, so the action reports ``action.failed``. A key stays recorded
+        as held until its release succeeds, so a later release or reset can
+        still let go of it.
         """
 
         canonical = self._backend.canonical_key(key)
-        previous = self._held.pop(canonical, None)
-        if previous is not None:
-            self._backend.key_up(previous)
+        self._release_canonical(canonical)
         self._held[canonical] = self._backend.press(canonical, mods, repeat)
 
     def release(self, key: str) -> None:
         """Release a key held by ``press``; releasing an unheld key does nothing."""
 
-        handle = self._held.pop(self._backend.canonical_key(key), None)
+        self._release_canonical(self._backend.canonical_key(key))
+
+    def _release_canonical(self, canonical: str) -> None:
+        handle = self._held.get(canonical)
         if handle is not None:
             self._backend.key_up(handle)
+            del self._held[canonical]
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
         self._backend.tap(key, mods)
@@ -129,15 +133,13 @@ class KeyboardService:
         self._backend.type_text(text)
 
     def reset_state(self) -> None:
-        """Release every held key and report ``keyboard.reset``; a key that fails to release is logged."""
+        """Release every held key and report ``keyboard.reset``; a key that fails to release is logged and kept."""
 
-        held = tuple(self._held.values())
-        self._held.clear()
-        for handle in held:
+        for canonical in tuple(self._held):
             try:
-                self._backend.key_up(handle)
+                self._release_canonical(canonical)
             except Exception:
-                _logger.exception("Failed to release %s during reset", handle.key_name)
+                _logger.exception("Failed to release %s during reset", canonical)
         if self._context is not None:
             self._context.dispatcher.dispatch(keyboard_reset())
 

@@ -4,7 +4,7 @@ import unittest
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from axidev_osk.config.profile import ConfigDecoder, PropertySpec
+from axidev_osk.config.profile import ConfigDecoder, ProfileConfig, PropertySpec
 from axidev_osk.config.reader import ConfigError, ConfigReader
 from axidev_osk.function_registry import FunctionRef, FunctionRegistry
 from axidev_osk.messages import DataMap, MessageResult, RuntimeEvent
@@ -31,6 +31,7 @@ class FakeNodeKind:
     )
     callbacks: Mapping[str, str] = field(default_factory=lambda: {"on_press": "probe.pressed"})
     has_children: bool = True
+    widget_properties: frozenset[str] = frozenset()
 
     def decode_options(self, reader: ConfigReader) -> object:
         return reader.integer("size", 1)
@@ -55,6 +56,13 @@ def _root(**profile: object) -> dict[str, object]:
     }
     defaults.update(profile)
     return {"active_profile": "tiny", "profiles": {"tiny": defaults}}
+
+
+def _with_spare_profile(spare: dict[str, object]) -> dict[str, object]:
+    """The default root plus an inactive profile named ``spare``."""
+
+    root = _root()
+    return {**root, "profiles": {**root["profiles"], "spare": spare}}  # type: ignore[dict-item]
 
 
 class StateTreeTests(unittest.TestCase):
@@ -157,6 +165,7 @@ class ConfigDecoderTests(unittest.TestCase):
             node_kinds={"probe": FakeNodeKind()},
             attachment_kinds={},
             functions=self.functions,
+            check_profile=lambda profile, path: None,
         )
 
     def test_decodes_bindings_callbacks_children_and_on_table(self) -> None:
@@ -220,6 +229,12 @@ class ConfigDecoderTests(unittest.TestCase):
                     }}])
                 )
 
+    def test_plain_data_errors_name_the_config_path(self) -> None:
+        with self.assertRaisesRegex(
+            ConfigError, r"^config\.profiles\.tiny\.state\.a\.b must contain only finite numbers$"
+        ):
+            self.decoder.decode_root(_root(state={"a": {"b": float("inf")}}))
+
     def test_keys_set_to_none_count_as_absent(self) -> None:
         root = self.decoder.decode_root(
             _root(
@@ -240,8 +255,7 @@ class ConfigDecoderTests(unittest.TestCase):
         self.assertNotIn("label", window.content.bindings)
 
     def test_inactive_profiles_are_validated_too(self) -> None:
-        root = _root()
-        root["profiles"]["spare"] = {"windows": [], "colour": "red"}  # type: ignore[index]
+        root = _with_spare_profile({"windows": [], "colour": "red"})
 
         with self.assertRaisesRegex(ConfigError, "config.profiles.spare has unknown keys: colour"):
             self.decoder.decode_root(root)
@@ -292,12 +306,21 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.failures.append(event)
         return []
 
+    def _decode(self, root: dict[str, object]) -> ProfileConfig:
+        decoder = ConfigDecoder(
+            node_kinds={"probe": FakeNodeKind()},
+            attachment_kinds={},
+            functions=self.functions,
+            check_profile=self.profile_runtime.check,
+        )
+        return decoder.decode_root(root)
+
     def _start(self, **profile: object) -> None:
-        decoder = ConfigDecoder(node_kinds={"probe": FakeNodeKind()}, attachment_kinds={}, functions=self.functions)
-        self.profile_runtime.start(decoder.decode_root(_root(**profile)))
+        self.profile_runtime.start(self._decode(_root(**profile)))
 
     def test_state_set_updates_state_and_reports_the_path(self) -> None:
         self._start(state={"shift": False})
+        self.changes.clear()
 
         self.dispatcher.dispatch(state_set("std.latched.shift", True))
         self.dispatcher.dispatch(state_set("std.latched.shift", True))
@@ -305,18 +328,33 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.assertEqual(self.state.get(("std", "latched", "shift")), True)
         self.assertEqual(self.changes, [("std", "latched", "shift")])
 
-    def test_rejected_profile_leaves_the_running_one_untouched(self) -> None:
-        seen: list[DataMap] = []
-        self._start(state={"mode": "a"}, on={"hot_corner.triggered": lambda ctx, event: seen.append(event) or []})
+    def test_restarting_a_profile_reports_what_changed_so_bindings_rerun(self) -> None:
+        self.profile_runtime.declare_root("input", {"keys": {"A": True}})
+        self._start(state={"mode": "a", "same": 1, "gone": True})
+        applied: list[object] = []
+        self.tracker.bind(self.functions.register(lambda state: state.mode), "node:a.label", applied.append)
+        self.changes.clear()
+
+        self._start(state={"mode": "b", "same": 1})
+
+        self.assertEqual(self.changes, [("gone",), ("mode",)])
+        self.assertEqual(applied, ["a", "b"])
+        self.assertEqual(self.state.get(("input", "keys", "A")), True)
+
+    def test_profiles_cannot_define_runtime_roots_even_when_inactive(self) -> None:
         self.profile_runtime.declare_root("input", {"keys": {}})
-        decoder = ConfigDecoder(node_kinds={"probe": FakeNodeKind()}, attachment_kinds={}, functions=self.functions)
+        root = _with_spare_profile({"windows": [], "state": {"input": {}}})
 
-        with self.assertRaisesRegex(ValueError, "cannot define runtime roots: input"):
-            self.profile_runtime.start(decoder.decode_root(_root(state={"input": {}})))
-        self.dispatcher.dispatch(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
+        with self.assertRaisesRegex(ConfigError, r"config.profiles.spare.state cannot define runtime roots: input"):
+            self._decode(root)
 
-        self.assertEqual(self.state.get(("mode",)), "a")
-        self.assertEqual(seen, [{"corner": "top_left"}])
+    def test_runtime_roots_set_to_none_count_as_absent(self) -> None:
+        self.profile_runtime.declare_root("input", {"keys": {}})
+
+        self._start(state={"input": None, "mode": {"a": None, "b": 1}})
+
+        self.assertEqual(self.state.get(("mode",)), {"b": 1})
+        self.assertEqual(self.state.get(("input",)), {"keys": {}})
 
     def test_profiles_cannot_set_runtime_state(self) -> None:
         self.profile_runtime.declare_root("input", {"keys": {}})
@@ -357,9 +395,11 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.assertEqual([failure.message for failure in self.failures], ["boom"])
         self.assertEqual(self.state.get(("ok",)), True)
 
-    def test_unknown_on_event_fails_at_start(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unknown events: nope.event"):
-            self._start(on={"nope.event": lambda ctx, event: None})
+    def test_unknown_on_event_fails_at_decode_even_when_inactive(self) -> None:
+        root = _with_spare_profile({"windows": [], "on": {"nope.event": lambda ctx, event: None}})
+
+        with self.assertRaisesRegex(ConfigError, r"config.profiles.spare.on handles unknown events: nope.event"):
+            self._decode(root)
 
     def test_bindings_rerun_only_when_their_reads_change(self) -> None:
         self._start(state={"shift": False, "other": 0})

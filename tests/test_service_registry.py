@@ -49,6 +49,15 @@ class ServiceRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "Service 'first' is not a KeyboardService"):
             services.get("first", KeyboardService)
 
+    def test_a_service_name_can_be_registered_once(self) -> None:
+        services = ServiceRegistry()
+        first = RecordingService("first", [])
+        services.register("keyboard", first)
+
+        with self.assertRaisesRegex(ValueError, "Service 'keyboard' is already registered"):
+            services.register("keyboard", RecordingService("second", []))
+        self.assertIs(services.find("keyboard"), first)
+
     def test_register_services_honors_the_include_filter(self) -> None:
         qt_app()
         services = ServiceRegistry()

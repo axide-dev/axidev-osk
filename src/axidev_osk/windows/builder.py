@@ -109,7 +109,6 @@ class RuntimeWindow(QMainWindow):
             self._overlay = configure_always_on_top_window(self, config=overlay.config)
         else:
             self._overlay = configure_plain_window(self)
-        self.destroyed.connect(self._release_platform_resources_on_destroy)
         try:
             central = build_content()
             if chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
@@ -228,10 +227,6 @@ class RuntimeWindow(QMainWindow):
         release = getattr(self._overlay, "release_resources", None)
         if release is not None:
             release()
-
-    def _release_platform_resources_on_destroy(self, *args: object) -> None:
-        del args
-        self.release_platform_resources()
 
     def apply_startup_size(self, *, minimum_size: tuple[int, int] = (0, 0)) -> None:
         """Resize the window to its polished minimum size.

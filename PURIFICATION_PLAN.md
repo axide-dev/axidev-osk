@@ -66,7 +66,7 @@ Nodes:
 Attachments:
 
 - `dwell` on a window.
-- `pointer_locator` on a window.
+- `pointer_locator` on a window, with the glow color it shows between buttons.
 - `hot_corners` with sensor settings and indicator colors.
 - `secure_input_panel` naming the window shown on the lock screen.
 
@@ -88,7 +88,7 @@ Events:
 - `hot_corner.triggered`, `display.configuration_changed`.
 - `app.quit_requested`, `window.close_requested`.
 - `keyboard.permission_required`, `keyboard.reset`.
-- `process.exited {tag, code}`.
+- `process.exited {tag, code, error}`, where `error` is present only when the program could not run.
 - `window.drag_started`, `window.drag_ended`, `pointer.motion_observed`.
 - `app.activated`, `linux.permission_setup_opened`.
 - `window.state_changed {window, visible, minimized, opacity, configured_opacity, input_blocked}`.

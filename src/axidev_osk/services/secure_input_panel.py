@@ -9,7 +9,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QSocketNotifier
-from PySide6.QtWidgets import QApplication
 
 from ..messages import MessageResult
 from ..runtime.app_messages import (
@@ -17,6 +16,7 @@ from ..runtime.app_messages import (
     SECURE_INPUT_PANEL_PREPARED,
     SECURE_INPUT_PANEL_RELEASE,
     SECURE_INPUT_PANEL_RELEASED,
+    app_quit,
     secure_input_panel_prepare,
     secure_input_panel_release,
 )
@@ -130,8 +130,8 @@ class SecureInputPanelWorkerService(QObject):
     def _respond(self, response: str) -> None:
         os.write(sys.stdout.fileno(), f"AXIDEV_OSK {response}\n".encode("ascii"))
 
-    @staticmethod
-    def _exit(status: int) -> None:
-        app = QApplication.instance()
-        if app is not None:
-            app.exit(status)
+    def _exit(self, status: int) -> None:
+        """Quit through the queue so the normal shutdown sequence runs."""
+
+        if self._context is not None:
+            self._context.dispatcher.dispatch(app_quit(status))

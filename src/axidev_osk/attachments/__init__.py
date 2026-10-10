@@ -103,6 +103,7 @@ def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorOptions:
             radius_percent=reader.number("radius_percent", 30.0),
             maximum_opacity_percent=reader.number("maximum_opacity_percent", 60.0),
             radius_standard_deviations=reader.number("radius_standard_deviations", 3.0),
+            gap_color=reader.color("gap_color"),
         ),
     )
     return PointerLocatorOptions(window=reader.string("window"), settings=settings)
@@ -113,19 +114,18 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
     unknown = sorted(corners - CORNERS)
     if unknown:
         raise ConfigError(f"{reader.field_path('corners')} has unknown corners: {', '.join(unknown)}")
-    defaults = HotCornerConfig()
     return HotCornersOptions(
         corners=corners,
         settings=HotCornerConfig(
-            dwell_ms=reader.integer("dwell_ms", defaults.dwell_ms, minimum=1),
-            poll_interval_ms=reader.integer("poll_interval_ms", defaults.poll_interval_ms, minimum=1),
-            corner_size_px=reader.integer("corner_size_px", defaults.corner_size_px, minimum=1),
-            indicator_size_px=reader.integer("indicator_size_px", defaults.indicator_size_px, minimum=1),
-            indicator_margin_px=reader.integer("indicator_margin_px", defaults.indicator_margin_px, minimum=0),
-            indicator_background=reader.color("indicator_background", defaults.indicator_background),
-            indicator_track=reader.color("indicator_track", defaults.indicator_track),
-            indicator_progress=reader.color("indicator_progress", defaults.indicator_progress),
-            indicator_center=reader.color("indicator_center", defaults.indicator_center),
+            indicator_background=reader.color("indicator_background"),
+            indicator_track=reader.color("indicator_track"),
+            indicator_progress=reader.color("indicator_progress"),
+            indicator_center=reader.color("indicator_center"),
+            dwell_ms=reader.integer("dwell_ms", 200, minimum=1),
+            poll_interval_ms=reader.integer("poll_interval_ms", 25, minimum=1),
+            corner_size_px=reader.integer("corner_size_px", 20, minimum=1),
+            indicator_size_px=reader.integer("indicator_size_px", 52, minimum=1),
+            indicator_margin_px=reader.integer("indicator_margin_px", 14, minimum=0),
         ),
     )
 

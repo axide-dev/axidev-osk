@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication, QDeadlineTimer
 
 from axidev_osk.config.profile import ConfigDecoder
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
+from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, Dispatcher
 from axidev_osk.runtime.engine import build_engine
@@ -19,6 +20,7 @@ from axidev_osk.runtime.engine_messages import (
     PROCESS_EXITED,
     ProcessExitedArguments,
     input_key,
+    process_exited,
     window_state_changed,
 )
 from axidev_osk.runtime.functions import CallbackContext
@@ -38,7 +40,12 @@ class Harness:
         self.engine = build_engine(self.dispatcher, keyboard=self.keyboard, processes=processes)  # type: ignore[arg-type]
         self.context = SimpleNamespace(dispatcher=self.dispatcher)
         self.keyboard.bind_context(self.context)  # type: ignore[arg-type]
-        decoder = ConfigDecoder(node_kinds={"probe": _ProbeKind()}, attachment_kinds={}, functions=self.engine.functions)
+        decoder = ConfigDecoder(
+            node_kinds={"probe": _ProbeKind()},
+            attachment_kinds={},
+            functions=self.engine.functions,
+            check_profile=self.engine.profile.check,
+        )
         root = {
             "active_profile": "p",
             "profiles": {
@@ -63,6 +70,7 @@ class _ProbeKind:
     properties: dict[str, object] = {}
     callbacks: dict[str, str] = {}
     has_children = False
+    widget_properties: frozenset[str] = frozenset()
 
     def decode_options(self, reader: object) -> None:
         return None
@@ -183,16 +191,31 @@ class KeyboardEffectTests(unittest.TestCase):
         self.assertEqual(harness.backend.sent[-1], ("up", "ShiftLeft"))
         self.assertEqual(len(resets), 2)
 
-    def test_spawn_and_log_actions_are_registered(self) -> None:
-        harness = Harness()
+    def test_profile_log_and_spawn_actions_reach_the_log_and_the_process_lane(self) -> None:
+        def on_window_close(ctx: CallbackContext, event: DataMap) -> list[osk.Map]:
+            del ctx, event
+            return [
+                osk.log.info("hello"),
+                osk.log.warn("careful"),
+                osk.log.error("broken"),
+                osk.process.spawn(["cowsay", "moo"], "cow"),
+                osk.process.spawn(["notify-send", "hi"], "note", detached=True),
+            ]
+
+        harness = Harness({"on": {"window.close_requested": on_window_close}})
 
         with self.assertLogs("axidev_osk.profile", level="INFO") as logs:
-            harness.act("log.info", message="hello")
-            harness.act("log.warn", message="careful")
-        harness.act("process.spawn", argv=["cowsay", "moo"], tag="cow")
+            harness.dispatcher.dispatch(window_close_requested("pad"))
 
-        self.assertEqual([record.getMessage() for record in logs.records], ["hello", "careful"])
-        self.assertEqual(harness.spawned, [(("cowsay", "moo"), "cow", False)])
+        self.assertEqual([record.getMessage() for record in logs.records], ["hello", "careful", "broken"])
+        self.assertEqual(
+            harness.spawned,
+            [(("cowsay", "moo"), "cow", False), (("notify-send", "hi"), "note", True)],
+        )
+
+    def test_a_program_that_ran_reports_no_error_key(self) -> None:
+        self.assertNotIn("error", process_exited("probe", 0).arguments)
+        self.assertEqual(process_exited("probe", -1, "missing").arguments["error"], "missing")
 
 
 class ProcessServiceTests(unittest.TestCase):

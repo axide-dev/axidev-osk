@@ -12,7 +12,7 @@ from typing import Any
 from . import osk
 from .osk import std
 from .osk.std import keys, prompts, windows
-from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR
+from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR, POINTER_LOCATOR
 
 KEYBOARD = "keyboard"
 KEYBOARD_OPACITY = 0.85
@@ -46,7 +46,7 @@ LAYOUT: list[tuple[Any, ...]] = [
     (1, 16, 1.0, "shifted", "4", "$", "4"),
     (1, 20, 1.0, "shifted", "5", "%", "5"),
     (1, 24, 1.0, "shifted", "6", "^", "6"),
-    (1, 28, 1.0, "shifted", "7", "&&", "7"),
+    (1, 28, 1.0, "shifted", "7", "&", "7"),
     (1, 32, 1.0, "shifted", "8", "*", "8"),
     (1, 36, 1.0, "shifted", "9", "(", "9"),
     (1, 40, 1.0, "shifted", "0", ")", "0"),
@@ -313,6 +313,7 @@ def build_default_config() -> osk.Map:
                         radius_percent=30,
                         maximum_opacity_percent=60,
                         radius_standard_deviations=3,
+                        **POINTER_LOCATOR,
                     ),
                     osk.hot_corners(
                         id="hot-corners",
