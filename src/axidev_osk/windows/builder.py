@@ -101,6 +101,7 @@ class RuntimeWindow(QMainWindow):
         self._chrome_widgets: OverlayChromeWidgets | None = None
         self._dwell_click: DwellClickController | None = None
         self._pointer_locators: dict[str, PointerLocator] = {}
+        self._unbinds: list[Callable[[], None]] = []
         self.setProperty(COMPONENT_TYPE, "window")
         self.setProperty(COMPONENT_ID, window_id)
         self.setWindowTitle(values.initial.title)
@@ -110,7 +111,9 @@ class RuntimeWindow(QMainWindow):
         else:
             self._overlay = configure_plain_window(self)
         try:
-            central = build_content()
+            with engine.node_builder.collecting() as node_unbinds:
+                central = build_content()
+            self._unbinds.extend(node_unbinds)
             if chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
                 if isinstance(central_layout, QVBoxLayout):
@@ -138,6 +141,7 @@ class RuntimeWindow(QMainWindow):
                 self._dwell_click = DwellClickController(self, central, dwell)
             self._opacity = WindowOpacityController(self)
             unbind = engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
+            self._unbinds.append(unbind)
             self.destroyed.connect(lambda _object=None: unbind())
             self.apply_startup_size(minimum_size=self._minimum_size)
         except Exception:
@@ -230,9 +234,25 @@ class RuntimeWindow(QMainWindow):
         if self._chrome_widgets is not None:
             self._chrome_widgets.title_bar.set_close_enabled(enabled)
 
-    def release_platform_resources(self) -> None:
-        """Release native resources and the input block before Qt destroys this window."""
+    def restore_position(self, x: int, y: int) -> None:
+        """Place the window's top-left corner at ``(x, y)`` through its overlay backend, before it shows."""
 
+        restore = getattr(self._overlay, "restore_position", None)
+        if restore is not None:
+            restore(x, y)
+        else:
+            self.move(x, y)
+
+    def release_platform_resources(self) -> None:
+        """Release native resources, the input block, and every binding before Qt destroys this window.
+
+        Bindings are dropped here rather than when Qt deletes the widgets
+        later, so a closed window never follows state again.
+        """
+
+        for unbind in self._unbinds:
+            unbind()
+        self._unbinds.clear()
         self._remove_input_blocker()
         release = getattr(self._overlay, "release_resources", None)
         if release is not None:
@@ -251,6 +271,13 @@ class RuntimeWindow(QMainWindow):
             Updates Qt minimum size and current size.
         """
 
+        fitted = self._fitted_size(minimum_size)
+        self.setMinimumSize(fitted)
+        self.resize(fitted)
+
+    def _fitted_size(self, minimum_size: tuple[int, int]) -> QSize:
+        """Return the smallest size that holds the content and respects ``minimum_size``."""
+
         self.ensurePolished()
         central_widget = self.centralWidget()
         if central_widget is not None:
@@ -263,8 +290,22 @@ class RuntimeWindow(QMainWindow):
             # Wrapped text is taller at the final width than the size hint assumes.
             needed_height = central_widget.heightForWidth(resolved_minimum_size.width())
             resolved_minimum_size.setHeight(max(resolved_minimum_size.height(), needed_height))
-        self.setMinimumSize(resolved_minimum_size)
-        self.resize(resolved_minimum_size)
+        return resolved_minimum_size
+
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        """Refit the window when its content needs a different size, such as a panel that shows or hides.
+
+        Only a change in what the content needs resizes the window, so a size
+        the user chose stays until the content changes.
+        """
+
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest and self.centralWidget() is not None:
+            fitted = self._fitted_size(self._minimum_size)
+            if fitted != self.minimumSize():
+                self.setMinimumSize(fitted)
+                self.resize(fitted)
+        return handled
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Send ``window.close_requested`` instead of closing; a removed output's close is ignored."""

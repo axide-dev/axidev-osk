@@ -10,7 +10,7 @@ from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.axidev_osk import std
-from axidev_osk.python_defaults.axidev_osk.std import keys, prompts, windows
+from axidev_osk.python_defaults.axidev_osk.std import controls, keys, prompts, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.state import StateTree
@@ -24,6 +24,7 @@ class StdHarness:
         children: list[axidev_osk.Map],
         *,
         on: dict[str, Any] | None = None,
+        state: dict[str, Any] | None = None,
         **window_fields: Any,
     ) -> None:
         qt_app()
@@ -35,7 +36,7 @@ class StdHarness:
             profiles={
                 "p": axidev_osk.profile(
                     windows=[axidev_osk.window(id="pad", title="Pad", content=axidev_osk.box(id="root", children=children), **window_fields)],
-                    state=std.with_state(),
+                    state=std.with_state(state),
                     on=std.with_handlers(on),
                 )
             },
@@ -235,6 +236,103 @@ class KeyTests(unittest.TestCase):
         node = keys.letter("a", {"id": "cow", "on_release": custom, "cell": {"row": 0, "column": 0}})
 
         self.assertEqual((node["id"], node["on_release"], node["cell"]), ("cow", custom, {"row": 0, "column": 0}))
+
+
+class ControlTests(unittest.TestCase):
+    def test_checkbox_flips_its_variable_and_lights_while_true(self) -> None:
+        harness = StdHarness(self, [controls.checkbox("on", "On", "on")], state={"on": axidev_osk.var("boolean", False)})
+
+        harness.tap("on")
+        self.assertIs(harness.state("on"), True)
+        self.assertTrue(harness.widget("on").property("latched"))
+
+        harness.tap("on")
+        self.assertIs(harness.state("on"), False)
+        self.assertFalse(harness.widget("on").property("latched"))
+
+    def test_stepper_moves_by_exact_steps_and_stops_at_its_bounds(self) -> None:
+        harness = StdHarness(
+            self,
+            [controls.stepper("level", "level", minimum=0.3, maximum=1.0, step=0.05, label="Level")],
+            state={"level": axidev_osk.var("number", 0.85)},
+        )
+        up = harness.widget("level:up")
+
+        for _tap in range(4):
+            harness.tap("level:up")
+        self.assertEqual(harness.state("level"), 1.0)
+        self.assertEqual(harness.widget("level:value").text(), "1")  # type: ignore[attr-defined]
+        self.assertFalse(up.isEnabled())
+
+        harness.tap("level:down")
+        self.assertEqual(harness.state("level"), 0.95)
+        self.assertTrue(up.isEnabled())
+
+    def test_linked_steppers_never_cross(self) -> None:
+        harness = StdHarness(
+            self,
+            [
+                controls.stepper("low", "low", minimum=0, maximum=lambda state: state.high - 5, step=5),
+                controls.stepper("high", "high", minimum=lambda state: state.low + 5, maximum=100, step=5),
+            ],
+            state={"low": axidev_osk.var("integer", 0), "high": axidev_osk.var("integer", 15)},
+        )
+
+        for _tap in range(5):
+            harness.tap("low:up")
+        self.assertEqual(harness.state("low"), 10)
+        self.assertFalse(harness.widget("high:down").isEnabled())
+
+        harness.tap("high:up")
+        harness.tap("low:up")
+        self.assertEqual((harness.state("low"), harness.state("high")), (15, 20))
+
+    def test_dropdown_opens_inline_and_picking_a_choice_runs_on_select_and_closes_it(self) -> None:
+        mode, mode_panel = controls.dropdown(
+            "mode",
+            [("a", "Alpha"), ("b", "Beta")],
+            value=lambda state: state.mode,
+            on_select=lambda ctx, value: [axidev_osk.state.set("mode", value)],
+            label="Mode",
+            group="g",
+        )
+        other, other_panel = controls.menu("other", "Other", [axidev_osk.label(id="other:text", text="hi")], group="g")
+        harness = StdHarness(self, [mode_panel, other_panel, mode, other], state={"mode": axidev_osk.var("string", "a")})
+        panel = harness.widget("mode:panel")
+        self.assertEqual(harness.widget("mode").text(), "Mode: Alpha ▾")  # type: ignore[attr-defined]
+        self.assertTrue(panel.isHidden())
+
+        harness.tap("mode")
+        self.assertFalse(panel.isHidden())
+        self.assertTrue(harness.widget("mode:choice:0").property("latched"))
+
+        harness.tap("mode:choice:1")
+        self.assertEqual(harness.state("mode"), "b")
+        self.assertTrue(panel.isHidden())
+        self.assertEqual(harness.widget("mode").text(), "Mode: Beta ▾")  # type: ignore[attr-defined]
+
+        harness.tap("mode")
+        harness.tap("other")
+        self.assertTrue(panel.isHidden())
+        self.assertFalse(harness.widget("other:panel").isHidden())
+
+    def test_strip_shows_only_its_toggle_until_opened_and_closes_its_menus_with_it(self) -> None:
+        group = controls.strip_group("s")
+        more, more_panel = controls.menu("more", "More", [axidev_osk.label(id="more:text", text="hi")], group=group)
+        harness = StdHarness(self, [controls.strip("s", [more], panels=[more_panel])])
+        controls_row, panel = harness.widget("s:controls"), harness.widget("more:panel")
+        self.assertTrue(controls_row.isHidden())
+
+        harness.tap("s:toggle")
+        self.assertFalse(controls_row.isHidden())
+        harness.tap("more")
+        self.assertFalse(panel.isHidden())
+        self.assertFalse(controls_row.isHidden())
+
+        harness.tap("s:toggle")
+        self.assertTrue(controls_row.isHidden())
+        harness.tap("s:toggle")
+        self.assertTrue(panel.isHidden())
 
 
 class WindowHelperTests(unittest.TestCase):

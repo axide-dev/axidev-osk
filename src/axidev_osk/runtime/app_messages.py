@@ -1,7 +1,7 @@
 """Messages the application runtime handles or sends.
 
 These cover windows, title-bar drags, displays, hot corners, the lock-screen
-panel, quit requests, second-launch activation, and Linux permission setup.
+panel, profile switching, quit requests, second-launch activation, and Linux permission setup.
 ``build_engine`` registers every event here, so profiles can handle them; the
 application registers the action handlers, because they need the objects it
 owns. Messages the engine itself handles (keyboard, processes, logging,
@@ -42,6 +42,7 @@ WINDOW_DRAG_ENDED = "window.drag_ended"
 WINDOW_DRAG_STARTED = "window.drag_started"
 
 APP_QUIT = "app.quit"
+PROFILE_SWITCH = "profile.switch"
 LINUX_OPEN_PERMISSION_SETUP = "linux.open_permission_setup"
 SECURE_INPUT_PANEL_PREPARE = "secure_input_panel.prepare"
 SECURE_INPUT_PANEL_RELEASE = "secure_input_panel.release"
@@ -75,6 +76,11 @@ class PermissionSetupOpenedArguments:
 @dataclass(frozen=True, slots=True)
 class AppQuitArguments:
     exit_code: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileSwitchArguments:
+    profile: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +143,10 @@ def app_quit(exit_code: int = 0) -> RuntimeAction:
     return validated_action(APP_QUIT, {"exit_code": exit_code}, decode_app_quit)
 
 
+def profile_switch(profile: str) -> RuntimeAction:
+    return validated_action(PROFILE_SWITCH, {"profile": profile}, decode_profile_switch)
+
+
 def window_show(window_id: str) -> RuntimeAction:
     return validated_action(WINDOW_SHOW, {"window": window_id}, decode_window)
 
@@ -184,6 +194,11 @@ def decode_permission_setup_opened(arguments: DataMap) -> PermissionSetupOpenedA
 def decode_app_quit(arguments: DataMap) -> AppQuitArguments:
     require_keys(arguments, (), optional=("exit_code",))
     return AppQuitArguments(exit_code=int_value(arguments, "exit_code") if "exit_code" in arguments else 0)
+
+
+def decode_profile_switch(arguments: DataMap) -> ProfileSwitchArguments:
+    require_keys(arguments, ("profile",))
+    return ProfileSwitchArguments(profile=non_empty_string_value(arguments, "profile"))
 
 
 def decode_window(arguments: DataMap) -> WindowArguments:

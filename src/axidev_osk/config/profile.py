@@ -243,6 +243,18 @@ class ProfileConfig:
         return [node for window in self.windows for node in window.content.walk()]
 
 
+@dataclass(frozen=True, slots=True)
+class RootConfig:
+    """Every decoded profile of a root config, and the one it starts with."""
+
+    active_profile: str
+    profiles: Mapping[str, ProfileConfig]
+
+    @property
+    def active(self) -> ProfileConfig:
+        return self.profiles[self.active_profile]
+
+
 ProfileCheck = Callable[[ProfileConfig, str], None]
 """Engine checks a decoded profile must pass, given the profile and its config path."""
 
@@ -271,6 +283,11 @@ class ConfigDecoder:
     def decode_root(self, data: object) -> ProfileConfig:
         """Validate every profile in a root config and return the active one."""
 
+        return self.decode_config(data).active
+
+    def decode_config(self, data: object) -> RootConfig:
+        """Validate every profile in a root config and return them all."""
+
         reader = ConfigReader(data, "config", self._functions)
         active = reader.string("active_profile")
         profiles = reader.items("profiles")
@@ -284,7 +301,7 @@ class ConfigDecoder:
             )
         if active not in decoded:
             raise ConfigError(f"config.active_profile names unknown profile {active!r}")
-        return decoded[active]
+        return RootConfig(active_profile=active, profiles=decoded)
 
     def _decode_profile(
         self,

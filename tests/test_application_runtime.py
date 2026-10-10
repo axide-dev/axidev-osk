@@ -7,7 +7,8 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import QEvent
 
 from axidev_osk.app import _set_application_icon
-from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
+from axidev_osk.messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent
+from axidev_osk.nodes import BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.runtime.app_messages import (
@@ -32,7 +33,8 @@ from axidev_osk.runtime.engine_messages import keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
-from support import RecordingBackend, has_pending, qt_app
+from axidev_osk.windows.builder import build_profile_window
+from support import RecordingBackend, has_pending, nodes_by_id, qt_app
 
 _KEYBOARD_WINDOW = "keyboard"
 
@@ -47,8 +49,7 @@ def _runtime_without_platform_services(
         qt_app(),
         root_config=root_config if root_config is not None else build_default_config(),
         services=services,
-        show_startup_windows=False,
-        **options,
+        **{"show_startup_windows": False, **options},
     )
 
 
@@ -313,6 +314,33 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         close.assert_not_called()
         exit_app.assert_not_called()
 
+    def test_the_profile_dropdown_switches_to_the_social_keyboard_and_back(self) -> None:
+        runtime = _runtime_without_platform_services(show_startup_windows=True)
+        _start(self, runtime)
+        self.addCleanup(runtime._window_manager.close_all)
+        dispatcher = runtime.engine.dispatcher
+        dispatcher.dispatch(state_set("settings.opacity", 0.6))
+
+        def pick(choice: int) -> None:
+            for node in ("keyboard:strip:toggle", "keyboard:profile-menu", f"keyboard:profile-menu:choice:{choice}"):
+                dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node}))
+
+        pick(1)
+        social = runtime._window_manager.get(_KEYBOARD_WINDOW)
+        assert social is not None
+        self.assertTrue(social.isVisible())
+        self.assertEqual(
+            sorted(node for node in nodes_by_id(social) if node.startswith("key:")),
+            ["key:Down", "key:K", "key:L", "key:Up"],
+        )
+        self.assertAlmostEqual(social.windowOpacity(), 0.6, delta=0.005)
+
+        pick(0)
+        keyboard = runtime._window_manager.get(_KEYBOARD_WINDOW)
+        assert keyboard is not None
+        self.assertIn("keyboard-grid", nodes_by_id(keyboard))
+        self.assertEqual(runtime.engine.profile.state.get(("app", "profile")), "default")
+
     def test_the_theme_follows_the_state_it_reads(self) -> None:
         root = axidev_osk.config(
             active_profile="p",
@@ -485,6 +513,134 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
         self.assertEqual(runtime._window_manager.all_windows(), [])
+
+
+def _switch_root(on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, panel: bool = False) -> axidev_osk.Map:
+    """Two profiles, ``a`` and ``b``, each showing a ``pad`` window and recording ``app.activated``."""
+
+    def profile(name: str, children: list[axidev_osk.Map]) -> axidev_osk.Map:
+        return axidev_osk.profile(
+            state={"count": axidev_osk.var("integer", 0), "activated": axidev_osk.var(axidev_osk.list_of("string"))},
+            windows=[axidev_osk.window(id="pad", title=name, show_on_start=True, content=axidev_osk.box(id=f"{name}:root", children=children))],
+            attachments=[axidev_osk.secure_input_panel(id="panel", window="pad")] if panel and name == "a" else [],
+            on={"app.activated": lambda ctx, event: [axidev_osk.state.set("activated", [*ctx.state.activated, name])]},
+        )
+
+    return axidev_osk.config(
+        active_profile="a",
+        state={"kept": axidev_osk.var("integer", 0)},
+        profiles={
+            "a": profile("a", [axidev_osk.button(id="a:go", on_release=on_go)]),
+            "b": profile("b", [axidev_osk.button(id="b:only")]),
+            **(extra or {}),
+        },
+    )
+
+
+class ProfileSwitchTests(unittest.TestCase):
+    def _runtime(self, root: axidev_osk.Map, *, show_startup_windows: bool = True) -> ApplicationRuntime:
+        services = ServiceRegistry()
+        services.register("keyboard", KeyboardService(RecordingBackend()), autostart=False)
+        runtime = ApplicationRuntime(qt_app(), root_config=root, services=services, show_startup_windows=show_startup_windows)
+        _start(self, runtime)
+        self.addCleanup(runtime._window_manager.close_all)
+        return runtime
+
+    def _state(self, runtime: ApplicationRuntime, *path: str) -> object:
+        return runtime.engine.profile.state.get(path)
+
+    def _release(self, runtime: ApplicationRuntime, node: str) -> None:
+        runtime.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node}))
+
+    def test_a_switch_waits_for_queued_work_then_runs_the_other_profile(self) -> None:
+        runtime = self._runtime(
+            _switch_root(lambda ctx, event: [axidev_osk.state.set("kept", 7), axidev_osk.profile.switch("b"), axidev_osk.state.set("count", 5)])
+        )
+        old_window = runtime._window_manager.get("pad")
+        assert old_window is not None
+
+        self._release(runtime, "a:go")
+
+        self.assertEqual(self._state(runtime, "app"), {"profile": "b", "profiles": ["a", "b"]})
+        self.assertEqual(self._state(runtime, "count"), 0)
+        self.assertEqual(self._state(runtime, "kept"), 7)
+        new_window = runtime._window_manager.get("pad")
+        assert new_window is not None
+        self.assertIsNot(new_window, old_window)
+        self.assertFalse(old_window.isVisible())
+        self.assertTrue(new_window.isVisible())
+        self.assertIn("b:only", nodes_by_id(new_window))
+        runtime.engine.dispatcher.dispatch(app_activated())
+        self.assertEqual(self._state(runtime, "activated"), ["b"])
+
+    def test_a_window_with_the_same_id_keeps_its_position(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")]))
+        window = runtime._window_manager.get("pad")
+        assert window is not None
+        window.move(120, 80)
+
+        self._release(runtime, "a:go")
+
+        moved = runtime._window_manager.get("pad")
+        assert moved is not None
+        self.assertEqual((moved.x(), moved.y()), (120, 80))
+
+    def test_a_profile_that_fails_to_build_brings_the_previous_one_back(self) -> None:
+        broken = axidev_osk.profile(
+            windows=[axidev_osk.window(id="pad", title="broken", show_on_start=True, content=axidev_osk.box(id="broken:root"))],
+        )
+        runtime = self._runtime(
+            _switch_root(lambda ctx, event: [axidev_osk.profile.switch("broken")], extra={"broken": broken})
+        )
+        failures = _record_failures(runtime)
+
+        def build(config: Any, *args: Any, **kwargs: Any) -> Any:
+            if config.values.initial.title == "broken":
+                raise RuntimeError("the window cannot be built")
+            return build_profile_window(config, *args, **kwargs)
+
+        with patch("axidev_osk.runtime.application.build_profile_window", side_effect=build), self.assertLogs(level="ERROR"):
+            self._release(runtime, "a:go")
+
+        self.assertEqual(
+            [(failure.action, failure.message) for failure in failures],
+            [("profile.switch", "the window cannot be built")],
+        )
+        self.assertEqual(self._state(runtime, "app", "profile"), "a")
+        window = runtime._window_manager.get("pad")
+        assert window is not None
+        self.assertTrue(window.isVisible())
+        self.assertIn("a:go", nodes_by_id(window))
+        runtime.engine.dispatcher.dispatch(app_activated())
+        self.assertEqual(self._state(runtime, "activated"), ["a"])
+
+    def test_switching_to_an_unknown_profile_fails_and_changes_nothing(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("typo")]))
+        failures = _record_failures(runtime)
+        window = runtime._window_manager.get("pad")
+
+        self._release(runtime, "a:go")
+
+        self.assertEqual([failure.message for failure in failures], ["No profile named 'typo' in the root config"])
+        self.assertIs(runtime._window_manager.get("pad"), window)
+
+    def test_a_prepared_lock_screen_panel_refuses_a_profile_without_one(self) -> None:
+        runtime = self._runtime(
+            _switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")], panel=True), show_startup_windows=False
+        )
+        failures = _record_failures(runtime)
+        runtime.engine.dispatcher.dispatch(secure_input_panel_prepare())
+        panel = runtime._window_manager.get("pad")
+
+        self._release(runtime, "a:go")
+
+        self.assertEqual(
+            [failure.message for failure in failures],
+            ["Profile 'b' has no secure_input_panel attachment for the prepared lock-screen panel"],
+        )
+        self.assertIs(runtime._window_manager.get("pad"), panel)
+        assert panel is not None
+        self.assertTrue(panel.isVisible())
 
 
 class SecureInputPanelLifecycleTests(unittest.TestCase):

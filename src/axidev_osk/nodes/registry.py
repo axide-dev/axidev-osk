@@ -9,7 +9,8 @@ they read changes and hands the kind the new values with the previous ones.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,7 @@ from ..runtime.decoding import non_empty_string_value, require_keys, validated_e
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 
 if TYPE_CHECKING:
-    from ..runtime.dispatcher import Dispatcher
+    from ..runtime.dispatcher import Dispatcher, Unsubscribe
     from ..runtime.profile_runtime import BindingTracker
 
 NodeBuild = Callable[[NodeConfig, "NodeBuilder"], QWidget]
@@ -110,6 +111,23 @@ class NodeBuilder:
         self._kinds = kinds
         self._dispatcher = dispatcher
         self._bindings = bindings
+        self._collectors: list[list[Unsubscribe]] = []
+
+    @contextmanager
+    def collecting(self) -> Iterator[list[Unsubscribe]]:
+        """Collect the unbind of every node built inside the block, so its owner can drop them at once.
+
+        A closed window drops its bindings right away instead of when Qt
+        deletes its widgets later, so they never decode against another
+        profile's state.
+        """
+
+        unbinds: list[Unsubscribe] = []
+        self._collectors.append(unbinds)
+        try:
+            yield unbinds
+        finally:
+            self._collectors.pop()
 
     def build(self, node: NodeConfig) -> QWidget:
         kind = self._kinds[node.kind]
@@ -125,6 +143,8 @@ class NodeBuilder:
 
         unbind = self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial)
         widget.destroyed.connect(lambda _object=None: unbind())
+        if self._collectors:
+            self._collectors[-1].append(unbind)
         return widget
 
     def emit(self, event_name: str, node_id: str) -> None:

@@ -36,6 +36,8 @@ class AttachmentWindow(Protocol):
 class HotCornerTarget(Protocol):
     def configure(self, settings: HotCornerConfig, corners: frozenset[str]) -> None: ...
 
+    def clear(self) -> None: ...
+
 
 class AttachmentHost(Protocol):
     """What an attachment kind may use when it is attached for the running profile."""

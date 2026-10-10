@@ -26,6 +26,12 @@ class WindowManager:
         self._windows: dict[str, RuntimeWindow] = {}
         self._factories: dict[str, WindowFactory] = dict(factories)
 
+    def set_factories(self, factories: Mapping[str, WindowFactory]) -> None:
+        """Close every live window and build later windows from ``factories``, such as another profile's."""
+
+        self.close_all()
+        self._factories = dict(factories)
+
     def get_or_create(self, window_id: str) -> RuntimeWindow:
         """Return a live window, building it from its factory if needed."""
 

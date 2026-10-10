@@ -469,6 +469,22 @@ class AlwaysOnTopWindowController:
         position = self._window.pos()
         return (position.x(), position.y())
 
+    def restore_position(self, x: int, y: int) -> None:
+        """Put the window's top-left corner back at ``(x, y)``, as ``position`` reported it.
+
+        A layer surface is anchored to the screen's left and bottom edges like
+        every drag leaves it, so a later drag continues from there. KWin
+        places the input panel itself, so it ignores the request.
+        """
+
+        if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
+            return
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            self.move_to_anchored(QPoint(x, y), anchors=ANCHOR_LEFT | ANCHOR_BOTTOM)
+            return
+        self._window.move(x, y)
+        self._floating_position_initialized = True
+
     def move_by(self, dx: int, dy: int) -> None:
         """Move the overlay by a bounded delta."""
 
@@ -768,6 +784,11 @@ class PlainWindowController:
 
         position = self._window.pos()
         return (position.x(), position.y())
+
+    def restore_position(self, x: int, y: int) -> None:
+        """Put the window's top-left corner back at ``(x, y)``."""
+
+        self._window.move(x, y)
 
     def move_by(self, _dx: int, _dy: int) -> None:
         """Ignore overlay move requests for plain windows."""

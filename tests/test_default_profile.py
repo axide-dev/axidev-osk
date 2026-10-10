@@ -231,6 +231,24 @@ class BehaviorParityTests(unittest.TestCase):
         self.assertIs(harness.engine.profile.state.get(enabled), False)
         self.assertFalse(harness.nodes["dwell"].property("latched"))
 
+    def test_settings_strip_drives_opacity_and_the_dwell_attachment(self) -> None:
+        harness = self.harness
+
+        self.assertTrue(harness.nodes["keyboard:strip:controls"].isHidden())
+        harness.tap("keyboard:strip:toggle")
+        self.assertFalse(harness.nodes["keyboard:strip:controls"].isHidden())
+
+        harness.tap("keyboard:opacity:down")
+        self.assertAlmostEqual(harness.window.windowOpacity(), KEYBOARD_OPACITY - 0.05, delta=0.005)
+
+        harness.tap("keyboard:dwell-menu")
+        self.assertFalse(harness.nodes["keyboard:dwell-menu:panel"].isHidden())
+        harness.tap("keyboard:dwell-enabled")
+        dwell = harness.attachments.for_window("keyboard").dwell
+        assert dwell is not None
+        self.assertTrue(dwell.enabled)
+        self.assertTrue(harness.nodes["dwell"].property("latched"))
+
     def test_hot_corner_toggles_the_keyboard(self) -> None:
         harness = self.harness
         harness.emit(_keyboard_shown())

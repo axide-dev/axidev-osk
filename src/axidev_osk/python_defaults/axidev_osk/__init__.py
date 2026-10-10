@@ -8,7 +8,7 @@ Everything here builds plain maps. Nothing calls the engine directly. A Lua
 - Attachment builders: ``dwell``, ``pointer_locator``, ``hot_corners``,
   ``secure_input_panel``.
 - Action builders grouped by subject: ``state``, ``keyboard``, ``window``,
-  ``process``, ``log``, ``app``, ``linux``.
+  ``profile``, ``process``, ``log``, ``app``, ``linux``.
 - State declarations: ``var`` with the types ``list_of``, ``map_of``, and
   ``record``.
 - Helpers: ``config``, ``profile``, ``merge``, ``read``.
@@ -96,24 +96,37 @@ def config(*, active_profile: str, profiles: Mapping[str, Map], state: Map | Non
     return result
 
 
-def profile(
-    *,
-    windows: list[Map],
-    state: Map | None = None,
-    attachments: list[Map] | None = None,
-    on: Mapping[str, Any] | None = None,
-    theme: Map | None = None,
-) -> Map:
-    result: Map = {"windows": windows}
-    if state is not None:
-        result["state"] = state
-    if attachments is not None:
-        result["attachments"] = attachments
-    if on is not None:
-        result["on"] = dict(on)
-    if theme is not None:
-        result["theme"] = theme
-    return result
+class _Profile:
+    """``axidev_osk.profile(...)`` builds a profile; ``axidev_osk.profile.switch(...)`` builds an action."""
+
+    def __call__(
+        self,
+        *,
+        windows: list[Map],
+        state: Map | None = None,
+        attachments: list[Map] | None = None,
+        on: Mapping[str, Any] | None = None,
+        theme: Map | None = None,
+    ) -> Map:
+        result: Map = {"windows": windows}
+        if state is not None:
+            result["state"] = state
+        if attachments is not None:
+            result["attachments"] = attachments
+        if on is not None:
+            result["on"] = dict(on)
+        if theme is not None:
+            result["theme"] = theme
+        return result
+
+    @staticmethod
+    def switch(profile: str) -> Map:
+        """Run another profile of the root config once queued work finishes."""
+
+        return action("profile.switch", profile=profile)
+
+
+profile = _Profile()
 
 
 def _node(kind: str, fields: Mapping[str, Any]) -> Map:

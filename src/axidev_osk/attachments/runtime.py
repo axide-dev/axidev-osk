@@ -73,6 +73,8 @@ class AttachmentRuntime:
         self._dwell.clear()
         self._locators.clear()
         self._secure_input_panel_window = None
+        if self._hot_corners is not None:
+            self._hot_corners.clear()
 
     def for_window(self, window_id: str) -> WindowAttachments:
         """Return the attachments a window installs, with their current options."""

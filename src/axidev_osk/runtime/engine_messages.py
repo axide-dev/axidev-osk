@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
-from ..config.variables import MapOf, Record, Scalar, StatePath, Variable, record_default
+from ..config.variables import ListOf, MapOf, Record, Scalar, StatePath, Variable, record_default
 from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent
 from .decoding import (
     bool_value,
@@ -79,6 +79,7 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         needs_permission_setup=_boolean(),
         permission_setup_text=_string(),
     ),
+    ("app",): _record(profile=_string(), profiles=Variable(ListOf(Scalar("string")), [])),
     ("windows",): Variable(
         MapOf(
             Record(
@@ -93,7 +94,7 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         {},
     ),
 }
-"""What the engine observes: keys and locks, keyboard output status, and each built window."""
+"""What the engine observes: keys and locks, keyboard output status, the running and available profiles, and each built window."""
 
 
 @dataclass(frozen=True, slots=True)

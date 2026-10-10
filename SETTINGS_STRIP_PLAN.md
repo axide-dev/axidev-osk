@@ -91,8 +91,8 @@ Changing the default keyboard updates the expected data in `tests/test_default_p
 
 Each step keeps the full test suite, flake8, and pyright passing.
 
-- [ ] 1. Engine shrink-back after content shrinks.
-- [ ] 2. `checkbox`, `stepper`, `dropdown`, and `menu` in `axidev_osk.std`.
-- [ ] 3. `profile.switch`, `app.profile`, `app.profiles`, position kept across a rebuild, and rollback on a failed switch.
-- [ ] 4. Default keyboard strip and the `social` profile, with updated parity data.
-- [ ] 5. Document the strip helpers and profile switching in `AGENTS.md`.
+- [x] 1. Engine shrink-back after content shrinks.
+- [x] 2. `checkbox`, `stepper`, `dropdown`, and `menu` in `axidev_osk.std`.
+- [x] 3. `profile.switch`, `app.profile`, `app.profiles`, position kept across a rebuild, and rollback on a failed switch.
+- [x] 4. Default keyboard strip and the `social` profile, with updated parity data.
+- [x] 5. Document the strip helpers and profile switching in `AGENTS.md`.

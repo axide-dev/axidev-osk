@@ -232,4 +232,31 @@ QWidget[pointerLocatorEnabled="true"] QPushButton:disabled {
     background-color: rgba(15, 15, 22, 153);
 }
 
+QWidget#settingsStrip QPushButton {
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    padding: 4px 10px;
+    min-height: 22px;
+}
+QWidget#settingsStrip QPushButton#stripToggle {
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 0px;
+    min-height: 24px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #b9bbc7;
+}
+QWidget#settingsStrip QPushButton#stripToggle:hover {
+    background: rgba(255, 255, 255, 18);
+}
+QWidget#settingsStrip QPushButton#stripToggle[latched="true"] {
+    color: #e61e8c;
+}
+QWidget#settingsStrip QLabel {
+    color: #b9bbc7;
+    font-size: 13px;
+}
 """
