@@ -18,7 +18,7 @@ jobs:
         uses: ./.github/actions/setup-ubuntu-runner
 
       - name: Install Python check tools
-        run: python -m pip install --upgrade pip build flake8
+        run: python -m pip install --upgrade pip build flake8 pyright
 
       - name: Lint top-level Python code
         run: |
@@ -44,6 +44,9 @@ jobs:
 
       - name: Install axidev-osk
         run: python -m pip install -e .
+
+      - name: Type-check application source
+        run: python -m pyright --pythonpath "$(python -c 'import sys; print(sys.executable)')"
 
       - name: Run app tests
         env:

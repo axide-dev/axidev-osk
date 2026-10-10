@@ -1,198 +1,61 @@
-"""Test helpers for constructing minimal runtime contexts.
+"""Test helpers for building a real runtime context around a fake keyboard backend.
 
-These helpers exist so unit tests can build a real ``Context`` with a
-caller-supplied keyboard backend stub instead of constructing widgets
-with ``context=None``. Keeping a single sanctioned construction path
-means the production ``KeyboardWidget`` can require ``context`` and
-never fall back to legacy behavior.
-
-This module is intentionally lightweight and dependency-free beyond
-the runtime package itself: tests should be able to import it without
-pulling Qt or the full application stack.
+Tests get the production dispatcher, engine, node kinds, and attachment kinds,
+so they exercise the same queue and state paths the app uses. Only the
+keyboard backend and spawned processes are replaced.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
-from ..config.defaults import build_default_app_config
-from ..config.models import AppConfig
-from ..services import register_services
+from ..config.profile import ProfileConfig
 from ..services.keyboard import KeyboardService
-from .commands import AppQuit, StateSet, WindowMoveBy
 from .context import Context
 from .dispatcher import Dispatcher
-from .event_handlers import (
-    register_context_command_handlers,
-    register_event_handlers,
-    route_component_pressed,
-    route_component_state_changed,
-    route_hot_corner_triggered,
-    route_pointer_drag_event,
-)
-from .events import WindowCloseRequested
-from .identity import window_state_namespace
-from .registries import (
-    ComponentRegistry,
-    EventHandlerRegistry,
-    ServiceRegistry,
-    SurfaceRegistry,
-)
-from .state_store import StateStore
-from .window_manager import WindowManager
+from .engine import build_engine
 
 
-class _TestApplication:
-    """Minimal QApplication-shaped adapter for default command handlers."""
+class RecordingProcesses:
+    """Process effects that record spawn requests instead of starting programs."""
 
     def __init__(self) -> None:
-        """Create an adapter that records requested exit codes."""
+        self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
 
-        self.exit_code: int | None = None
-
-    def exit(self, exit_code: int) -> None:
-        """Record the requested application exit code."""
-
-        self.exit_code = exit_code
+    def spawn(self, argv: tuple[str, ...], tag: str, detached: bool) -> None:
+        self.spawned.append((argv, tag, detached))
 
 
-class _TestRuntime:
-    """Runtime-shaped adapter used to install default handlers in tests."""
-
-    def __init__(self, context: Context) -> None:
-        """Bind context, window manager, and app adapter for handlers."""
-
-        self._config = context.config
-        self._dispatcher = context.dispatcher
-        self._window_manager = WindowManager(context)
-        self._app = _TestApplication()
-        self._active_pointer_drag_window_id: str | None = None
-        self._pointer_drag_remainder = (0.0, 0.0)
-
-    def _handle_window_close_requested(self, event: object) -> None:
-        """Map close requests to a direct test quit command."""
-
-        if isinstance(event, WindowCloseRequested):
-            self._dispatcher.dispatch_command(AppQuit())
-
-    def _handle_hot_corner_triggered(self, event: object) -> None:
-        """Route hot-corner visibility commands through production helper."""
-
-        route_hot_corner_triggered(event, self)
-
-    def _handle_component_pressed(self, event: object) -> None:
-        """Route configured component actions through production helper."""
-
-        route_component_pressed(event, self)
-
-    def _handle_component_state_changed(self, event: object) -> None:
-        """Route configured latch actions through production helper."""
-
-        route_component_state_changed(event, self)
-
-    def _set_window_dwell_enabled(self, window_id: str, enabled: bool) -> None:
-        """Apply and centrally store dwell state for test windows."""
-
-        self._window_manager.set_dwell_enabled(window_id, enabled)
-        self._dispatcher.dispatch_command(
-            StateSet(
-                namespace=window_state_namespace(window_id),
-                key="dwell_enabled",
-                value=enabled,
-            )
-        )
-
-    def _handle_pointer_drag_event(self, event: object) -> None:
-        """Route raw pointer drag events through the production helper."""
-
-        route_pointer_drag_event(event, self)
-
-    def _set_pointer_drag_active(self, enabled: bool) -> None:
-        """Accept drag lifecycle changes without starting platform services."""
-
-        del enabled
-
-    def _move_pointer_drag_window(self, window_id: str, dx: int, dy: int) -> bool:
-        """Move a live test window through the production command path."""
-
-        window = self._window_manager.get(window_id)
-        if window is None or not window.isVisible():
-            return False
-        self._dispatcher.dispatch_command(WindowMoveBy(window_id, dx, dy))
-        return True
-
-
-def make_test_context(
-    keyboard_backend: Any,
-    *,
-    config: AppConfig | None = None,
-    components: ComponentRegistry | None = None,
-    surfaces: SurfaceRegistry | None = None,
-    services: set[str] | None = None,
-    event_handlers: bool = False,
-) -> Context:
+def make_test_context(keyboard_backend: Any) -> Context:
     """Build a runtime ``Context`` wrapping a test keyboard backend.
 
-    The returned context is fully functional: it owns its own
-    ``Dispatcher`` (with default command handlers bound), ``StateStore``,
-    and registries. Tests can therefore exercise the same dispatch and
-    state paths the production runtime uses.
+    The dispatcher has every built-in event, the engine actions, node kinds,
+    and attachment kinds registered; the window and app actions belong to
+    ``ApplicationRuntime``.
+    """
 
-    Args:
-        keyboard_backend: Duck-typed keyboard backend exposing the same
-            surface as ``AxidevIoKeyboardBackend``. Wrapped in a
-            ``KeyboardService`` so components see the production
-            service boundary.
-        config: Optional declarative app config. Defaults to the bundled
-            default config so dependent code (window IDs, layout names)
-            sees realistic values.
-        components: Optional pre-populated component registry. When
-            omitted, a fresh registry is created and the bundled
-            component builders are registered into it.
-        surfaces: Optional pre-populated surface registry. Defaults to
-            an empty registry.
-        services: Optional explicit service names to register and start.
-            When omitted, only the supplied keyboard backend is bound.
-        event_handlers: Whether to install bundled application-level event
-            handler factories against a lightweight runtime adapter.
+    return make_keyboard_test_context(keyboard_backend)[0]
 
-    Returns:
-        A bound ``Context`` ready to pass into widgets and builders.
 
-    Side effects:
-        Constructs and binds a fresh ``Dispatcher``.
+def make_keyboard_test_context(keyboard_backend: Any) -> tuple[Context, KeyboardService]:
+    """Build a test ``Context`` and return the keyboard service its engine sends key effects to.
+
+    The service is bound to the context but not started, so tests decide when
+    output initializes.
     """
 
     dispatcher = Dispatcher()
     keyboard = KeyboardService(cast(Any, keyboard_backend))
-    if components is None:
-        # Lazy import: avoids pulling Qt-bound builders into modules
-        # that import this helper purely for the Context type.
-        from ..components import register_components
+    engine = build_engine(dispatcher, keyboard=keyboard, processes=RecordingProcesses())
+    context = Context(dispatcher=dispatcher, engine=engine)
+    keyboard.bind_context(context)
+    return context, keyboard
 
-        components = ComponentRegistry()
-        register_components(components)
-    context = Context(
-        config=config or build_default_app_config(),
-        dispatcher=dispatcher,
-        keyboard=keyboard,
-        state=StateStore(),
-        components=components,
-        surfaces=surfaces or SurfaceRegistry(),
-    )
-    dispatcher.bind_context(context)
-    context_handlers = EventHandlerRegistry()
-    register_context_command_handlers(context_handlers)
-    context_handlers.install(dispatcher, context)
-    if services is None:
-        keyboard.bind_context(context)
-    else:
-        service_registry = ServiceRegistry()
-        register_services(service_registry, include=services, keyboard=keyboard)
-        for service in service_registry.services():
-            service.start(context)
-    if event_handlers:
-        handler_registry = EventHandlerRegistry()
-        register_event_handlers(handler_registry)
-        handler_registry.install(dispatcher, _TestRuntime(context))
-    return context
+
+def start_test_profile(context: Context, root_config: Mapping[str, Any]) -> ProfileConfig:
+    """Decode ``root_config`` with the context's engine and start its active profile."""
+
+    profile = context.engine.decoder().decode_root(root_config)
+    context.engine.profile.start(profile)
+    return profile

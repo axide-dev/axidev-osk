@@ -1,9 +1,13 @@
 """Wayland layer-shell integration helpers.
 
-Wraps the optional ``LayerShellQt`` plugin so the rest of the codebase
-can call ``apply_wayland_layer_shell`` without caring whether the
-plugin is installed, locatable, or missing. Constants mirror the
-``zwlr_layer_shell_v1`` protocol so call sites remain readable.
+Wraps LayerShellQt so the rest of the codebase can call
+``attach_wayland_layer_shell`` and ``apply_wayland_layer_shell`` without
+caring whether it is installed, locatable, or missing. Each overlay window
+asks for a layer surface itself, through LayerShellQt's per-window
+``LayerShellQt::Window::get``, before it is first shown; other windows stay
+ordinary Wayland windows. Python has no LayerShellQt bindings, so that one
+function is called through ctypes. Constants mirror the ``zwlr_layer_shell_v1``
+protocol so call sites remain readable.
 
 Per the project's architectural rules, Wayland-specific branching is
 isolated to this module; non-Wayland sessions short-circuit to a no-op
@@ -12,17 +16,23 @@ return so callers can treat layer-shell as an optional optimization.
 
 from __future__ import annotations
 
+import ctypes
+import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
-from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 import PySide6
+import shiboken6
 from PySide6.QtCore import QMargins, QObject, QLibraryInfo
+from PySide6.QtGui import QWindow
 from PySide6.QtWidgets import QWidget
 
+_logger = logging.getLogger(__name__)
 
 ANCHOR_TOP = 1
 ANCHOR_BOTTOM = 2
@@ -38,6 +48,13 @@ KEYBOARD_INTERACTIVITY_NONE = 0
 KEYBOARD_INTERACTIVITY_EXCLUSIVE = 1
 KEYBOARD_INTERACTIVITY_ON_DEMAND = 2
 
+_INTERFACE_SONAME = "libLayerShellQtInterface.so.6"
+_WINDOW_GET_SYMBOL = "_ZN12LayerShellQt6Window3getEP7QWindow"
+"""``LayerShellQt::Window::get(QWindow*)``, the per-window entry point."""
+
+_interface_path: str | None = None
+_window_get: Callable[[int], int | None] | None = None
+
 _COMMON_QT_PLUGIN_ROOTS = (
     Path("/usr/lib64/qt6/plugins"),
     Path("/usr/lib/qt6/plugins"),
@@ -47,8 +64,16 @@ _COMMON_QT_PLUGIN_ROOTS = (
 )
 
 
-def configure_wayland_layer_shell_environment() -> bool:
-    """Configure Qt to use layer-shell when the session and plugin support it."""
+def wayland_layer_shell_available() -> bool:
+    """Return whether overlay windows can ask LayerShellQt for layer surfaces.
+
+    Call this before the QApplication exists. It does not change how Qt
+    creates windows: only windows passed to ``attach_wayland_layer_shell``
+    become layer surfaces. A ``QT_WAYLAND_SHELL_INTEGRATION`` set by the user
+    is respected as is.
+    """
+
+    global _interface_path
 
     if not is_wayland_session():
         return False
@@ -67,9 +92,33 @@ def configure_wayland_layer_shell_environment() -> bool:
     if not _layer_shell_plugin_is_compatible(plugin_root):
         return False
 
-    prepend_plugin_root(plugin_root)
-    os.environ["QT_WAYLAND_SHELL_INTEGRATION"] = "layer-shell"
+    interface_path = layer_shell_interface_path(plugin_root)
+    if interface_path is None or not layer_shell_interface_has_window_get(interface_path):
+        return False
+
+    _interface_path = str(interface_path)
     return True
+
+
+def attach_wayland_layer_shell(window: QWidget) -> bool:
+    """Make ``window`` a layer surface; call it before the window is first shown.
+
+    The attachment survives hiding, showing, and Qt recreating the native
+    window. Properties are set later with ``apply_wayland_layer_shell``. A
+    failure is logged: the window then shows as an ordinary window.
+    """
+
+    if not is_wayland_session():
+        return False
+    handle = window.windowHandle()
+    if handle is None:
+        window.winId()
+        handle = window.windowHandle()
+    attached = handle is not None and _layer_shell_window(handle) is not None
+    if not attached:
+        _logger.warning("Could not make %s a layer-shell surface; it shows as an ordinary window", type(window).__name__)
+    return attached
+
 
 def apply_wayland_layer_shell(
     window: QWidget,
@@ -95,7 +144,7 @@ def apply_wayland_layer_shell(
     if handle is None:
         return False
 
-    layer_shell_window = _find_layer_shell_window(handle)
+    layer_shell_window = _layer_shell_window(handle)
     if layer_shell_window is None:
         return False
 
@@ -117,7 +166,7 @@ def update_wayland_layer_shell_margins(window: QWidget, margins: QMargins) -> bo
     handle = window.windowHandle()
     if handle is None:
         return False
-    layer_shell_window = _find_layer_shell_window(handle)
+    layer_shell_window = _layer_shell_window(handle)
     if layer_shell_window is None:
         return False
     layer_shell_window.setProperty("margins", margins)
@@ -279,21 +328,13 @@ def _layer_shell_plugin_is_compatible(plugin_root: Path) -> bool:
     if not plugin_path.is_file():
         return False
 
-    qt_library_root = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.LibrariesPath))
-    env = os.environ.copy()
-    ld_library_path_entries = [str(qt_library_root)]
-    existing_ld_library_path = env.get("LD_LIBRARY_PATH")
-    if existing_ld_library_path:
-        ld_library_path_entries.append(existing_ld_library_path)
-    env["LD_LIBRARY_PATH"] = os.pathsep.join(ld_library_path_entries)
-
     try:
         result = subprocess.run(
             ["ldd", "-r", str(plugin_path)],
             check=False,
             capture_output=True,
             text=True,
-            env=env,
+            env=_qt_library_environment(),
             timeout=5,
         )
     except (FileNotFoundError, subprocess.SubprocessError):
@@ -309,28 +350,73 @@ def _layer_shell_plugin_is_compatible(plugin_root: Path) -> bool:
     return not any(marker in output for marker in incompatible_markers)
 
 
-def _find_layer_shell_window(root: QObject) -> QObject | None:
-    pending: deque[QObject] = deque([root])
+def layer_shell_interface_path(plugin_root: Path) -> Path | None:
+    """Find the LayerShellQt interface library the layer-shell plugin links against."""
 
-    while pending:
-        current = pending.popleft()
-        if _looks_like_layer_shell_window(current):
-            return current
-        pending.extend(child for child in current.children() if isinstance(child, QObject))
+    plugin_path = plugin_root / "wayland-shell-integration" / "liblayer-shell.so"
+    try:
+        result = subprocess.run(
+            ["ldd", str(plugin_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=_qt_library_environment(),
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    match = re.search(rf"{re.escape(_INTERFACE_SONAME)} => (\S+)", result.stdout)
+    return Path(match.group(1)) if match else None
 
-    return None
 
+def layer_shell_interface_has_window_get(interface_path: Path) -> bool:
+    """Check, in a separate process, that the library exports ``LayerShellQt::Window::get``.
 
-def _looks_like_layer_shell_window(candidate: QObject) -> bool:
-    meta_object = candidate.metaObject()
-    if meta_object is None:
+    Loading the library here would pull Qt's Wayland client library into the
+    process before Qt chooses its own, so the check runs in a child process.
+    """
+
+    check = f"import ctypes, sys; ctypes.CDLL(sys.argv[1]).{_WINDOW_GET_SYMBOL}"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", check, str(interface_path)],
+            check=False,
+            capture_output=True,
+            env=_qt_library_environment(),
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
         return False
+    return result.returncode == 0
 
-    required_properties = (
-        "anchors",
-        "layer",
-        "keyboardInteractivity",
-        "activateOnShow",
-        "wantsToBeOnActiveScreen",
-    )
-    return all(meta_object.indexOfProperty(name) >= 0 for name in required_properties)
+
+def _qt_library_environment() -> dict[str, str]:
+    qt_library_root = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.LibrariesPath))
+    env = os.environ.copy()
+    entries = [str(qt_library_root)]
+    if env.get("LD_LIBRARY_PATH"):
+        entries.append(env["LD_LIBRARY_PATH"])
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(entries)
+    return env
+
+
+def _layer_shell_window(handle: QWindow) -> QObject | None:
+    """Return LayerShellQt's per-window object, creating it on first use."""
+
+    global _window_get
+
+    window_get = _window_get
+    if window_get is None:
+        try:
+            library = ctypes.CDLL(_interface_path or _INTERFACE_SONAME)
+            function = getattr(library, _WINDOW_GET_SYMBOL)
+        except (OSError, AttributeError):
+            return None
+        function.restype = ctypes.c_void_p
+        function.argtypes = [ctypes.c_void_p]
+        window_get = _window_get = function
+    pointer = window_get(shiboken6.getCppPointer(handle)[0])
+    if not pointer:
+        return None
+    layer_shell_window = shiboken6.wrapInstance(pointer, QObject)
+    return layer_shell_window if isinstance(layer_shell_window, QObject) else None

@@ -1,50 +1,15 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
-from types import SimpleNamespace
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication
-
-from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.registries import ComponentRegistry, ServiceRegistry, SurfaceRegistry
+from axidev_osk.runtime.registries import ServiceRegistry
+from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.services import register_services
+from axidev_osk.services.displays import DisplayService
 from axidev_osk.services.keyboard import KeyboardService
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
-class FakeKeyboardBackend:
-    ready = True
-    status_text = "ready"
-    needs_permission_setup = False
-    permission_setup_text = ""
-
-    def initialize(self) -> bool:
-        return True
-
-    def shutdown(self) -> None:
-        return None
-
-    def add_modifier_state_listener(self, listener):
-        return lambda: None
-
-    def add_key_state_listener(self, listener):
-        del listener
-        return lambda: None
-
-    def is_key_down(self, key_name: str) -> bool:
-        del key_name
-        return False
-
-    def key_name_for_spec(self, spec) -> str | None:
-        return getattr(spec, "io_key", None)
+from support import RecordingBackend, qt_app
 
 
 class RecordingService:
@@ -71,38 +36,77 @@ class ServiceRegistryTests(unittest.TestCase):
         self.assertEqual(tuple(services.services()), (deferred, automatic))
         self.assertEqual(tuple(services.autostart_services()), (automatic,))
 
+    def test_find_returns_none_for_missing_services_and_get_checks_type(self) -> None:
+        services = ServiceRegistry()
+        service = RecordingService("first", [])
+        services.register("first", service)
+
+        self.assertIs(services.find("first"), service)
+        self.assertIsNone(services.find("missing"))
+        self.assertIs(services.get("first", RecordingService), service)
+        with self.assertRaisesRegex(ValueError, "No service registered for name 'missing'"):
+            services.get("missing", RecordingService)
+        with self.assertRaisesRegex(TypeError, "Service 'first' is not a KeyboardService"):
+            services.get("first", KeyboardService)
+
+    def test_a_service_name_can_be_registered_once(self) -> None:
+        services = ServiceRegistry()
+        first = RecordingService("first", [])
+        services.register("keyboard", first)
+
+        with self.assertRaisesRegex(ValueError, "Service 'keyboard' is already registered"):
+            services.register("keyboard", RecordingService("second", []))
+        self.assertIs(services.find("keyboard"), first)
+
+    def test_register_services_honors_the_include_filter(self) -> None:
+        qt_app()
+        services = ServiceRegistry()
+        keyboard = KeyboardService(RecordingBackend())
+
+        register_services(services, include={"keyboard", "displays"}, keyboard=keyboard)
+
+        self.assertIs(services.find("keyboard"), keyboard)
+        self.assertIsInstance(services.find("displays"), DisplayService)
+        for name in ("single_instance", "wayland_relative_pointer", "hot_corner"):
+            with self.subTest(name=name):
+                self.assertIsNone(services.find(name))
+
+    def test_test_context_binds_keyboard_without_starting_it(self) -> None:
+        backend = RecordingBackend()
+
+        make_test_context(backend)
+
+        self.assertEqual(backend.initialized, 0)
+        self.assertEqual(len(backend.observers), 1)
+
     def test_runtime_starts_and_stops_registered_services_in_order(self) -> None:
         calls: list[str] = []
         services = ServiceRegistry()
-        services.register("keyboard", KeyboardService(FakeKeyboardBackend()))
+        services.register("keyboard", KeyboardService(RecordingBackend()))
         services.register("first", RecordingService("first", calls))
+        services.register("deferred", RecordingService("deferred", calls), autostart=False)
         services.register("second", RecordingService("second", calls))
-        config = replace(build_default_app_config(), startup_window_ids=())
-        runtime = ApplicationRuntime(_app(), config=config, services=services)
+        runtime = ApplicationRuntime(
+            qt_app(),
+            services=services,
+            confirm_quit=False,
+            show_startup_windows=False,
+        )
 
         def exec_and_quit() -> int:
-            runtime._quit_controller._prompt = lambda parent: True
-            runtime._quit_controller.request_quit()
+            runtime._quit_controller.request_quit("signal")
             return 0
 
-        with patch.object(runtime._app, "exec", side_effect=exec_and_quit):
+        with (
+            patch.object(runtime._app, "exec", side_effect=exec_and_quit),
+            patch.object(runtime._app, "exit"),
+        ):
             self.assertEqual(runtime.start(), 0)
 
-        self.assertEqual(calls, ["start:first", "start:second", "stop:first", "stop:second"])
-
-
-class RegistryErrorTests(unittest.TestCase):
-    def test_component_registry_reports_missing_kind(self) -> None:
-        registry = ComponentRegistry()
-
-        with self.assertRaisesRegex(ValueError, "No component registered for kind 'missing-component'"):
-            registry.build(SimpleNamespace(kind="missing-component"), None)  # type: ignore[arg-type]
-
-    def test_surface_registry_reports_missing_kind(self) -> None:
-        registry = SurfaceRegistry()
-
-        with self.assertRaisesRegex(ValueError, "No surface registered for kind 'missing-surface'"):
-            registry.build(SimpleNamespace(kind="missing-surface"), None)  # type: ignore[arg-type]
+        self.assertEqual(
+            calls,
+            ["start:first", "start:second", "stop:first", "stop:deferred", "stop:second"],
+        )
 
 
 if __name__ == "__main__":

@@ -1,14 +1,9 @@
-"""Generic window surface builder."""
+"""Root surface hosting a window's content and background attachments."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QVBoxLayout, QWidget
-
-from ..config.models import SurfaceConfig
-from ..runtime.context import Context
-from ..runtime.registries import SurfaceRegistry
+from PySide6.QtWidgets import QWidget
 
 
 class RootSurface(QWidget):
@@ -33,52 +28,3 @@ class RootSurface(QWidget):
         super().resizeEvent(event)
         for component in self._background_components:
             component.setGeometry(self.rect())
-
-
-def register_surfaces(registry: SurfaceRegistry) -> None:
-    """Register the generic surface builder.
-
-    Args:
-        registry: Surface registry owned by the runtime context.
-
-    Returns:
-        None.
-
-    Side effects:
-        Mutates the registry.
-    """
-
-    registry.register("surface", build_surface)
-
-
-def build_surface(config: SurfaceConfig, context: Context) -> QWidget:
-    """Build a generic root surface from child component configs.
-
-    Args:
-        config: Surface config containing child components.
-        context: Runtime context used to build child components.
-
-    Returns:
-        Root surface widget.
-
-    Side effects:
-        Constructs child widgets via the component registry.
-    """
-
-    central = RootSurface()
-    central.setObjectName("rootSurface")
-    central.setProperty("componentType", "surface")
-    central.setProperty("componentId", config.id)
-    central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-
-    for component in config.background_components:
-        widget = context.components.build(component, context, host=central)
-        central.install_background_component(widget)
-
-    layout = QVBoxLayout(central)
-    layout.setContentsMargins(*config.margins)
-    layout.setSpacing(config.spacing)
-    for component in config.components:
-        widget = context.components.build(component, context, host=central)
-        layout.addWidget(widget)
-    return central

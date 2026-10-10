@@ -6,7 +6,7 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
-from axidev_osk.runtime.events import PointerMotionObserved
+from axidev_osk.runtime.app_messages import pointer_motion_observed
 
 if sys.platform.startswith("linux"):
     import axidev_osk.services.wayland_relative_pointer as relative_pointer
@@ -84,8 +84,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
 
         self.service._on_motion(0, 0, 0, 1_000, 384, -640, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_called_once_with(
-            PointerMotionObserved(dx=1.5, dy=-2.5)
+        self.context.dispatcher.dispatch.assert_called_once_with(
+            pointer_motion_observed(1.5, -2.5)
         )
 
     def test_motion_outside_drag_is_ignored(self) -> None:
@@ -93,7 +93,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
 
         self.service._on_motion(0, 0, 0, 1_000, 384, -640, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_not_called()
+        self.context.dispatcher.dispatch.assert_not_called()
 
     def test_close_motions_are_aggregated_until_timer_runs(self) -> None:
         callbacks: list[object] = []
@@ -110,8 +110,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         single_shot.assert_called_once()
         callbacks[0]()
         self.assertEqual(
-            self.context.dispatcher.dispatch_event.call_args_list[-1].args[0],
-            PointerMotionObserved(dx=2.0, dy=1.0),
+            self.context.dispatcher.dispatch.call_args_list[-1].args[0],
+            pointer_motion_observed(2.0, 1.0),
         )
 
     def test_motion_timestamp_flushes_aggregated_delta(self) -> None:
@@ -123,8 +123,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
             self.service._on_motion(0, 0, 0, 5_000, 512, 0, 0, 0)
 
         self.assertEqual(
-            self.context.dispatcher.dispatch_event.call_args_list[-1].args[0],
-            PointerMotionObserved(dx=3.0, dy=0.0),
+            self.context.dispatcher.dispatch.call_args_list[-1].args[0],
+            pointer_motion_observed(3.0, 0.0),
         )
 
     def test_drag_end_invalidates_scheduled_motion(self) -> None:
@@ -140,7 +140,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         self.service.end_drag()
         callbacks[0]()
 
-        self.context.dispatcher.dispatch_event.assert_not_called()
+        self.context.dispatcher.dispatch.assert_not_called()
 
     def test_new_drag_discards_motion_buffered_by_previous_drag(self) -> None:
         callbacks: list[object] = []
@@ -156,8 +156,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         callbacks[0]()
         self.service._on_motion(0, 0, 0, 3_000, 512, 0, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_called_once_with(
-            PointerMotionObserved(dx=2.0, dy=0.0)
+        self.context.dispatcher.dispatch.assert_called_once_with(
+            pointer_motion_observed(2.0, 0.0)
         )
 
     def test_commit_uses_current_surface_without_retaining_it(self) -> None:

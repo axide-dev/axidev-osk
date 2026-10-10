@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton, QWidget
 
 from axidev_osk.components.pointer_locator import (
     PointerLocator,
@@ -13,15 +13,8 @@ from axidev_osk.components.pointer_locator import (
     build_component_palette,
     gaussian_opacity,
 )
-from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import PointerLocatorConfig
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+from support import qt_app
 
 
 def _locator_config(**overrides: object) -> PointerLocatorConfig:
@@ -30,22 +23,13 @@ def _locator_config(**overrides: object) -> PointerLocatorConfig:
         "radius_percent": 30,
         "maximum_opacity_percent": 60,
         "radius_standard_deviations": 3,
+        "gap_color": "#242424",
     }
     values.update(overrides)
     return PointerLocatorConfig(**values)
 
 
 class PointerLocatorPaletteTests(unittest.TestCase):
-    def test_default_keyboard_uses_component_aware_locator(self) -> None:
-        background_components = build_default_app_config().windows[0].surface.background_components
-
-        self.assertEqual(len(background_components), 1)
-        config = background_components[0]
-        self.assertIsInstance(config, PointerLocatorConfig)
-        self.assertEqual(config.radius_percent, 30)
-        self.assertEqual(config.maximum_opacity_percent, 60)
-        self.assertEqual(config.radius_standard_deviations, 3)
-
     def test_config_rejects_radius_outside_percentage_bounds(self) -> None:
         for radius_percent in (0, -1, 100.1, float("nan")):
             with self.subTest(radius_percent=radius_percent):
@@ -136,7 +120,7 @@ class PointerLocatorPaletteTests(unittest.TestCase):
 
 class PointerLocatorWidgetTests(unittest.TestCase):
     def test_glow_tracks_pointer_inside_host_and_hides_outside(self) -> None:
-        app = _app()
+        app = qt_app()
         host = QWidget()
         host.resize(400, 200)
         host.show()
@@ -166,14 +150,14 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         self.assertFalse(locator.isVisible())
 
     def test_glow_uses_button_colors_and_a_muted_gap_color(self) -> None:
-        app = _app()
+        app = qt_app()
         host = QWidget()
         host.resize(220, 80)
         left = QPushButton("Left", host)
-        left.setProperty("componentType", "key")
+        left.setProperty("componentType", "button")
         left.setGeometry(10, 10, 90, 60)
         right = QPushButton("Right", host)
-        right.setProperty("componentType", "key")
+        right.setProperty("componentType", "button")
         right.setGeometry(120, 10, 90, 60)
         host.show()
         app.processEvents()
@@ -199,7 +183,7 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         self.assertLess(locator.current_color.valueF(), 0.2)
 
     def test_stale_wayland_position_cannot_restore_glow_after_leave(self) -> None:
-        app = _app()
+        app = qt_app()
         host = QWidget()
         host.resize(400, 200)
         host.show()

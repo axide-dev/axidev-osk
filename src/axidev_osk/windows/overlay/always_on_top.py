@@ -17,10 +17,10 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtWidgets import QWidget
 
 # AlwaysOnTopWindowConfig and OverlayPlacement are pure data DTOs and live
@@ -38,11 +38,12 @@ from ...platform.layer_shell import (
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
-    configure_wayland_layer_shell_environment,
+    attach_wayland_layer_shell,
     find_qt_platform_plugin_root,
     is_wayland_session,
     prepend_plugin_root,
     update_wayland_layer_shell_margins,
+    wayland_layer_shell_available,
 )
 from ...platform.kwin_input_panel import attach_kwin_input_panel
 
@@ -118,7 +119,7 @@ def prepare_always_on_top_window_environment(
     if os.environ.get("QT_WAYLAND_SHELL_INTEGRATION") == "layer-shell":
         return _set_overlay_backend(OverlayBackend.WAYLAND_LAYER_SHELL)
 
-    if prefer_layer_shell and configure_wayland_layer_shell_environment():
+    if prefer_layer_shell and wayland_layer_shell_available():
         return _set_overlay_backend(OverlayBackend.WAYLAND_LAYER_SHELL)
 
     if prefer_x11_bridge and _configure_x11_bridge_environment():
@@ -238,6 +239,9 @@ class AlwaysOnTopWindowController:
         if self._backend == OverlayBackend.WINDOWS_NATIVE:
             _set_windows_taskbar_style(int(self._window.winId()))
 
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            attach_wayland_layer_shell(self._window)
+
         if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
             screen = self._window.screen()
             output_name = screen.name() if screen is not None else ""
@@ -312,7 +316,7 @@ class AlwaysOnTopWindowController:
 
         if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL:
             return
-        app = QGuiApplication.instance()
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         if not screens:
             return
@@ -332,7 +336,7 @@ class AlwaysOnTopWindowController:
 
         if self._backend != OverlayBackend.WAYLAND_LAYER_SHELL or self._mapped_screen_name is None:
             return False
-        app = QGuiApplication.instance()
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         return all(screen.name() != self._mapped_screen_name for screen in screens)
 
@@ -345,8 +349,8 @@ class AlwaysOnTopWindowController:
         if screen is not None:
             self._mapped_screen_name = screen.name()
 
-    def _layer_shell_screen_changed(self, screen: object) -> None:
-        app = QGuiApplication.instance()
+    def _layer_shell_screen_changed(self, screen: QScreen | None) -> None:
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         # Retain the old identity until runtime recovery has remapped a
         # surface whose output was removed.
@@ -488,7 +492,7 @@ class AlwaysOnTopWindowController:
         platform = self._qt_platform()
         if platform == "wayland":
             selected = _read_selected_backend()
-            if selected in {
+            if selected is not None and selected in {
                 OverlayBackend.WAYLAND_INPUT_PANEL,
                 OverlayBackend.WAYLAND_LAYER_SHELL,
             }:
@@ -677,7 +681,7 @@ class AlwaysOnTopWindowController:
     def _current_screen_geometry(self, *, for_layer_shell: bool = False) -> QRect:
         screen = self._window.screen()
         if screen is None:
-            app = QGuiApplication.instance()
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             geometry = None

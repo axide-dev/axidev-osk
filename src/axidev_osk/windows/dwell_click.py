@@ -101,7 +101,7 @@ class _DwellFadeFeedback(QWidget):
         self._opacity = 0.0
         self.hide()
 
-    def _set_opacity(self, value: object) -> None:
+    def _set_opacity(self, value: float) -> None:
         self._opacity = float(value)
         self.update()
 

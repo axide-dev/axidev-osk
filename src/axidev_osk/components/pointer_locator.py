@@ -9,36 +9,19 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-from ..config.models import ComponentConfig, PointerLocatorConfig
-from ..runtime.context import Context
-from ..runtime.registries import ComponentRegistry
+from ..config.models import PointerLocatorConfig
+from ..windows.surface import RootSurface
 
 _GRADIENT_SEGMENTS = 32
-_GAP_COLOR = QColor("#242424")
 
 
-def register(registry: ComponentRegistry) -> None:
-    """Register the pointer locator as a reusable background component."""
-
-    registry.register("pointer-locator", build_pointer_locator_component)
-
-
-def build_pointer_locator_component(
-    config: ComponentConfig,
-    context: Context,
-    *,
-    host: QWidget | None = None,
-) -> QWidget:
-    """Build pointer feedback for a root surface background."""
-
-    del context
-    if not isinstance(config, PointerLocatorConfig):
-        raise TypeError(f"Expected PointerLocatorConfig, got {type(config).__name__}")
-    if host is None:
-        raise RuntimeError("Pointer locator components require a root surface host")
+def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> QWidget:
+    """Install pointer feedback behind a root surface's content."""
 
     host.setProperty("pointerLocatorEnabled", True)
-    return PointerLocator(config, host)
+    locator = PointerLocator(settings, host)
+    host.install_background_component(locator)
+    return locator
 
 
 def _rectangle_distance_squared(first: QRect, second: QRect) -> int:
@@ -242,7 +225,7 @@ class PointerLocator(QWidget):
             (target for target in self._color_targets if target[1].contains(local_position)),
             None,
         )
-        self._color = QColor(target[2] if target is not None else _GAP_COLOR)
+        self._color = QColor(target[2] if target is not None else self._config.gap_color)
         self._cursor_position = local_position
         if self.geometry() != self._host.rect():
             self.setGeometry(self._host.rect())
@@ -253,7 +236,7 @@ class PointerLocator(QWidget):
         widgets = [
             widget
             for widget in self._host.findChildren(QWidget)
-            if widget.property("componentType") in {"button", "key"} and widget.isVisibleTo(self._host)
+            if widget.property("componentType") == "button" and widget.isVisibleTo(self._host)
         ]
         positioned = [
             (
@@ -264,7 +247,10 @@ class PointerLocator(QWidget):
             if widget.width() > 0 and widget.height() > 0
         ]
         positioned.sort(key=lambda item: (item[1].center().y(), item[1].center().x()))
-        signature = tuple((id(widget), *rect.getRect()) for widget, rect in positioned)
+        signature = tuple(
+            (id(widget), rect.x(), rect.y(), rect.width(), rect.height())
+            for widget, rect in positioned
+        )
         if signature == self._color_target_signature:
             return
         colors = build_component_palette(tuple(rect for _, rect in positioned))

@@ -1,7 +1,7 @@
 """Hot-corner dwell trigger that emits runtime events.
 
 TEMPORARY: this subsystem currently lives outside the main runtime
-event/command queue and talks to its own overlays directly. It is
+event/action queue and talks to its own overlays directly. It is
 intentionally kept self-contained so it can be ported to per-corner
 events through the central runtime queue later (see issue #8). New
 features should not extend this controller — add them through the
@@ -22,14 +22,13 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol, cast
 
 from PySide6.QtCore import QMargins, QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEvent, QPen, QScreen
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import HotCornerConfig
-from ..runtime.dispatcher import Dispatcher
-from ..runtime.events import HotCornerTriggered
 from ..platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
@@ -38,9 +37,11 @@ from ..platform.layer_shell import (
     KEYBOARD_INTERACTIVITY_NONE,
     LAYER_OVERLAY,
     apply_wayland_layer_shell,
+    attach_wayland_layer_shell,
 )
 from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
-from ..styles.theme import ThemePalette, build_theme_palette
+from ..runtime.app_messages import hot_corner_triggered
+from ..runtime.dispatcher import Dispatcher
 
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
@@ -102,6 +103,9 @@ class HotCornerOverlayController:
         if self._backend in {OverlayBackend.X11_UTILITY, OverlayBackend.X11_UTILITY_BRIDGE}:
             self._window.setWindowFlag(Qt.WindowType.Tool, True)
             self._window.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
+
+        if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
+            attach_wayland_layer_shell(self._window)
 
     def set_screen(self, screen: QScreen) -> None:
         """Bind a helper to its corner's output rather than the active output."""
@@ -209,7 +213,7 @@ class HotCornerOverlayController:
     def _current_screen_geometry(self) -> QRect:
         screen = self._window.screen()
         if screen is None:
-            app = QGuiApplication.instance()
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             return QRect(0, 0, 1920, 1080)
@@ -223,6 +227,29 @@ class ScreenCorner(str, Enum):
     TOP_RIGHT = "top_right"
     BOTTOM_LEFT = "bottom_left"
     BOTTOM_RIGHT = "bottom_right"
+
+
+class HotCornerOverlay(Protocol):
+    """Overlay operations used by indicator and sensor windows."""
+
+    @property
+    def backend(self) -> OverlayBackend: ...
+
+    def handle_show(self) -> bool: ...
+
+    def move_to(self, position: QPoint, *, screen_geometry: QRect | None = None) -> None: ...
+
+    def move_to_anchored(
+        self,
+        position: QPoint,
+        *,
+        anchors: int,
+        screen_geometry: QRect | None = None,
+    ) -> None: ...
+
+    def set_screen(self, screen: QScreen) -> None: ...
+
+    def release_resources(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -239,7 +266,7 @@ class HotCornerSensorHandle:
     corner: ScreenCorner
     screen: QScreen
     window: "HotCornerSensorWindow"
-    overlay: object
+    overlay: HotCornerOverlay
 
 
 class HotCornerIndicator(QWidget):
@@ -248,15 +275,14 @@ class HotCornerIndicator(QWidget):
     def __init__(
         self,
         *,
-        size_px: int,
-        palette: ThemePalette,
+        config: HotCornerConfig,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._progress = 0.0
-        self._palette = palette
+        self._config = config
 
-        self.setFixedSize(QSize(size_px, size_px))
+        self.setFixedSize(QSize(config.indicator_size_px, config.indicator_size_px))
         _configure_hot_corner_window(self, accepts_input=False)
 
     def set_progress(self, progress: float) -> None:
@@ -277,13 +303,13 @@ class HotCornerIndicator(QWidget):
 
         bounds = QRectF(6, 6, self.width() - 12, self.height() - 12)
         center_bounds = QRectF(16, 16, self.width() - 32, self.height() - 32)
-        shell_fill = QColor(self._palette.shell_fill)
+        shell_fill = QColor(self._config.indicator_background)
         shell_fill.setAlpha(220)
-        shell_edge = QColor(self._palette.shell_edge)
+        shell_edge = QColor(self._config.indicator_track)
         shell_edge.setAlpha(180)
-        active_edge = QColor(self._palette.active_edge)
+        active_edge = QColor(self._config.indicator_progress)
         active_edge.setAlpha(235)
-        active_fill = QColor(self._palette.active_fill)
+        active_fill = QColor(self._config.indicator_center)
         active_fill.setAlpha(105 + int(90 * self._progress))
 
         painter.setPen(Qt.PenStyle.NoPen)
@@ -344,27 +370,26 @@ class HotCornerWindowToggleController(QObject):
 
     Side effects:
         Owns timers, indicator/sensor windows, and dispatches
-        ``HotCornerTriggered`` when a dwell completes.
+        ``hot_corner.triggered`` when a dwell completes.
     """
 
     def __init__(
         self,
         dispatcher: Dispatcher,
         *,
-        config: HotCornerConfig | None = None,
+        config: HotCornerConfig,
+        corners: frozenset[str] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._dispatcher = dispatcher
-        self._config = config or HotCornerConfig()
+        self._config = config
+        self._corners = frozenset(corner for corner in ScreenCorner if corners is None or corner.value in corners)
         self._active_corner: ScreenCorner | None = None
         self._active_screen: QScreen | None = None
         self._entered_at = 0.0
         self._triggered_corner: ScreenCorner | None = None
-        self._indicator = HotCornerIndicator(
-            size_px=self._config.indicator_size_px,
-            palette=build_theme_palette(),
-        )
+        self._indicator = HotCornerIndicator(config=self._config)
         self._indicator_overlay = configure_hot_corner_overlay(self._indicator)
         self._sensor_handles: list[HotCornerSensorHandle] = []
         self._use_sensor_windows = self._indicator_overlay.backend in {
@@ -406,7 +431,7 @@ class HotCornerWindowToggleController(QObject):
         self._reset_corner_tracking()
         if not self._use_sensor_windows:
             return
-        app = QGuiApplication.instance()
+        app = cast("QGuiApplication | None", QGuiApplication.instance())
         screens = app.screens() if app is not None else []
         retained: list[HotCornerSensorHandle] = []
         for handle in self._sensor_handles:
@@ -479,7 +504,7 @@ class HotCornerWindowToggleController(QObject):
         self._emit_hot_corner_triggered(self._active_corner)
 
     def _emit_hot_corner_triggered(self, corner: ScreenCorner) -> None:
-        self._dispatcher.dispatch_event(HotCornerTriggered(corner=corner.value))
+        self._dispatcher.dispatch(hot_corner_triggered(corner.value))
 
     def _reset_corner_tracking(self) -> None:
         self._active_corner = None
@@ -490,7 +515,7 @@ class HotCornerWindowToggleController(QObject):
     def _detect_corner(self, cursor_pos: QPoint) -> ScreenCorner | None:
         screen = QGuiApplication.screenAt(cursor_pos)
         if screen is None:
-            app = QGuiApplication.instance()
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             return None
@@ -507,15 +532,16 @@ class HotCornerWindowToggleController(QObject):
         in_top = y <= geometry.top() + corner_size - 1
         in_bottom = y >= geometry.bottom() - corner_size + 1
 
+        corner = None
         if in_left and in_top:
-            return ScreenCorner.TOP_LEFT
-        if in_right and in_top:
-            return ScreenCorner.TOP_RIGHT
-        if in_left and in_bottom:
-            return ScreenCorner.BOTTOM_LEFT
-        if in_right and in_bottom:
-            return ScreenCorner.BOTTOM_RIGHT
-        return None
+            corner = ScreenCorner.TOP_LEFT
+        elif in_right and in_top:
+            corner = ScreenCorner.TOP_RIGHT
+        elif in_left and in_bottom:
+            corner = ScreenCorner.BOTTOM_LEFT
+        elif in_right and in_bottom:
+            corner = ScreenCorner.BOTTOM_RIGHT
+        return corner if corner in self._corners else None
 
     def _show_indicator(
         self,
@@ -525,7 +551,7 @@ class HotCornerWindowToggleController(QObject):
     ) -> None:
         screen = QGuiApplication.screenAt(cursor_pos)
         if screen is None:
-            app = QGuiApplication.instance()
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screen = app.primaryScreen() if app is not None else None
         if screen is None:
             self._indicator.hide()
@@ -587,7 +613,7 @@ class HotCornerWindowToggleController(QObject):
         return ANCHOR_RIGHT | ANCHOR_BOTTOM
 
     @staticmethod
-    def _usable_geometry(screen: QScreen, overlay: object) -> QRect:
+    def _usable_geometry(screen: QScreen, overlay: HotCornerOverlay) -> QRect:
         if overlay.backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             # Edge anchors let the compositor account for other surfaces' reserved space.
             return screen.geometry()
@@ -596,10 +622,12 @@ class HotCornerWindowToggleController(QObject):
     def _create_sensor_handles(self, screens: list[QScreen] | None = None) -> list[HotCornerSensorHandle]:
         handles: list[HotCornerSensorHandle] = []
         if screens is None:
-            app = QGuiApplication.instance()
+            app = cast("QGuiApplication | None", QGuiApplication.instance())
             screens = app.screens() if app is not None else []
         for screen in screens:
             for corner in ScreenCorner:
+                if corner not in self._corners:
+                    continue
                 sensor_window = HotCornerSensorWindow(size_px=self._config.corner_size_px)
                 overlay = configure_hot_corner_overlay(sensor_window)
                 handle = HotCornerSensorHandle(

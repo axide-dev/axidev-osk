@@ -5,12 +5,23 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QSocketNotifier
-from PySide6.QtWidgets import QApplication
 
-from ..runtime.commands import SecureInputPanelPrepare, SecureInputPanelRelease
+from ..messages import MessageResult
+from ..runtime.app_messages import (
+    SECURE_INPUT_PANEL_PREPARE,
+    SECURE_INPUT_PANEL_PREPARED,
+    SECURE_INPUT_PANEL_RELEASE,
+    SECURE_INPUT_PANEL_RELEASED,
+    app_quit,
+    secure_input_panel_prepare,
+    secure_input_panel_release,
+)
+from ..runtime.decoding import EmptyArguments
+from ..runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
     from ..runtime.context import Context
@@ -19,18 +30,26 @@ _logger = logging.getLogger(__name__)
 
 
 class SecureInputPanelWorkerService(QObject):
-    """Translate supervisor commands into runtime queue commands."""
+    """Translate supervisor commands into runtime actions and answer from runtime events."""
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._context: Context | None = None
         self._notifier: QSocketNotifier | None = None
         self._buffer = bytearray()
+        self._pending_action: str | None = None
+        self._unsubscribes: list[Callable[[], None]] = []
 
     def start(self, context: Context) -> None:
         """Start reading line-delimited commands from the Rust supervisor."""
 
         self._context = context
+        dispatcher = context.dispatcher
+        self._unsubscribes = [
+            dispatcher.add_event_handler(SECURE_INPUT_PANEL_PREPARED, self._handle_prepared),
+            dispatcher.add_event_handler(SECURE_INPUT_PANEL_RELEASED, self._handle_released),
+            dispatcher.add_event_handler(ACTION_FAILED, self._handle_action_failed),
+        ]
         self._notifier = QSocketNotifier(sys.stdin.fileno(), QSocketNotifier.Type.Read, self)
         self._notifier.activated.connect(self._read_commands)
         self._respond("READY")
@@ -39,6 +58,10 @@ class SecureInputPanelWorkerService(QObject):
         """Stop reading supervisor commands."""
 
         self._context = None
+        self._pending_action = None
+        for unsubscribe in self._unsubscribes:
+            unsubscribe()
+        self._unsubscribes.clear()
         if self._notifier is not None:
             self._notifier.setEnabled(False)
             self._notifier.deleteLater()
@@ -69,11 +92,11 @@ class SecureInputPanelWorkerService(QObject):
             return
         try:
             if command == "PREPARE":
-                context.dispatcher.dispatch_command(SecureInputPanelPrepare())
-                self._respond("PREPARED")
+                self._pending_action = SECURE_INPUT_PANEL_PREPARE
+                context.dispatcher.dispatch(secure_input_panel_prepare())
             elif command == "RELEASE":
-                context.dispatcher.dispatch_command(SecureInputPanelRelease())
-                self._respond("RELEASED")
+                self._pending_action = SECURE_INPUT_PANEL_RELEASE
+                context.dispatcher.dispatch(secure_input_panel_release())
             elif command == "PING":
                 self._respond("PONG")
             else:
@@ -81,13 +104,34 @@ class SecureInputPanelWorkerService(QObject):
                 self._respond("ERROR")
         except Exception:
             _logger.exception("Lock-screen worker command failed: %s", command)
+            self._pending_action = None
             self._respond("ERROR")
+
+    def _handle_prepared(self, event: EmptyArguments) -> MessageResult:
+        del event
+        self._answer_pending(SECURE_INPUT_PANEL_PREPARE, "PREPARED")
+        return []
+
+    def _handle_released(self, event: EmptyArguments) -> MessageResult:
+        del event
+        self._answer_pending(SECURE_INPUT_PANEL_RELEASE, "RELEASED")
+        return []
+
+    def _handle_action_failed(self, event: ActionFailedArguments) -> MessageResult:
+        self._answer_pending(event.action, "ERROR")
+        return []
+
+    def _answer_pending(self, action: str, response: str) -> None:
+        if self._pending_action != action:
+            return
+        self._pending_action = None
+        self._respond(response)
 
     def _respond(self, response: str) -> None:
         os.write(sys.stdout.fileno(), f"AXIDEV_OSK {response}\n".encode("ascii"))
 
-    @staticmethod
-    def _exit(status: int) -> None:
-        app = QApplication.instance()
-        if app is not None:
-            app.exit(status)
+    def _exit(self, status: int) -> None:
+        """Quit through the queue so the normal shutdown sequence runs."""
+
+        if self._context is not None:
+            self._context.dispatcher.dispatch(app_quit(status))

@@ -8,29 +8,14 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
-from axidev_osk.runtime.commands import WindowShow
+from axidev_osk.messages import DataMap, MessageResult
+from axidev_osk.runtime.app_messages import APP_ACTIVATED
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.runtime.testing import make_test_context
 from axidev_osk.services import register_services
 from axidev_osk.services.single_instance import ExistingInstanceActivated, WindowsSingleInstanceService
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
-
-class FakeKeyboardBackend:
-    def add_modifier_state_listener(self, listener):
-        return lambda: None
-
-    def add_key_state_listener(self, listener):
-        del listener
-        return lambda: None
+from support import RecordingBackend, qt_app
 
 
 class WindowsSingleInstanceServiceTests(unittest.TestCase):
@@ -43,8 +28,8 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
         self.assertIsInstance(services[0], WindowsSingleInstanceService)
 
     def test_service_is_inactive_off_windows(self) -> None:
-        service = WindowsSingleInstanceService(parent=_app())
-        context = make_test_context(FakeKeyboardBackend())
+        service = WindowsSingleInstanceService(parent=qt_app())
+        context = make_test_context(RecordingBackend())
 
         with patch("axidev_osk.services.single_instance.sys.platform", "linux"):
             service.start(context)
@@ -53,10 +38,15 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows local-server integration test")
     def test_second_launch_activates_primary_instance(self) -> None:
-        _app()
-        context = make_test_context(FakeKeyboardBackend())
-        commands: list[object] = []
-        context.dispatcher.add_command_handler(WindowShow, commands.append)
+        qt_app()
+        context = make_test_context(RecordingBackend())
+        activations: list[DataMap] = []
+
+        def record(event: DataMap) -> MessageResult:
+            activations.append(event)
+            return []
+
+        context.dispatcher.add_raw_event_handler(APP_ACTIVATED, record)
         primary = WindowsSingleInstanceService()
         secondary = WindowsSingleInstanceService()
         server_name = f"axidev-osk-test-{uuid4().hex}"
@@ -77,7 +67,7 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
                 secondary.stop()
                 primary.stop()
 
-        self.assertEqual(commands, [WindowShow(context.config.keyboard_window_id)])
+        self.assertEqual(activations, [{}])
 
 
 if __name__ == "__main__":
