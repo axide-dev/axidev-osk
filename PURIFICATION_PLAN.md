@@ -36,13 +36,27 @@ Each decision below was made by the project owner. Do not reopen one without a n
 
 10. Durable state stays in the central runtime store. Widgets render state and emit events. The queue carries native data and function IDs, never functions or live objects.
 
+11. State is a registry of declared variables. The engine stores them, checks values against their declared type, and resets them by lifetime, but it does not know what any of them mean. A profile, the standard library, or a user config declares every variable it uses, including ones the engine never reads. Variables are declared only in config, never while the app runs.
+
+12. Where a variable is declared sets its lifetime. A variable declared in the root config's `state` exists in every profile and survives profile switches. A variable declared in a profile's `state` resets when that profile starts. Declaring one path at both levels is rejected at load. Nothing is saved to disk.
+
+13. The registry is strict. `state.set` on a path that no declaration covers fails with `action.failed`. Reading such a path raises, so the binding or callback reports `callback.failed` naming the path. Reading an absent entry of a declared map returns `None`.
+
+14. Setting a declared variable to `None` resets it to its default, and setting a record field to `None` resets that field. Setting a map entry to `None` removes the entry, because entries have no default of their own.
+
+15. Every value option in a config accepts a binding: window, theme, attachment, and node values. Identity and structure stay static: ids, kinds, references such as an attachment's `window`, grid cells, children lists, and `show_on_start`. A binding that produces an invalid value counts as a failed binding, and its target keeps the last valid value.
+
+16. Each value has one source of truth. A value that a binding can set has no setter action, so `window.set_opacity`, `window.block_input`, `window.unblock_input`, and `dwell.set_enabled` are removed. `window.show` and `window.hide` stay because the system also changes visibility.
+
+17. Settings that attachments read (dwell timings, pointer locator and hot corner options) are not engine-owned state. A profile declares variables with its own names and lifetimes and binds attachment options to them, so one variable can drive several attachments.
+
 ## Target Architecture
 
 ### Config Shape
 
 - The root config holds `profiles` and `active_profile`. Every profile is validated; the active one runs.
 - A profile's `theme` holds `qss`, `palette` (Qt color roles), and `font`.
-- A profile holds `state` (initial values), `windows`, `attachments`, and `on` (callbacks for any registered event).
+- The root config's `state` declares variables shared by every profile. A profile holds `state` (its own variable declarations), `windows`, `attachments`, and `on` (callbacks for any registered event).
 - Every node is a map with `kind`, `id`, options, `style` (object name, classes, properties, QSS), function bindings, and callbacks.
 - Each node kind and attachment kind registers a decoder that validates its map into a typed record. Bundled defaults and future Lua configs use the same decoders.
 - `osk.*` helpers only build maps. `osk.merge(defaults, opts)` lets a caller override any single field.
@@ -53,6 +67,15 @@ Each decision below was made by the project owner. Do not reopen one without a n
 - Bindings: `fn(state) -> value`, re-run only when a state key they read changes.
 - A function registry stores callbacks and bindings. Queue messages carry their IDs.
 - A failing callback or binding produces `callback.failed` and is logged. It never stops the queue.
+
+### State Registry
+
+- A variable is declared in place inside a nested `state` map with `osk.var(type, default)`, which builds `{"var": type, "default": value}`.
+- Types: `boolean`, `integer`, `number`, `string`, list of X, map of X, and record (named, typed fields). Integer and number stay distinct, as in Lua 5.3 and later.
+- The engine declares the values it observes as typed, read-only variables, replacing bare `declare_root`. Profiles cannot set them.
+- The standard library declares its own variables under `std`, for example `std.latches` and `std.ghosted` as maps of booleans.
+- Ghost sets `std.ghosted.<window>`, and the window's `opacity` and input block follow it through bindings. `std.windows.on_window_state` is no longer needed because a rebuilt window re-applies its bindings.
+- The default profile declares its opacity and all dwell options in the root `state` and binds the keyboard window and the dwell attachment to them.
 
 ### Engine Building Blocks
 
@@ -73,9 +96,8 @@ Attachments:
 Actions:
 
 - `keyboard.down {key, mods, repeat}`, `keyboard.up {key}`, `keyboard.tap {key, mods}`, `keyboard.type_text {text}`.
-- `window.show`, `window.hide`, `window.close`, `window.move_by`, `window.set_opacity`, `window.block_input {window, except}`, `window.unblock_input`.
-- `dwell.set_enabled`.
-- `state.set`.
+- `window.show`, `window.hide`, `window.close`, `window.move_by`. Opacity and input blocking are bindable window values, not actions.
+- `state.set`, checked against the registry.
 - `process.spawn {argv, tag, detached}` with an argument list, never a shell string.
 - `log.info`, `log.warn`, `log.error`.
 - `app.quit`.
@@ -97,8 +119,8 @@ Observed state, written by the runtime and read-only to profiles:
 
 - `keyboard.ready`, `keyboard.status`, `keyboard.needs_permission_setup`, `keyboard.permission_setup_text`.
 - `input.keys.<name>`, `input.locks.capslock`, `input.locks.numlock`.
-- `windows.<id>.visible`, `windows.<id>.minimized`, `windows.<id>.opacity`, `windows.<id>.configured_opacity`, `windows.<id>.input_blocked`.
-- `dwell.<id>.enabled`.
+- `windows.<id>.visible`, `windows.<id>.minimized`, `windows.<id>.position`, `windows.<id>.size`.
+- Opacity, input blocking, and dwell `enabled` are not observed: the variables their bindings read are their only source.
 
 Lifecycle that stays in Python:
 
@@ -148,6 +170,7 @@ Each step keeps the full test suite, flake8, and pyright passing.
 - [x] 5. Default profile on `osk.std` with parity tests. The app does not load it yet.
 - [x] 6. Attachments (dwell, pointer locator, hot corners, secure input panel) take references and options, each tested on its own.
 - [x] 7. Switch the app to the default profile in one step: quit flow, prompts, permission flow, and lock-screen panel. Delete dead engine code. Rewrite `AGENTS.md` to explain the architecture with practical guides for adding node kinds, attachments, actions, events, library helpers, and profiles.
+- [ ] 8. State registry: typed declarations with `osk.var`, root and profile lifetimes, strict writes and reads, `None` as reset, engine-observed variables, bindings for every value option, removal of the setter actions and redundant observations, and the default profile's settings as root variables. Update `AGENTS.md` and the parity data in `tests/test_default_profile.py` in the same step.
 
 ## After This PR
 
