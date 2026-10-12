@@ -14,7 +14,7 @@ from axidev_osk.python_defaults.osk.std import keys, prompts, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.state import StateTree
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from support import RecordingBackend, build_window, find_node, nodes_by_id, qt_app, record_app_actions
 
 
@@ -29,9 +29,8 @@ class StdHarness:
     ) -> None:
         qt_app()
         self.backend = RecordingBackend()
-        self.context = make_test_context(self.backend)
-        self.engine = self.context.engine
-        self.window_actions = record_app_actions(self.context.dispatcher)
+        self.engine = make_test_engine(self.backend)
+        self.window_actions = record_app_actions(self.engine.dispatcher)
         root = osk.config(
             active_profile="p",
             profiles={
@@ -42,15 +41,15 @@ class StdHarness:
                 )
             },
         )
-        self.profile = start_test_profile(self.context, root)
-        self.window = build_window(test, self.profile.window("pad"), self.context)
+        self.profile = start_test_profile(self.engine, root)
+        self.window = build_window(test, self.profile.window("pad"), self.engine)
 
     def tap(self, node_id: str) -> None:
-        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
-        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
 
     def observe(self, key: str, pressed: bool, modifiers: tuple[str, ...] = ()) -> None:
-        self.context.dispatcher.dispatch(input_key(key, None, modifiers, pressed))
+        self.engine.dispatcher.dispatch(input_key(key, None, modifiers, pressed))
 
     def widget(self, node_id: str) -> QWidget:
         return find_node(self.window, node_id)
@@ -107,7 +106,7 @@ class KeyTests(unittest.TestCase):
 
     def test_a_key_releases_the_one_shot_its_press_held_even_if_cancelled_meanwhile(self) -> None:
         harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
-        dispatch = harness.context.dispatcher.dispatch
+        dispatch = harness.engine.dispatcher.dispatch
 
         harness.tap("key:ShiftLeft")
         dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A"}))
@@ -122,7 +121,7 @@ class KeyTests(unittest.TestCase):
 
     def test_a_one_shot_set_while_a_key_is_down_waits_for_the_next_key(self) -> None:
         harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
-        dispatch = harness.context.dispatcher.dispatch
+        dispatch = harness.engine.dispatcher.dispatch
 
         dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A"}))
         harness.tap("key:ShiftLeft")
@@ -209,7 +208,7 @@ class KeyTests(unittest.TestCase):
         harness = StdHarness(self, [keys.modifier("Ctrl", "CtrlLeft")])
         harness.tap("key:CtrlLeft")
 
-        harness.context.dispatcher.dispatch(keyboard_reset())
+        harness.engine.dispatcher.dispatch(keyboard_reset())
 
         self.assertEqual(harness.state("std", "latched"), {})
         self.assertFalse(harness.widget("key:CtrlLeft").property("latched"))
@@ -293,7 +292,7 @@ class PromptTests(unittest.TestCase):
 
     def test_prompt_window_builds_with_button_callbacks_and_takes_opts(self) -> None:
         qt_app()
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         answers: list[str] = []
 
         def answer(ctx: Any, event: DataMap) -> None:
@@ -311,9 +310,9 @@ class PromptTests(unittest.TestCase):
             ],
             opts={"minimum_size": [500, 200]},
         )
-        profile = start_test_profile(context, osk.config(active_profile="p", profiles={"p": osk.profile(windows=[prompt])}))
-        window = build_window(self, profile.window("quit"), context)
-        context.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
+        profile = start_test_profile(engine, osk.config(active_profile="p", profiles={"p": osk.profile(windows=[prompt])}))
+        window = build_window(self, profile.window("quit"), engine)
+        engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
 
         widgets = nodes_by_id(window)
         self.assertEqual(widgets["quit:message"].text(), "Close it?")  # type: ignore[attr-defined]

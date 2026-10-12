@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import Generic, TypeVar
 
 from ..config.profile import ProfileConfig
 from ..config.reader import ConfigError, Resolver
 from ..config.variables import Variable
 from ..function_registry import FunctionRef, FunctionRegistry
-from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent
+from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent, data_equal
 from .decoding import (
     non_empty_string_value,
     optional_string_value,
@@ -188,7 +188,7 @@ class ProfileRuntime:
         self._state.declare(profile.state, PROFILE)
         after = self._state.get(())
         assert isinstance(before, dict) and isinstance(after, dict)
-        changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+        changed = sorted(key for key in before.keys() | after.keys() if not data_equal(before.get(key), after.get(key)))
         self._dispatcher.dispatch(*(state_changed((key,)) for key in changed))
         for event_name, refs in profile.on.items():
             self._unsubscribes.append(
@@ -287,14 +287,18 @@ def _resolve(
 class _Binding(Generic[T]):
     decode: Callable[[Resolver], T]
     source: str
-    apply: Callable[[T], None]
+    apply: Callable[[T, T | None], None]
     reads: frozenset[StatePath]
     value: T | None = None
     applied: bool = False
 
 
 class BindingTracker:
-    """Decode values that may follow state and decode them again when the state they read changes."""
+    """Decode values that may follow state and decode them again when the state they read changes.
+
+    The tracker keeps the last values it applied for each binding and hands
+    them to ``apply`` with the new ones, so appliers change only what differs.
+    """
 
     def __init__(self, dispatcher: Dispatcher, functions: FunctionRegistry, state: StateTree) -> None:
         self._dispatcher = dispatcher
@@ -307,31 +311,37 @@ class BindingTracker:
         self,
         decode: Callable[[Resolver], T],
         source: str,
-        apply: Callable[[T], None],
+        apply: Callable[[T, T | None], None],
         *,
         fallback: T,
     ) -> Unsubscribe:
         """Decode and apply values now, then again whenever a state path they read changes.
 
-        ``apply`` receives each new value that differs from the last one. When
-        the first decode fails, ``fallback`` (the values decoded from default
-        state at load) is applied instead, and the failure is reported.
+        ``apply`` receives each new value that differs from the last one,
+        with the last one, or ``None`` the first time. When the first decode
+        fails, ``fallback`` (the values decoded from default state at load) is
+        applied instead, and the failure is reported. When the fallback cannot
+        be applied either, nothing stays bound and the error is raised.
         """
 
         binding: _Binding[object] = _Binding(decode=decode, source=source, apply=apply, reads=frozenset())  # type: ignore[arg-type]
-        failure = self._evaluate(binding)
-        if failure is not None:
-            self._dispatcher.dispatch(failure)
-            if not binding.applied:
-                apply(fallback)
-                binding.value = fallback
-                binding.applied = True
         self._bindings.append(binding)
 
         def unbind() -> None:
             if binding in self._bindings:
                 self._bindings.remove(binding)
 
+        failure = self._evaluate(binding)
+        if failure is not None:
+            if not binding.applied:
+                try:
+                    apply(fallback, None)
+                except Exception:
+                    unbind()
+                    raise
+                binding.value = fallback
+                binding.applied = True
+            self._dispatcher.dispatch(failure)
         return unbind
 
     def _handle_state_changed(self, event: StateChangedArguments) -> MessageResult:
@@ -351,8 +361,8 @@ class BindingTracker:
             value = binding.decode(
                 lambda function, path: _resolve(self._functions, self._state, recorder, function, path)
             )
-            if not binding.applied or value != binding.value:
-                binding.apply(value)
+            if not binding.applied or not _same_values(value, binding.value):
+                binding.apply(value, binding.value if binding.applied else None)
                 binding.value = value
                 binding.applied = True
         except BindingFailed as exc:
@@ -364,3 +374,17 @@ class BindingTracker:
         finally:
             binding.reads = recorder.paths
         return None
+
+
+def _same_values(left: object, right: object) -> bool:
+    """Compare decoded values field by field, with plain data compared the way Lua does."""
+
+    if is_dataclass(left) and not isinstance(left, type):
+        return type(left) is type(right) and all(
+            _same_values(getattr(left, item.name), getattr(right, item.name)) for item in fields(left)
+        )
+    if isinstance(left, tuple) and isinstance(right, tuple):
+        return len(left) == len(right) and all(_same_values(a, b) for a, b in zip(left, right))
+    if isinstance(left, Mapping) and isinstance(right, Mapping) and not isinstance(left, dict):
+        return left.keys() == right.keys() and all(_same_values(left[key], right[key]) for key in left)
+    return data_equal(left, right)  # type: ignore[arg-type]

@@ -18,10 +18,14 @@ def qt_enum_name(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
 
 
-def apply_theme(app: QApplication, theme: ThemeConfig) -> None:
-    """Apply the profile's palette roles, font, and stylesheet."""
+def apply_theme(app: QApplication, theme: ThemeConfig, *, base_palette: QPalette, base_font: QFont) -> None:
+    """Apply the profile's palette roles, font, and stylesheet on top of the app's own palette and font.
 
-    palette = QPalette(app.palette())
+    Every call starts from ``base_palette`` and ``base_font``, so a color role
+    or font the theme no longer names goes back to the app's own.
+    """
+
+    palette = QPalette(base_palette)
     for role, color in theme.palette.items():
         palette.setColor(getattr(QPalette.ColorRole, qt_enum_name(role)), QColor(color))
     app.setPalette(palette)
@@ -34,4 +38,6 @@ def apply_theme(app: QApplication, theme: ThemeConfig) -> None:
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
         font.setKerning(True)
         app.setFont(font)
+    else:
+        app.setFont(base_font)
     app.setStyleSheet(theme.qss)

@@ -9,7 +9,7 @@ from axidev_osk.config.reader import ConfigError
 from axidev_osk.python_defaults import osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.python_defaults.theme import DEFAULT_FONT, DEFAULT_QSS
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.styles.theme import apply_theme
 from support import FakeOverlay, RecordingBackend, build_window, qt_app
 
@@ -19,7 +19,7 @@ def _decode(theme: osk.Map) -> object:
         active_profile="p",
         profiles={"p": osk.profile(theme=theme, windows=[osk.window(id="w", title="w", content=osk.box(id="r"))])},
     )
-    return make_test_context(RecordingBackend()).engine.decoder().decode_root(root)
+    return make_test_engine(RecordingBackend()).decoder().decode_root(root)
 
 
 class ThemeTests(unittest.TestCase):
@@ -27,15 +27,29 @@ class ThemeTests(unittest.TestCase):
         app = qt_app()
         previous = (app.styleSheet(), app.palette(), app.font())
         self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
-        profile = make_test_context(RecordingBackend()).engine.decoder().decode_root(build_default_config())
+        profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
 
-        apply_theme(app, profile.theme.initial)
+        apply_theme(app, profile.theme.initial, base_palette=previous[1], base_font=previous[2])
 
         self.assertEqual(app.styleSheet(), DEFAULT_QSS)
         self.assertEqual(app.palette().color(QPalette.ColorRole.Window), QColor("#0B0B10"))
         self.assertEqual(app.palette().color(QPalette.ColorRole.Highlight), QColor("#E61E8C"))
         self.assertEqual(app.font().families(), DEFAULT_FONT["families"])
         self.assertEqual((app.font().pixelSize(), app.font().weight()), (14, QFont.Weight.Medium))
+
+    def test_a_theme_without_a_color_or_font_goes_back_to_the_base_ones(self) -> None:
+        app = qt_app()
+        previous = (app.styleSheet(), app.palette(), app.font())
+        self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
+        base = {"base_palette": QPalette(previous[1]), "base_font": QFont(previous[2])}
+        themed = _decode({"palette": {"window": "#FF0000"}, "font": {"families": ["Inter"], "pixel_size": 31}})
+        plain = _decode({})
+
+        apply_theme(app, themed.theme.initial, **base)  # type: ignore[attr-defined]
+        apply_theme(app, plain.theme.initial, **base)  # type: ignore[attr-defined]
+
+        self.assertEqual(app.palette().color(QPalette.ColorRole.Window), previous[1].color(QPalette.ColorRole.Window))
+        self.assertEqual(app.font().pixelSize(), previous[2].pixelSize())
 
     def test_theme_rejects_unknown_palette_roles_and_malformed_colors(self) -> None:
         cases = {
@@ -49,14 +63,14 @@ class ThemeTests(unittest.TestCase):
 
     def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
         qt_app()
-        context = make_test_context(RecordingBackend())
-        attachments = AttachmentRuntime(context.engine.bindings, window_lookup=lambda _id: None)
-        profile = start_test_profile(context, build_default_config())
+        engine = make_test_engine(RecordingBackend())
+        attachments = AttachmentRuntime(engine.bindings, window_lookup=lambda _id: None)
+        profile = start_test_profile(engine, build_default_config())
         attachments.start(profile)
         window = build_window(
             self,
             profile.window("keyboard"),
-            context,
+            engine,
             attachments=attachments.for_window("keyboard"),
             overlay=FakeOverlay(uses_custom_chrome=True),
         )

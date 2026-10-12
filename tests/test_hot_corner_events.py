@@ -10,8 +10,8 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.hot_corner.service import HotCornerService
 from axidev_osk.messages import MessageResult
-from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments, display_configuration_changed
+from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 from support import RecordingBackend, hot_corner_config
 
@@ -56,14 +56,14 @@ class HotCornerEventTests(unittest.TestCase):
         cls.app.processEvents()
 
     def test_dwell_completion_emits_hot_corner_triggered(self) -> None:
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         events: list[HotCornerTriggeredArguments] = []
 
         def record_event(event: HotCornerTriggeredArguments) -> MessageResult:
             events.append(event)
             return []
 
-        context.dispatcher.add_event_handler(HOT_CORNER_TRIGGERED, record_event)
+        engine.dispatcher.add_event_handler(HOT_CORNER_TRIGGERED, record_event)
         overlay = FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE)
 
         with patch(
@@ -71,7 +71,7 @@ class HotCornerEventTests(unittest.TestCase):
             return_value=overlay,
         ):
             controller = HotCornerWindowToggleController(
-                context.dispatcher,
+                engine.dispatcher,
                 config=hot_corner_config(dwell_ms=1),
             )
 
@@ -95,30 +95,30 @@ class HotCornerServiceTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_start_without_configuration_builds_no_controller(self) -> None:
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         service = HotCornerService()
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
-            service.start(context)
-            service.refresh_screen_configuration()
+            service.start(engine.dispatcher)
+            engine.dispatcher.dispatch(display_configuration_changed())
             service.stop()
 
         controller_type.assert_not_called()
 
     def test_configured_start_runs_controller_with_profile_settings(self) -> None:
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         service = HotCornerService()
         settings = hot_corner_config(dwell_ms=150)
         corners = frozenset({"top_left", "bottom_right"})
         service.configure(settings, corners)
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
-            service.start(context)
-            service.refresh_screen_configuration()
+            service.start(engine.dispatcher)
+            engine.dispatcher.dispatch(display_configuration_changed())
             service.stop()
 
         controller_type.assert_called_once_with(
-            context.dispatcher,
+            engine.dispatcher,
             config=settings,
             corners=corners,
             parent=None,
@@ -129,15 +129,15 @@ class HotCornerServiceTests(unittest.TestCase):
         controller.stop.assert_called_once_with()
 
     def test_configuring_after_start_restarts_the_sensors_and_stop_forgets_them(self) -> None:
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         service = HotCornerService()
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
-            service.start(context)
+            service.start(engine.dispatcher)
             service.configure(hot_corner_config(dwell_ms=150), frozenset({"top_left"}))
             service.configure(hot_corner_config(dwell_ms=300), frozenset({"top_left"}))
             service.stop()
-            service.refresh_screen_configuration()
+            engine.dispatcher.dispatch(display_configuration_changed())
 
         self.assertEqual([call.kwargs["config"].dwell_ms for call in controller_type.call_args_list], [150, 300])
         self.assertEqual(controller_type.return_value.stop.call_count, 2)

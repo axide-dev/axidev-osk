@@ -54,28 +54,11 @@ class AttachmentRuntime:
         return self._secure_input_panel_window
 
     def start(self, profile: ProfileConfig) -> None:
-        """Validate references, then bind every attachment's options for ``profile``.
+        """Bind every attachment's options for ``profile``; the config decoder already checked their references."""
 
-        Every check runs before anything changes, so a rejected profile leaves
-        the current attachments as they were.
-        """
-
-        window_ids = {window.id for window in profile.windows}
-        dwell_windows: set[str] = set()
         by_kind: dict[str, list[AttachmentConfig]] = {}
         for attachment in profile.attachments:
-            if attachment.target is not None and attachment.target not in window_ids:
-                raise ValueError(f"Attachment {attachment.id!r} targets unknown window {attachment.target!r}")
-            if attachment.kind == "dwell":
-                assert attachment.target is not None
-                if attachment.target in dwell_windows:
-                    raise ValueError(f"Window {attachment.target!r} has more than one dwell attachment")
-                dwell_windows.add(attachment.target)
             by_kind.setdefault(attachment.kind, []).append(attachment)
-        if len(by_kind.get("hot_corners", [])) > 1:
-            raise ValueError("A profile can have at most one hot_corners attachment")
-        if len(by_kind.get("secure_input_panel", [])) > 1:
-            raise ValueError("A profile can have at most one secure_input_panel attachment")
         self.stop()
         panels = by_kind.get("secure_input_panel", [])
         self._secure_input_panel_window = panels[0].target if panels else None
@@ -107,7 +90,7 @@ class AttachmentRuntime:
             self._bindings.bind(
                 attachment.values.decode,
                 f"attachment:{attachment.id}",
-                apply,
+                lambda options, _previous: apply(options),
                 fallback=attachment.values.initial,
             )
         )

@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QProcess
 from ..runtime.engine_messages import process_exited
 
 if TYPE_CHECKING:
-    from ..runtime.context import Context
+    from ..runtime.dispatcher import Dispatcher
 
 _logger = logging.getLogger(__name__)
 
@@ -25,14 +25,14 @@ class ProcessService(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._running: set[QProcess] = set()
 
-    def start(self, context: "Context") -> None:
-        self._context = context
+    def start(self, dispatcher: Dispatcher) -> None:
+        self._dispatcher = dispatcher
 
     def stop(self) -> None:
-        self._context = None
+        self._dispatcher = None
 
     def spawn(self, argv: tuple[str, ...], tag: str, detached: bool) -> None:
         program, *arguments = argv
@@ -69,5 +69,5 @@ class ProcessService(QObject):
     def _report(self, tag: str, code: int, error: str | None) -> None:
         if error is not None:
             _logger.warning("Process %s failed: %s", tag, error)
-        if self._context is not None:
-            self._context.dispatcher.dispatch(process_exited(tag, code, error))
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch(process_exited(tag, code, error))

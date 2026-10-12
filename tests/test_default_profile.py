@@ -20,7 +20,7 @@ from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_d
 from axidev_osk.python_defaults.osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from support import RecordingBackend, build_window, nodes_by_id, qt_app, record_app_actions
 
 _MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "SuperRight", "AltLeft", "AltRight"}
@@ -37,27 +37,26 @@ class DefaultProfileHarness:
     def __init__(self, test: unittest.TestCase) -> None:
         qt_app()
         self.backend = RecordingBackend()
-        self.context = make_test_context(self.backend)
-        self.engine = self.context.engine
-        self.actions = record_app_actions(self.context.dispatcher)
+        self.engine = make_test_engine(self.backend)
+        self.actions = record_app_actions(self.engine.dispatcher)
         self.attachments = AttachmentRuntime(self.engine.bindings, window_lookup=lambda _id: None)
-        self.profile = start_test_profile(self.context, build_default_config())
+        self.profile = start_test_profile(self.engine, build_default_config())
         self.attachments.start(self.profile)
-        self.window = build_window(test, self.profile.window("keyboard"), self.context)
+        self.window = build_window(test, self.profile.window("keyboard"), self.engine)
         self.nodes = nodes_by_id(self.window)
 
     def press(self, node_id: str) -> None:
-        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
 
     def release(self, node_id: str) -> None:
-        self.context.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
 
     def tap(self, node_id: str) -> None:
         self.press(node_id)
         self.release(node_id)
 
     def emit(self, *messages: RuntimeEvent) -> None:
-        self.context.dispatcher.dispatch(*messages)
+        self.engine.dispatcher.dispatch(*messages)
 
     def key_ids(self) -> list[str]:
         grid = self.nodes["keyboard-grid"]
@@ -105,7 +104,7 @@ class LayoutParityTests(unittest.TestCase):
 
 class ConfigParityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.profile = make_test_context(RecordingBackend()).engine.decoder().decode_root(build_default_config())
+        self.profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
 
     def _attachment(self, attachment_id: str) -> tuple[str | None, object]:
         attachment = next(attachment for attachment in self.profile.attachments if attachment.id == attachment_id)
@@ -152,11 +151,8 @@ class ConfigParityTests(unittest.TestCase):
 
         self.assertEqual(node_ids.count("permission-prompt:open_terminal"), 1)
 
-    def test_only_the_keyboard_handles_its_own_close(self) -> None:
-        self.assertEqual(
-            [window.id for window in self.profile.windows if not window.values.initial.default_close],
-            ["keyboard"],
-        )
+    def test_every_window_handles_its_own_close(self) -> None:
+        self.assertEqual([window.id for window in self.profile.windows if window.values.initial.default_close], [])
 
 
 class BehaviorParityTests(unittest.TestCase):

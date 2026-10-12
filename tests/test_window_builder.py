@@ -19,9 +19,9 @@ from axidev_osk.runtime.app_messages import (
     WINDOW_DRAG_STARTED,
     WindowArguments,
 )
-from axidev_osk.runtime.context import Context
+from axidev_osk.runtime.engine import Engine
 from axidev_osk.runtime.profile_runtime import state_set
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
@@ -74,17 +74,17 @@ class WindowHarness:
         **window_fields: Any,
     ) -> None:
         qt_app()
-        self.context: Context = make_test_context(RecordingBackend())
+        self.engine: Engine = make_test_engine(RecordingBackend())
         self.built: dict[str, RuntimeWindow] = {}
-        self.attachments = AttachmentRuntime(self.context.engine.bindings, window_lookup=self.built.get)
-        self.profile: ProfileConfig = start_test_profile(self.context, _root(attachments, windows, state, **window_fields))
+        self.attachments = AttachmentRuntime(self.engine.bindings, window_lookup=self.built.get)
+        self.profile: ProfileConfig = start_test_profile(self.engine, _root(attachments, windows, state, **window_fields))
         self.attachments.start(self.profile)
 
     def build(self, window_id: str = "pad", overlay: object | None = None) -> RuntimeWindow:
         with patch(_CONFIGURE_OVERLAY, return_value=overlay or FakeOverlay(uses_custom_chrome=True)):
             window = build_profile_window(
                 self.profile.window(window_id),
-                self.context,
+                self.engine,
                 attachments=self.attachments.for_window(window_id),
             )
         self.built[window_id] = window
@@ -94,7 +94,7 @@ class WindowHarness:
 class RuntimeWindowCloseTests(unittest.TestCase):
     def _record_close_requests(self, harness: WindowHarness) -> list[WindowArguments]:
         events: list[WindowArguments] = []
-        harness.context.dispatcher.add_event_handler(
+        harness.engine.dispatcher.add_event_handler(
             WINDOW_CLOSE_REQUESTED,
             lambda close_event: events.append(close_event) or [],
         )
@@ -110,6 +110,9 @@ class RuntimeWindowCloseTests(unittest.TestCase):
         window.closeEvent(event)
 
         self.assertFalse(event.isAccepted())
+        # The request is posted, so it runs after the Qt event returns.
+        self.assertEqual(events, [])
+        qt_app().processEvents()
         self.assertEqual(events, [WindowArguments("pad")])
 
     def test_removed_output_close_does_not_request_application_quit(self) -> None:
@@ -122,11 +125,13 @@ class RuntimeWindowCloseTests(unittest.TestCase):
 
         event = QCloseEvent()
         window.closeEvent(event)
+        qt_app().processEvents()
         self.assertFalse(event.isAccepted())
         self.assertEqual(events, [])
 
         overlay.has_removed_output.return_value = False  # type: ignore[attr-defined]
         window.closeEvent(QCloseEvent())
+        qt_app().processEvents()
         self.assertEqual(events, [WindowArguments("pad")])
 
 
@@ -135,7 +140,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
     def test_failed_content_build_releases_platform_resources(self) -> None:
         qt_app()
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         overlay = Mock()
         values = WindowValues(
             title="Pad", opacity=1.0, minimum_size=(0, 0), default_close=True, input_blocked=False, style=StyleConfig()
@@ -151,7 +156,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
                 chrome=ChromeConfig(),
                 values=Live(values, lambda _resolver: values),
                 build_content=Mock(side_effect=RuntimeError("content failed")),
-                context=context,
+                engine=engine,
             )
 
         overlay.release_resources.assert_called_once_with()
@@ -189,7 +194,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.addCleanup(window.deleteLater)
         events: list[tuple[str, WindowArguments]] = []
         for name in (WINDOW_DRAG_STARTED, WINDOW_DRAG_ENDED):
-            harness.context.dispatcher.add_event_handler(
+            harness.engine.dispatcher.add_event_handler(
                 name,
                 lambda event, name=name: events.append((name, event)) or [],
             )
@@ -209,7 +214,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         window = harness.build()
         self.addCleanup(window.deleteLater)
         events: list[object] = []
-        harness.context.dispatcher.add_raw_event_handler(WINDOW_DRAG_STARTED, lambda event: events.append(event) or [])
+        harness.engine.dispatcher.add_raw_event_handler(WINDOW_DRAG_STARTED, lambda event: events.append(event) or [])
 
         title_bar = window.findChild(OverlayTitleBar)
         assert title_bar is not None
@@ -328,6 +333,16 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertLessEqual(window.minimumWidth(), window.width())
         self.assertLessEqual(window.minimumHeight(), window.height())
 
+    def test_a_bound_minimum_size_uses_current_state_on_the_first_build(self) -> None:
+        harness = WindowHarness(state={"width": osk.var("integer", 100)}, minimum_size=lambda s: [s.width, 50])
+        harness.engine.dispatcher.dispatch(state_set("width", 640))
+
+        window = harness.build()
+        self.addCleanup(window.deleteLater)
+        window.show()
+
+        self.assertGreaterEqual(window.minimumWidth(), 640)
+
     def test_startup_size_honors_configured_minimum_size(self) -> None:
         window = WindowHarness(minimum_size=[640, 320]).build()
         self.addCleanup(window.deleteLater)
@@ -354,7 +369,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         harness = WindowHarness(overlay={"placement": "center"})
 
         with patch(_CONFIGURE_OVERLAY, return_value=FakeOverlay(uses_custom_chrome=True)) as configure_overlay:
-            window = build_profile_window(harness.profile.window("pad"), harness.context)
+            window = build_profile_window(harness.profile.window("pad"), harness.engine)
         self.addCleanup(window.deleteLater)
 
         self.assertEqual(configure_overlay.call_args.kwargs["config"].placement, OverlayPlacement.CENTER)
@@ -369,7 +384,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
                 return_value=FakeOverlay(),
             ) as configure_plain,
         ):
-            window = build_profile_window(harness.profile.window("pad"), harness.context)
+            window = build_profile_window(harness.profile.window("pad"), harness.engine)
         self.addCleanup(window.deleteLater)
 
         configure_overlay.assert_not_called()
@@ -459,9 +474,10 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         harness = WindowHarness()
         window = harness.build()
         self.addCleanup(window.deleteLater)
-        state = harness.context.engine.profile.state
+        state = harness.engine.profile.state
 
         window.show()
+        qt_app().processEvents()
         self.assertEqual((state.get(("windows", "pad", "visible")), state.get(("windows", "pad", "minimized"))), (True, False))
 
         self.assertEqual(
@@ -470,6 +486,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         )
 
         window.hide()
+        qt_app().processEvents()
         self.assertIs(state.get(("windows", "pad", "visible")), False)
 
     def test_title_opacity_and_input_block_follow_state(self) -> None:
@@ -489,7 +506,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         press = QEvent(QEvent.Type.MouseButtonPress)
         self.assertIsNone(window._input_blocker)
 
-        harness.context.dispatcher.dispatch(state_set("faded", True), state_set("name", "Faded"))
+        harness.engine.dispatcher.dispatch(state_set("faded", True), state_set("name", "Faded"))
 
         self.assertEqual(window.windowTitle(), "Faded")
         self.assertAlmostEqual(window.windowOpacity(), 0.01, delta=0.005)
@@ -498,7 +515,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertTrue(blocker.eventFilter(keys["pad:a"], press))
         self.assertFalse(blocker.eventFilter(keys["pad:ghost"], press))
 
-        harness.context.dispatcher.dispatch(state_set("faded", False))
+        harness.engine.dispatcher.dispatch(state_set("faded", False))
 
         self.assertIsNone(window._input_blocker)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
@@ -525,7 +542,7 @@ class RuntimeWindowDwellTests(unittest.TestCase):
         self.addCleanup(window.deleteLater)
         self.assertFalse(window._dwell_click.enabled)
 
-        harness.context.dispatcher.dispatch(state_set("dwell_on", True))
+        harness.engine.dispatcher.dispatch(state_set("dwell_on", True))
 
         self.assertTrue(window._dwell_click.enabled)
 
@@ -534,7 +551,7 @@ class RuntimeWindowDwellTests(unittest.TestCase):
             [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
             state={"dwell_on": osk.var("boolean", False)},
         )
-        harness.context.dispatcher.dispatch(state_set("dwell_on", True))
+        harness.engine.dispatcher.dispatch(state_set("dwell_on", True))
 
         window = harness.build()
         self.addCleanup(window.deleteLater)

@@ -158,6 +158,7 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             decode_options=_decode_stack,
             has_children=True,
             decode_child_placement=_decode_stack_page,
+            check_options=_check_stack,
         )
     )
 
@@ -231,6 +232,12 @@ def _decode_grid_cell(reader: ConfigReader) -> GridCell:
 
 def _decode_box_placement(reader: ConfigReader) -> BoxPlacement:
     return BoxPlacement(stretch=reader.integer("stretch", 0, minimum=0))
+
+
+def _check_stack(reader: ConfigReader, options: object, children: tuple[str, ...]) -> None:
+    assert isinstance(options, StackOptions)
+    if options.current is not None and options.current not in children:
+        raise ConfigError(f"{reader.field_path('current')} names {options.current!r}, which is not a page of this stack")
 
 
 def _decode_stack_page(reader: ConfigReader) -> None:
@@ -389,10 +396,9 @@ def _apply_stack(widget: QWidget, options: object, previous: object | None) -> N
     if options.current is not None and (old is None or options.current != old.current):
         for index in range(widget.count()):
             page = widget.widget(index)
+            # The decoder checked that ``current`` names a page.
             if page is not None and page.property("componentId") == options.current:
                 widget.setCurrentWidget(page)
                 break
-        else:
-            raise ValueError(f"Stack {widget.property('componentId')!r} has no page {options.current!r}")
     if old is None or options.visible != old.visible:
         _apply_visible(widget, options.visible)

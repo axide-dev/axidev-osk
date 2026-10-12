@@ -13,7 +13,7 @@ from ..platform.overlay import OverlayBackend, read_selected_overlay_backend
 from ..runtime.app_messages import pointer_motion_observed
 
 if TYPE_CHECKING:
-    from ..runtime.context import Context
+    from ..runtime.dispatcher import Dispatcher
 
 _logger = logging.getLogger(__name__)
 _MANAGER_NAME = b"zwp_relative_pointer_manager_v1"
@@ -99,7 +99,7 @@ class WaylandRelativePointerService(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._display: int | None = None
         self._registry: int | None = None
         self._manager: int | None = None
@@ -119,10 +119,10 @@ class WaylandRelativePointerService(QObject):
         )
         self._motion_listener = (ctypes.c_void_p * 1)(ctypes.cast(self._motion_callback, ctypes.c_void_p))
 
-    def start(self, context: "Context") -> None:
+    def start(self, dispatcher: Dispatcher) -> None:
         """Bind the standard relative-pointer protocol when layer-shell uses it."""
 
-        if self._context is not None or read_selected_overlay_backend() != OverlayBackend.WAYLAND_LAYER_SHELL:
+        if self._dispatcher is not None or read_selected_overlay_backend() != OverlayBackend.WAYLAND_LAYER_SHELL:
             return
         app = cast("QGuiApplication | None", QGuiApplication.instance())
         # Qt's stubs do not describe the platform-specific native interface.
@@ -173,14 +173,14 @@ class WaylandRelativePointerService(QObject):
         if _wayland.wl_proxy_add_listener(relative_pointer, self._motion_listener, None) != 0:
             self.stop()
             raise RuntimeError("Wayland relative-pointer listener registration failed")
-        self._context = context
+        self._dispatcher = dispatcher
         self._display = display
         _logger.info("Wayland relative-pointer bridge started")
 
     def stop(self) -> None:
         """Destroy protocol objects owned by the service."""
 
-        self._context = None
+        self._dispatcher = None
         self._display = None
         self._drag_active = False
         self._reset_pending_motion()
@@ -230,7 +230,7 @@ class WaylandRelativePointerService(QObject):
         _dx_unaccelerated: int,
         _dy_unaccelerated: int,
     ) -> None:
-        if self._context is None or not self._drag_active:
+        if self._dispatcher is None or not self._drag_active:
             return
         self._pending_dx += dx / 256.0
         self._pending_dy += dy / 256.0
@@ -262,15 +262,15 @@ class WaylandRelativePointerService(QObject):
         dy = self._pending_dy
         self._pending_dx = 0.0
         self._pending_dy = 0.0
-        if self._context is None or not self._drag_active or (dx == 0.0 and dy == 0.0):
+        if self._dispatcher is None or not self._drag_active or (dx == 0.0 and dy == 0.0):
             return
-        self._context.dispatcher.dispatch(pointer_motion_observed(dx, dy))
+        self._dispatcher.dispatch(pointer_motion_observed(dx, dy))
 
     def begin_drag(self) -> None:
         """Start a fresh relative-pointer drag."""
 
         self._reset_pending_motion()
-        self._drag_active = self._context is not None
+        self._drag_active = self._dispatcher is not None
 
     def end_drag(self) -> None:
         """Stop the current drag and discard its buffered movement."""
@@ -281,7 +281,7 @@ class WaylandRelativePointerService(QObject):
     def commit_surface(self, surface: int) -> None:
         """Commit the current Qt-owned surface without retaining its pointer."""
 
-        if self._context is None or not self._drag_active:
+        if self._dispatcher is None or not self._drag_active:
             return
         version = _wayland.wl_proxy_get_version(surface)
         _wayland.wl_proxy_marshal_flags(

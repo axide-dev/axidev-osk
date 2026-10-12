@@ -218,7 +218,7 @@ class RuntimeMessageTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "must be an integer"):
             window_move_by("window:keyboard", 1.5, 0)  # type: ignore[arg-type]
 
-    def test_event_handler_failure_skips_remaining_handlers_but_continues_queue(self) -> None:
+    def test_event_handler_failure_still_runs_the_other_handlers_and_the_queue(self) -> None:
         dispatcher = Dispatcher()
         order: list[str] = []
         dispatcher.register_event("test.source", _identity)
@@ -247,7 +247,62 @@ class RuntimeMessageTests(unittest.TestCase):
         with self.assertLogs("axidev_osk.runtime.dispatcher", level="ERROR"):
             dispatcher.dispatch(RuntimeEvent("test.source", {}))
 
-        self.assertEqual(order, ["first", "followup"])
+        self.assertEqual(order, ["first", "skipped", "followup"])
+
+    def test_idle_actions_wait_for_the_queue_and_run_in_arrival_order(self) -> None:
+        dispatcher = Dispatcher()
+        order: list[str] = []
+
+        def step(arguments: DataMap) -> MessageResult:
+            name = str(arguments["name"])
+            order.append(name)
+            if name == "idle-a":
+                return [RuntimeAction("test.step", {"name": "after-a"})]
+            return []
+
+        dispatcher.register_action("test.step", _identity, step)
+        dispatcher.register_action("test.idle", _identity, step, when_idle=True)
+        dispatcher.dispatch(
+            RuntimeAction("test.idle", {"name": "idle-a"}),
+            RuntimeAction("test.idle", {"name": "idle-b"}),
+            RuntimeAction("test.step", {"name": "plain"}),
+        )
+
+        self.assertEqual(order, ["plain", "idle-a", "after-a", "idle-b"])
+        self.assertFalse(dispatcher.has_pending())
+
+    def test_idle_actions_wait_for_messages_from_other_threads(self) -> None:
+        dispatcher = Dispatcher()
+        order: list[str] = []
+
+        def idle(arguments: DataMap) -> MessageResult:
+            del arguments
+            order.append("idle")
+            return []
+
+        def step(arguments: DataMap) -> MessageResult:
+            order.append(str(arguments["name"]))
+            return []
+
+        dispatcher.register_action("test.idle", _identity, idle, when_idle=True)
+        dispatcher.register_action("test.step", _identity, step)
+        dispatcher.post(RuntimeAction("test.step", {"name": "posted"}))
+        dispatcher.dispatch(RuntimeAction("test.idle", {}))
+
+        self.assertEqual(order, ["posted", "idle"])
+
+    def test_posted_messages_wait_for_the_wake_outside_a_drain(self) -> None:
+        dispatcher = Dispatcher()
+        wakes: list[None] = []
+        order: list[str] = []
+        dispatcher.set_wake(lambda: wakes.append(None))
+        dispatcher.register_action("test.step", _identity, lambda arguments: order.append(str(arguments["name"])) or [])
+
+        dispatcher.post(RuntimeAction("test.step", {"name": "posted"}))
+
+        self.assertEqual((order, len(wakes)), ([], 1))
+        dispatcher.process_pending()
+        self.assertEqual(order, ["posted"])
 
     def test_unbounded_drain_warns_every_ten_thousand_messages_without_stopping(self) -> None:
         dispatcher = Dispatcher()

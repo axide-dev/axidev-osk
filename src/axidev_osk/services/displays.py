@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 
 from ..runtime.app_messages import display_configuration_changed
-from ..runtime.context import Context
+from ..runtime.dispatcher import Dispatcher
 
 
 class DisplayService(QObject):
@@ -16,18 +16,18 @@ class DisplayService(QObject):
 
     def __init__(self, *, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._screens: list[QScreen] = []
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._notify)
 
-    def start(self, context: Context) -> None:
+    def start(self, dispatcher: Dispatcher) -> None:
         """Subscribe to connected outputs and application output-list changes."""
 
-        if self._context is not None:
+        if self._dispatcher is not None:
             return
-        self._context = context
+        self._dispatcher = dispatcher
         app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.connect(self._screen_added)
         app.screenRemoved.connect(self._screen_removed)
@@ -38,7 +38,7 @@ class DisplayService(QObject):
     def stop(self) -> None:
         """Disconnect observers and cancel any pending notification."""
 
-        if self._context is None:
+        if self._dispatcher is None:
             return
         app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.disconnect(self._screen_added)
@@ -47,7 +47,7 @@ class DisplayService(QObject):
         for screen in tuple(self._screens):
             self._screen_removed(screen)
         self._timer.stop()
-        self._context = None
+        self._dispatcher = None
 
     def _screen_added(self, screen: QScreen) -> None:
         if screen not in self._screens:
@@ -67,5 +67,5 @@ class DisplayService(QObject):
         self._timer.start(0)
 
     def _notify(self) -> None:
-        if self._context is not None:
-            self._context.dispatcher.dispatch(display_configuration_changed())
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch(display_configuration_changed())

@@ -77,11 +77,20 @@ class NodeKindSpec(Protocol):
         """Read the fields this kind places its children with, such as a grid ``cell``."""
         ...
 
+    def check_options(self, reader: ConfigReader, options: object, children: tuple[str, ...], /) -> None:
+        """Reject options that do not fit the node's children, given their IDs."""
+        ...
+
 
 PlacementDecoder = Callable[[ConfigReader], object]
 
 
 class AttachmentKindSpec(Protocol):
+    @property
+    def limit(self) -> str | None:
+        """``"window"`` or ``"profile"`` when at most one attachment of the kind fits there."""
+        ...
+
     def decode_target(self, reader: ConfigReader, /) -> str | None:
         """Read the fixed window the attachment acts on, or ``None`` for a screen-wide one."""
         ...
@@ -335,8 +344,25 @@ class ConfigDecoder:
         _require_unique((window.id for window in windows), f"{reader.path}.windows")
         _require_unique((node.id for node in profile.nodes()), f"{reader.path} nodes")
         _require_unique((attachment.id for attachment in attachments), f"{reader.path}.attachments")
+        self._check_attachments(attachments, {window.id for window in windows}, reader.field_path("attachments"))
         self._check_profile(profile, reader.path)
         return profile
+
+    def _check_attachments(self, attachments: tuple[AttachmentConfig, ...], windows: set[str], path: str) -> None:
+        """Reject an attachment naming an unknown window, or more of a kind than its limit allows."""
+
+        seen: set[tuple[str, str | None]] = set()
+        for index, attachment in enumerate(attachments):
+            if attachment.target is not None and attachment.target not in windows:
+                raise ConfigError(f"{path}[{index}] targets unknown window {attachment.target!r}")
+            limit = self._attachment_kinds[attachment.kind].limit
+            if limit is None:
+                continue
+            key = (attachment.kind, attachment.target if limit == "window" else None)
+            if key in seen:
+                where = f"window {attachment.target!r}" if limit == "window" else "a profile"
+                raise ConfigError(f"{path}[{index}]: {where} can have at most one {attachment.kind} attachment")
+            seen.add(key)
 
     def _decode_window(self, reader: ConfigReader, resolver: Resolver) -> WindowConfig:
         overlay_reader = reader.optional_child("overlay")
@@ -381,14 +407,17 @@ class ConfigDecoder:
         structure = kind.decode_structure(reader)
         # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
         child_placement = placement(reader) if placement is not None else None
+        child_ids = tuple(child.id for child in children)
+
+        def decode_values(values: ConfigReader) -> NodeValues:
+            options = kind.decode_options(values)
+            kind.check_options(values, options, child_ids)
+            return NodeValues(options=options, style=_decode_style(values, reserved))
+
         return NodeConfig(
             kind=kind_name,
             id=node_id,
-            values=_live(
-                reader,
-                resolver,
-                lambda values: NodeValues(options=kind.decode_options(values), style=_decode_style(values, reserved)),
-            ),
+            values=_live(reader, resolver, decode_values),
             callbacks=callbacks,
             children=children,
             structure=structure,

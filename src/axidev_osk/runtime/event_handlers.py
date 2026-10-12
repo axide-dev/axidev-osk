@@ -7,7 +7,7 @@ send these actions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtWidgets import QWidget
 
@@ -29,7 +29,6 @@ from .app_messages import (
     window_move_by,
 )
 from .decoding import EmptyArguments
-from .registries import ServiceRegistry
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -56,31 +55,33 @@ def register_window_actions(dispatcher: "Dispatcher", windows: "WindowManager") 
     dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
 
 
-def register_display_recovery(
-    dispatcher: "Dispatcher",
-    windows: "WindowManager",
-    services: ServiceRegistry,
-) -> None:
-    """Recover windows and services after connected outputs change."""
+def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
+    """Recover windows after connected outputs change; services follow the same event themselves."""
 
     def recover(event: EmptyArguments) -> MessageResult:
         del event
         windows.refresh_screen_configuration()
-        for service in services.services():
-            refresh = getattr(service, "refresh_screen_configuration", None)
-            if refresh is not None:
-                refresh()
         return []
 
     dispatcher.add_event_handler(DISPLAY_CONFIGURATION_CHANGED, recover)
 
 
+class RelativePointer(Protocol):
+    """The service that collects compositor pointer motion while a layer-shell window is dragged."""
+
+    def begin_drag(self) -> None: ...
+
+    def end_drag(self) -> None: ...
+
+    def commit_surface(self, surface: int) -> None: ...
+
+
 class PointerDragRouter:
     """Own one layer-shell title-bar drag and turn raw pointer motion into window moves."""
 
-    def __init__(self, windows: "WindowManager", services: ServiceRegistry) -> None:
+    def __init__(self, windows: "WindowManager", relative_pointer: RelativePointer | None) -> None:
         self._windows = windows
-        self._services = services
+        self._relative_pointer = relative_pointer
         self._window_id: str | None = None
         self._remainder = (0.0, 0.0)
 
@@ -98,10 +99,10 @@ class PointerDragRouter:
 
     def _drag_started(self, event: WindowArguments) -> MessageResult:
         if self._window_id is not None:
-            self._set_services_dragging(False)
+            self._set_dragging(False)
         self._window_id = event.window_id
         self._remainder = (0.0, 0.0)
-        self._set_services_dragging(True)
+        self._set_dragging(True)
         return []
 
     def _drag_ended(self, event: WindowArguments) -> MessageResult:
@@ -144,23 +145,22 @@ class PointerDragRouter:
         return []
 
     def _stop(self) -> None:
-        self._set_services_dragging(False)
+        self._set_dragging(False)
         self._window_id = None
         self._remainder = (0.0, 0.0)
 
-    def _set_services_dragging(self, enabled: bool) -> None:
-        """Start or stop relative-pointer collection in interested services."""
+    def _set_dragging(self, enabled: bool) -> None:
+        """Start or stop relative-pointer collection."""
 
-        for service in self._services.services():
-            toggle = getattr(service, "begin_drag" if enabled else "end_drag", None)
-            if toggle is not None:
-                toggle()
+        if self._relative_pointer is None:
+            return
+        if enabled:
+            self._relative_pointer.begin_drag()
+        else:
+            self._relative_pointer.end_drag()
 
     def _commit_surface(self, window: QWidget) -> None:
-        """Commit a moved layer-shell surface through interested services."""
+        """Commit a moved layer-shell surface through the relative-pointer service."""
 
-        surface = int(window.winId())
-        for service in self._services.services():
-            commit_surface = getattr(service, "commit_surface", None)
-            if commit_surface is not None:
-                commit_surface(surface)
+        if self._relative_pointer is not None:
+            self._relative_pointer.commit_surface(int(window.winId()))

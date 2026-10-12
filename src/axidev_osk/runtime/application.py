@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
 from ..application.linux_permissions import open_permission_setup_terminal
@@ -20,7 +21,6 @@ from ..attachments.runtime import AttachmentRuntime
 from ..config.profile import ProfileConfig
 from ..hot_corner.service import HotCornerService
 from ..messages import MessageResult
-from ..python_defaults.default_profile import build_default_config
 from ..services import register_services
 from ..services.keyboard import KeyboardService
 from ..services.process import ProcessService
@@ -44,11 +44,10 @@ from .app_messages import (
     window_close,
     window_show,
 )
-from .context import Context
 from .decoding import EmptyArguments, decode_empty
 from .dispatcher import Dispatcher
 from .engine import build_engine
-from .event_handlers import PointerDragRouter, register_display_recovery, register_window_actions
+from .event_handlers import PointerDragRouter, RelativePointer, register_display_recovery, register_window_actions
 from .qt_wake import QtDispatcherWake
 from .registries import ServiceRegistry
 from .window_manager import WindowFactory, WindowManager
@@ -63,7 +62,7 @@ class ApplicationRuntime:
         self,
         app: QApplication,
         *,
-        root_config: Mapping[str, Any] | None = None,
+        root_config: Mapping[str, Any],
         services: ServiceRegistry | None = None,
         confirm_quit: bool = True,
         show_startup_windows: bool = True,
@@ -72,13 +71,16 @@ class ApplicationRuntime:
 
         Args:
             app: Existing QApplication.
-            root_config: Root config map; the bundled default profile when omitted.
+            root_config: Root config map whose active profile runs.
             services: Optional pre-populated service registry for tests.
             confirm_quit: Whether quit requests may ask the profile before shutting down.
             show_startup_windows: Whether to show ``show_on_start`` windows immediately.
         """
 
         self._app = app
+        # Every theme applies on top of the app's own look, so one theme never inherits another's.
+        self._base_palette = QPalette(app.palette())
+        self._base_font = QFont(app.font())
         self._show_startup_windows = show_startup_windows
         self._panel_prepared = False
         self._dispatcher = Dispatcher()
@@ -90,16 +92,14 @@ class ApplicationRuntime:
         processes = ProcessService(parent=app)
         self._services.register("processes", processes)
         engine = build_engine(self._dispatcher, keyboard=self._keyboard, processes=processes)
-        self.context = Context(dispatcher=self._dispatcher, engine=engine)
+        self.engine = engine
         hot_corners = self._services.find("hot_corner")
         self._attachments = AttachmentRuntime(
             engine.bindings,
             window_lookup=lambda window_id: self._window_manager.get(window_id),
             hot_corners=hot_corners if isinstance(hot_corners, HotCornerService) else None,
         )
-        self._profile: ProfileConfig = engine.decoder().decode_root(
-            root_config if root_config is not None else build_default_config()
-        )
+        self._profile: ProfileConfig = engine.decoder().decode_root(root_config)
         self._window_manager = WindowManager(
             {window.id: self._window_factory(window.id) for window in self._profile.windows}
         )
@@ -112,10 +112,11 @@ class ApplicationRuntime:
             parent=app,
         )
         register_window_actions(self._dispatcher, self._window_manager)
-        register_display_recovery(self._dispatcher, self._window_manager, self._services)
-        self._pointer_drag = PointerDragRouter(self._window_manager, self._services)
+        register_display_recovery(self._dispatcher, self._window_manager)
+        relative_pointer = self._services.find("wayland_relative_pointer")
+        self._pointer_drag = PointerDragRouter(self._window_manager, cast("RelativePointer | None", relative_pointer))
         self._pointer_drag.register(self._dispatcher)
-        self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit)
+        self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit, when_idle=True)
         self._dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel)
         self._dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, self._release_secure_input_panel)
         self._dispatcher.register_action(LINUX_OPEN_PERMISSION_SETUP, decode_empty, self._open_permission_setup)
@@ -131,29 +132,36 @@ class ApplicationRuntime:
         Startup windows are shown through the queue, so every window is built
         inside a queue drain like the windows profiles show later. Shutdown
         closes the queue, then stops the profile, so its callbacks never see
-        teardown.
+        teardown. The shutdown steps are registered first: when a step of
+        starting fails, they run before the error is raised.
         """
 
-        self.context.engine.profile.start(self._profile)
-        theme = self._profile.theme
-        self.context.engine.bindings.bind(
-            theme.decode,
-            "theme",
-            lambda values: apply_theme(self._app, values),
-            fallback=theme.initial,
-        )
-        self._attachments.start(self._profile)
-        for service in self._services.autostart_services():
-            service.start(self.context)
-        if self._show_startup_windows:
-            self._dispatcher.dispatch(
-                *(window_show(window.id) for window in self._profile.windows if window.show_on_start)
-            )
         self._quit_controller.register_quit_callback(self._dispatcher.close)
-        self._quit_controller.register_quit_callback(self.context.engine.profile.stop)
+        self._quit_controller.register_quit_callback(self.engine.profile.stop)
         for service in self._services.services():
             self._quit_controller.register_quit_callback(service.stop)
         self._quit_controller.register_quit_callback(self._window_manager.close_all)
+        try:
+            self.engine.profile.start(self._profile)
+            theme = self._profile.theme
+            self.engine.bindings.bind(
+                theme.decode,
+                "theme",
+                lambda values, _previous: apply_theme(
+                    self._app, values, base_palette=self._base_palette, base_font=self._base_font
+                ),
+                fallback=theme.initial,
+            )
+            self._attachments.start(self._profile)
+            for service in self._services.autostart_services():
+                service.start(self._dispatcher)
+            if self._show_startup_windows:
+                self._dispatcher.dispatch(
+                    *(window_show(window.id) for window in self._profile.windows if window.show_on_start)
+                )
+        except BaseException:
+            self._quit_controller.shutdown(1)
+            raise
         self._quit_controller.install_signal_handlers()
         if self._keyboard in self._services.autostart_services():
             QTimer.singleShot(0, self._keyboard.publish_status)
@@ -163,7 +171,7 @@ class ApplicationRuntime:
         window_config = self._profile.window(window_id)
 
         def build() -> RuntimeWindow:
-            return build_profile_window(window_config, self.context, attachments=self._attachments.for_window(window_id))
+            return build_profile_window(window_config, self.engine, attachments=self._attachments.for_window(window_id))
 
         return build
 
@@ -193,10 +201,8 @@ class ApplicationRuntime:
         return []
 
     def _quit(self, arguments: AppQuitArguments) -> MessageResult:
-        """Shut down once nothing else is waiting, so every earlier request finishes first."""
+        """Shut down; the action runs once nothing else is waiting, so every earlier request finishes first."""
 
-        if self._dispatcher.has_pending():
-            return [app_quit(arguments.exit_code)]
         self._quit_controller.shutdown(arguments.exit_code)
         return []
 
@@ -225,7 +231,7 @@ class ApplicationRuntime:
             self._window_manager.show(window_id).set_close_enabled(False)
             return [secure_input_panel_prepared()]
         try:
-            self._keyboard.start(self.context)
+            self._keyboard.start(self._dispatcher)
             if not self._keyboard.ready:
                 raise RuntimeError(f"Keyboard output is unavailable: {self._keyboard.status_text}")
             self._keyboard.publish_status()

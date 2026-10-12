@@ -24,7 +24,7 @@ from ..runtime.decoding import EmptyArguments
 from ..runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
-    from ..runtime.context import Context
+    from ..runtime.dispatcher import Dispatcher
 
 _logger = logging.getLogger(__name__)
 
@@ -34,17 +34,16 @@ class SecureInputPanelWorkerService(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._notifier: QSocketNotifier | None = None
         self._buffer = bytearray()
         self._pending_action: str | None = None
         self._unsubscribes: list[Callable[[], None]] = []
 
-    def start(self, context: Context) -> None:
+    def start(self, dispatcher: Dispatcher) -> None:
         """Start reading line-delimited commands from the Rust supervisor."""
 
-        self._context = context
-        dispatcher = context.dispatcher
+        self._dispatcher = dispatcher
         self._unsubscribes = [
             dispatcher.add_event_handler(SECURE_INPUT_PANEL_PREPARED, self._handle_prepared),
             dispatcher.add_event_handler(SECURE_INPUT_PANEL_RELEASED, self._handle_released),
@@ -57,7 +56,7 @@ class SecureInputPanelWorkerService(QObject):
     def stop(self) -> None:
         """Stop reading supervisor commands."""
 
-        self._context = None
+        self._dispatcher = None
         self._pending_action = None
         for unsubscribe in self._unsubscribes:
             unsubscribe()
@@ -86,17 +85,17 @@ class SecureInputPanelWorkerService(QObject):
             self._handle_command(raw.decode("ascii", "replace"))
 
     def _handle_command(self, command: str) -> None:
-        context = self._context
-        if context is None:
+        dispatcher = self._dispatcher
+        if dispatcher is None:
             self._respond("ERROR")
             return
         try:
             if command == "PREPARE":
                 self._pending_action = SECURE_INPUT_PANEL_PREPARE
-                context.dispatcher.dispatch(secure_input_panel_prepare())
+                dispatcher.dispatch(secure_input_panel_prepare())
             elif command == "RELEASE":
                 self._pending_action = SECURE_INPUT_PANEL_RELEASE
-                context.dispatcher.dispatch(secure_input_panel_release())
+                dispatcher.dispatch(secure_input_panel_release())
             elif command == "PING":
                 self._respond("PONG")
             else:
@@ -133,5 +132,5 @@ class SecureInputPanelWorkerService(QObject):
     def _exit(self, status: int) -> None:
         """Quit through the queue so the normal shutdown sequence runs."""
 
-        if self._context is not None:
-            self._context.dispatcher.dispatch(app_quit(status))
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch(app_quit(status))

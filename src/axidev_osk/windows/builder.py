@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QCloseEvent, QHideEvent, QMoveEvent, QResizeEvent, QShowEvent
@@ -14,13 +15,15 @@ from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, Point
 from ..config.profile import Live, WindowConfig, WindowValues
 from ..nodes import apply_style
 from ..runtime.app_messages import window_close_requested, window_drag_ended, window_drag_started
-from ..runtime.context import Context
 from ..runtime.engine_messages import window_state_changed
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 from .surface import RootSurface
+
+if TYPE_CHECKING:
+    from ..runtime.engine import Engine
 
 
 class _WindowInputBlocker(QObject):
@@ -78,7 +81,7 @@ class RuntimeWindow(QMainWindow):
         chrome: ChromeConfig,
         values: Live[WindowValues],
         build_content: Callable[[], QWidget],
-        context: Context,
+        engine: Engine,
         dwell: DwellClickConfig | None = None,
     ) -> None:
         """Create a generic runtime window around content built by ``build_content``.
@@ -90,8 +93,8 @@ class RuntimeWindow(QMainWindow):
 
         super().__init__()
         self._window_id = window_id
-        self._context = context
-        self._values: WindowValues | None = None
+        self._engine = engine
+        self._default_close = values.initial.default_close
         self._input_blocker: _WindowInputBlocker | None = None
         self._minimum_size = values.initial.minimum_size
         self._chrome_widgets: OverlayChromeWidgets | None = None
@@ -119,12 +122,12 @@ class RuntimeWindow(QMainWindow):
                         on_resize=self._overlay.resize_by,
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
-                            lambda: context.dispatcher.dispatch(window_drag_started(window_id))
+                            lambda: engine.dispatcher.dispatch(window_drag_started(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
                         on_drag_ended=(
-                            lambda: context.dispatcher.dispatch(window_drag_ended(window_id))
+                            lambda: engine.dispatcher.dispatch(window_drag_ended(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
@@ -133,7 +136,7 @@ class RuntimeWindow(QMainWindow):
             if dwell is not None:
                 self._dwell_click = DwellClickController(self, central, dwell)
             self._opacity = WindowOpacityController(self)
-            unbind = context.engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
+            unbind = engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
             self.destroyed.connect(lambda _object=None: unbind())
             self.apply_startup_size(minimum_size=self._minimum_size)
         except Exception:
@@ -164,11 +167,9 @@ class RuntimeWindow(QMainWindow):
     def default_close(self) -> bool:
         """Whether closing this window follows the engine's close rule."""
 
-        values = self._values
-        return values.default_close if values is not None else True
+        return self._default_close
 
-    def _apply_values(self, values: WindowValues) -> None:
-        previous = self._values
+    def _apply_values(self, values: WindowValues, previous: WindowValues | None) -> None:
         if previous is None or values.title != previous.title:
             self.setWindowTitle(values.title)
             if self._chrome_widgets is not None:
@@ -180,9 +181,9 @@ class RuntimeWindow(QMainWindow):
             self._install_input_blocker()
         elif not values.input_blocked:
             self._remove_input_blocker()
-        self._values = values
+        self._default_close = values.default_close
+        self._minimum_size = values.minimum_size
         if previous is not None and values.minimum_size != previous.minimum_size:
-            self._minimum_size = values.minimum_size
             self.apply_startup_size(minimum_size=values.minimum_size)
 
     @property
@@ -271,7 +272,7 @@ class RuntimeWindow(QMainWindow):
         if removed_output is not None and removed_output():
             event.ignore()
             return
-        self._context.dispatcher.dispatch(window_close_requested(self._window_id))
+        self._engine.dispatcher.post(window_close_requested(self._window_id))
         event.ignore()
 
     def showEvent(self, event: QShowEvent) -> None:  # type: ignore[override]
@@ -309,7 +310,8 @@ class RuntimeWindow(QMainWindow):
 
     def _report_state(self) -> None:
         x, y = self._overlay.position()
-        self._context.dispatcher.dispatch(
+        # Posted, so profile callbacks never run inside this window's Qt event handlers.
+        self._engine.dispatcher.post(
             window_state_changed(
                 self._window_id,
                 visible=self.isVisible(),
@@ -324,7 +326,7 @@ class RuntimeWindow(QMainWindow):
 
 def build_profile_window(
     config: WindowConfig,
-    context: Context,
+    engine: Engine,
     *,
     attachments: WindowAttachments | None = None,
 ) -> RuntimeWindow:
@@ -345,7 +347,7 @@ def build_profile_window(
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(context.engine.node_builder.build(config.content))
+        layout.addWidget(engine.node_builder.build(config.content))
         return surface
 
     window = RuntimeWindow(
@@ -354,7 +356,7 @@ def build_profile_window(
         chrome=config.chrome,
         values=config.values,
         build_content=build_content,
-        context=context,
+        engine=engine,
         dwell=installed.dwell,
     )
     for locator in installed.pointer_locators:

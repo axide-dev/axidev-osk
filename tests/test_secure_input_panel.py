@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from axidev_osk.messages import MessageResult
@@ -42,12 +41,11 @@ class SecureInputPanelWorkerServiceTests(unittest.TestCase):
         self.dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, prepare)
         self.dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, release)
         self.service = SecureInputPanelWorkerService()
-        context = SimpleNamespace(dispatcher=self.dispatcher)
         with (
             patch("axidev_osk.services.secure_input_panel.QSocketNotifier"),
             patch.object(self.service, "_respond") as respond,
         ):
-            self.service.start(context)  # type: ignore[arg-type]
+            self.service.start(self.dispatcher)
         respond.assert_called_once_with("READY")
 
     def test_worker_commands_dispatch_runtime_actions_and_answer_from_events(self) -> None:

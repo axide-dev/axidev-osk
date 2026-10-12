@@ -29,21 +29,26 @@ class HotCornersOptions:
 
 @dataclass(frozen=True, slots=True)
 class AttachmentKind:
-    """How one attachment kind reads its fixed target window and its options."""
+    """How one attachment kind reads its fixed target window and its options.
+
+    ``limit`` is ``"window"`` when a window takes at most one attachment of the
+    kind, ``"profile"`` when a profile does, and ``None`` when any number fit.
+    """
 
     name: str
     decode_target: Callable[[ConfigReader], str | None]
     decode_options: Callable[[ConfigReader], object]
+    limit: str | None = None
 
 
 AttachmentKindRegistry = KindRegistry[AttachmentKind]
 
 
 def register_builtin_attachments(registry: AttachmentKindRegistry) -> None:
-    registry.register(AttachmentKind("dwell", _window_target, _decode_dwell))
+    registry.register(AttachmentKind("dwell", _window_target, _decode_dwell, limit="window"))
     registry.register(AttachmentKind("pointer_locator", _window_target, _decode_pointer_locator))
-    registry.register(AttachmentKind("hot_corners", _no_target, _decode_hot_corners))
-    registry.register(AttachmentKind("secure_input_panel", _window_target, _no_options))
+    registry.register(AttachmentKind("hot_corners", _no_target, _decode_hot_corners, limit="profile"))
+    registry.register(AttachmentKind("secure_input_panel", _window_target, _no_options, limit="profile"))
 
 
 def _window_target(reader: ConfigReader) -> str:

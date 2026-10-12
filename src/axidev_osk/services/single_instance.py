@@ -12,7 +12,7 @@ from PySide6.QtCore import QLockFile, QObject
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from ..runtime.app_messages import app_activated
-from ..runtime.context import Context
+from ..runtime.dispatcher import Dispatcher
 
 
 class ExistingInstanceActivated(RuntimeError):
@@ -34,12 +34,12 @@ class WindowsSingleInstanceService(QObject):
 
     def __init__(self, *, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._lock: QLockFile | None = None
         self._server: QLocalServer | None = None
         self._name: str | None = None
 
-    def start(self, context: Context) -> None:
+    def start(self, dispatcher: Dispatcher) -> None:
         if sys.platform != "win32":
             return
 
@@ -58,7 +58,7 @@ class WindowsSingleInstanceService(QObject):
         if not server.listen(name):
             lock.unlock()
             raise RuntimeError(f"Unable to create the Axidev OSK single-instance server: {server.errorString()}")
-        self._context = context
+        self._dispatcher = dispatcher
         self._lock = lock
         self._server = server
         self._name = name
@@ -71,7 +71,7 @@ class WindowsSingleInstanceService(QObject):
             QLocalServer.removeServer(self._name)
         if self._lock is not None:
             self._lock.unlock()
-        self._context = None
+        self._dispatcher = None
         self._lock = None
         self._server = None
         self._name = None
@@ -91,8 +91,8 @@ class WindowsSingleInstanceService(QObject):
 
     def _activate_running_window(self) -> None:
         server = self._server
-        context = self._context
-        if server is None or context is None:
+        dispatcher = self._dispatcher
+        if server is None or dispatcher is None:
             return
 
         received_request = False
@@ -102,4 +102,4 @@ class WindowsSingleInstanceService(QObject):
             connection.deleteLater()
             received_request = True
         if received_request:
-            context.dispatcher.dispatch(app_activated())
+            dispatcher.dispatch(app_activated())

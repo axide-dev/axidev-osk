@@ -17,8 +17,9 @@ from .state import StateTree
 
 @dataclass(frozen=True, slots=True)
 class Engine:
-    """State, profile functions, node kinds, and attachment kinds shared by every subsystem."""
+    """The queue, state, profile functions, node kinds, and attachment kinds shared by every subsystem."""
 
+    dispatcher: Dispatcher
     functions: FunctionRegistry
     profile: ProfileRuntime
     nodes: NodeKindRegistry
@@ -64,6 +65,7 @@ def build_engine(
     attachments = AttachmentKindRegistry()
     register_builtin_attachments(attachments)
     return Engine(
+        dispatcher=dispatcher,
         functions=functions,
         profile=profile,
         nodes=nodes,

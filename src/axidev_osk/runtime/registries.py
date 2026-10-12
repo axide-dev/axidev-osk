@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
-    from .context import Context
+    from .dispatcher import Dispatcher
 
 
 RuntimeT = TypeVar("RuntimeT")
@@ -15,8 +15,8 @@ RuntimeT = TypeVar("RuntimeT")
 class RuntimeService(Protocol):
     """Runtime-managed service lifecycle contract."""
 
-    def start(self, context: "Context") -> None:
-        """Start the service using the bound runtime context."""
+    def start(self, dispatcher: "Dispatcher") -> None:
+        """Start the service; it sends what it observes through ``dispatcher``."""
 
     def stop(self) -> None:
         """Stop the service and release owned resources."""

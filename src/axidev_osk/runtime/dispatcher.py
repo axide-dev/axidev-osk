@@ -51,6 +51,7 @@ def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
 class _ActionDefinition(Generic[DecodedT]):
     decoder: Decoder[DecodedT]
     handler: MessageHandler[DecodedT]
+    when_idle: bool
 
 
 @dataclass(slots=True)
@@ -65,15 +66,18 @@ class Dispatcher:
     Handlers run only on the thread that created the dispatcher. Messages
     sent from any other thread wait in a locked inbox, and the ``wake``
     callback set with ``set_wake`` asks the owner thread to call
-    ``process_pending``. The dispatcher owns ``action.failed``, the event it
-    reports when an action fails. Once closed, it drops every waiting and
-    later message.
+    ``process_pending``. An action registered ``when_idle`` waits until no
+    other message is queued or in the inbox; such actions then run one at a
+    time in the order they arrived. The dispatcher owns ``action.failed``, the
+    event it reports when an action fails. Once closed, it drops every waiting
+    and later message.
     """
 
     def __init__(self) -> None:
         self._actions: dict[str, _ActionDefinition[object]] = {}
         self._events: dict[str, _EventDefinition[object]] = {}
         self._queue: deque[RuntimeMessage] = deque()
+        self._idle: deque[RuntimeAction] = deque()
         self._draining = False
         self._owner_thread = threading.get_ident()
         self._inbox: deque[RuntimeMessage] = deque()
@@ -100,12 +104,14 @@ class Dispatcher:
         name: str,
         decoder: Decoder[DecodedT],
         handler: MessageHandler[DecodedT],
+        *,
+        when_idle: bool = False,
     ) -> None:
-        """Register one action definition."""
+        """Register one action definition; ``when_idle`` runs it only once nothing else is waiting."""
 
         if name in self._actions:
             raise ValueError(f"Action {name!r} is already registered")
-        definition = _ActionDefinition(decoder=decoder, handler=handler)
+        definition = _ActionDefinition(decoder=decoder, handler=handler, when_idle=when_idle)
         self._actions[name] = cast(_ActionDefinition[object], definition)
 
     def register_event(
@@ -146,19 +152,20 @@ class Dispatcher:
         return name in self._events
 
     def has_pending(self) -> bool:
-        """Whether any message is waiting, in the queue or in the inbox."""
+        """Whether any message is waiting, in the queue, the inbox, or among idle actions."""
 
         with self._inbox_lock:
-            return bool(self._queue or self._inbox)
+            return bool(self._queue or self._inbox or self._idle)
 
     def close(self) -> None:
         """Drop every waiting message and refuse later ones; used once the app shuts down."""
 
         self._closed = True
         with self._inbox_lock:
-            dropped = len(self._queue) + len(self._inbox)
+            dropped = len(self._queue) + len(self._inbox) + len(self._idle)
             self._inbox.clear()
         self._queue.clear()
+        self._idle.clear()
         if dropped:
             _logger.info("Dropped %d runtime messages at shutdown", dropped)
 
@@ -186,15 +193,28 @@ class Dispatcher:
             _logger.info("Dropped %d runtime messages sent after shutdown", len(messages))
             return
         if threading.get_ident() != self._owner_thread:
-            with self._inbox_lock:
-                self._inbox.extend(messages)
-            wake = self._wake
-            if wake is not None:
-                wake()
+            self.post(*messages)
             return
         self._queue.extend(messages)
         if not self._draining:
             self._drain()
+
+    def post(self, *messages: RuntimeMessage) -> None:
+        """Queue messages for a later drain on the owner thread, from any thread.
+
+        Qt event handlers post what they observe, so a drain never runs
+        inside the event that reported it. During a drain the messages run
+        once the queue empties; otherwise they wait for the wake callback.
+        """
+
+        if self._closed:
+            _logger.info("Dropped %d runtime messages sent after shutdown", len(messages))
+            return
+        with self._inbox_lock:
+            self._inbox.extend(messages)
+        wake = self._wake
+        if wake is not None:
+            wake()
 
     def _take_inbox(self) -> None:
         with self._inbox_lock:
@@ -206,25 +226,31 @@ class Dispatcher:
         processed = 0
         try:
             while not self._closed:
+                idle = False
                 if not self._queue:
                     self._take_inbox()
                     if not self._queue:
-                        break
-                current = self._queue.popleft()
+                        if not self._idle:
+                            break
+                        idle = True
+                current = self._idle.popleft() if idle else self._queue.popleft()
                 processed += 1
                 if processed % _DRAIN_WARNING_INTERVAL == 0:
                     _logger.warning("Runtime queue drain has processed %d messages without returning", processed)
                 if isinstance(current, RuntimeAction):
-                    self._process_action(current)
+                    self._process_action(current, idle=idle)
                 else:
                     self._process_event(current)
         finally:
             self._draining = False
 
-    def _process_action(self, action: RuntimeAction) -> None:
+    def _process_action(self, action: RuntimeAction, *, idle: bool) -> None:
         definition = self._actions.get(action.action)
         if definition is None:
             self._fail_action(action, stage="lookup", error=ValueError(f"Action {action.action!r} is not registered"))
+            return
+        if definition.when_idle and not idle:
+            self._idle.append(action)
             return
         try:
             decoded = definition.decoder(action.arguments)
@@ -251,7 +277,6 @@ class Dispatcher:
                 self._append_results(handler(copy_data_map(event.arguments) if raw else decoded))
             except Exception:
                 _logger.exception("Event handler failed for %s with arguments %r", event.event, event.arguments)
-                return
 
     def _append_results(self, messages: MessageResult) -> None:
         results = list(messages)

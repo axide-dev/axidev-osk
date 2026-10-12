@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QObject, Signal
@@ -15,7 +14,6 @@ from axidev_osk.runtime.app_messages import (
 from axidev_osk.runtime.decoding import EmptyArguments
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.runtime.event_handlers import register_display_recovery
-from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.runtime.window_manager import WindowManager
 from axidev_osk.services.displays import DisplayService
 
@@ -51,12 +49,11 @@ class DisplayRecoveryTests(unittest.TestCase):
             DISPLAY_CONFIGURATION_CHANGED,
             lambda event: events.append(event) or [],
         )
-        context = SimpleNamespace(dispatcher=dispatcher)
         app = Application()
         service = DisplayService()
         with patch("axidev_osk.services.displays.QGuiApplication.instance", return_value=app):
             try:
-                service.start(context)
+                service.start(dispatcher)
                 self.app.processEvents()
                 events.clear()
                 removed = app.outputs.pop()
@@ -90,7 +87,7 @@ class DisplayRecoveryTests(unittest.TestCase):
             finally:
                 service.stop()
 
-    def test_runtime_refreshes_existing_windows_and_services_without_building_windows(self) -> None:
+    def test_runtime_refreshes_existing_windows_without_building_windows(self) -> None:
         keyboard = Mock()
         other_window = Mock()
         unbuilt = Mock()
@@ -103,16 +100,12 @@ class DisplayRecoveryTests(unittest.TestCase):
         )
         manager.get_or_create("keyboard")
         manager.get_or_create("other")
-        hot_corners = Mock()
-        services = ServiceRegistry()
-        services.register("hot_corner", hot_corners)
         dispatcher = Dispatcher()
         register_app_events(dispatcher)
-        register_display_recovery(dispatcher, manager, services)
+        register_display_recovery(dispatcher, manager)
         dispatcher.dispatch(display_configuration_changed())
         unbuilt.assert_not_called()
         keyboard.refresh_screen_configuration.assert_called_once_with()
         other_window.refresh_screen_configuration.assert_called_once_with()
-        hot_corners.refresh_screen_configuration.assert_called_once_with()
         self.assertIs(manager.get("keyboard"), keyboard)
         self.assertIsNone(manager.get("unbuilt"))

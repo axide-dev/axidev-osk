@@ -3,9 +3,10 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.registries import ServiceRegistry
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.services import register_services
 from axidev_osk.services.displays import DisplayService
 from axidev_osk.services.keyboard import KeyboardService
@@ -17,8 +18,8 @@ class RecordingService:
         self._name = name
         self._calls = calls
 
-    def start(self, context) -> None:
-        del context
+    def start(self, engine) -> None:
+        del engine
         self._calls.append(f"start:{self._name}")
 
     def stop(self) -> None:
@@ -74,7 +75,7 @@ class ServiceRegistryTests(unittest.TestCase):
     def test_test_context_binds_keyboard_without_starting_it(self) -> None:
         backend = RecordingBackend()
 
-        make_test_context(backend)
+        make_test_engine(backend)
 
         self.assertEqual(backend.initialized, 0)
         self.assertEqual(len(backend.observers), 1)
@@ -88,6 +89,7 @@ class ServiceRegistryTests(unittest.TestCase):
         services.register("second", RecordingService("second", calls))
         runtime = ApplicationRuntime(
             qt_app(),
+            root_config=build_default_config(),
             services=services,
             confirm_quit=False,
             show_startup_windows=False,

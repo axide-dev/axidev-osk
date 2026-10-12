@@ -22,7 +22,7 @@ from axidev_osk.runtime.app_messages import (
     decode_window,
 )
 from axidev_osk.runtime.decoding import decode_empty
-from axidev_osk.runtime.context import Context
+from axidev_osk.runtime.engine import Engine
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.services.keyboard.io import KeyPressHandle
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
@@ -129,7 +129,7 @@ class FakeOverlay:
 def build_window(
     test: unittest.TestCase,
     config: WindowConfig,
-    context: Context,
+    engine: Engine,
     *,
     attachments: WindowAttachments | None = None,
     overlay: object | None = None,
@@ -137,7 +137,7 @@ def build_window(
     """Build a profile window with a fake overlay; the window is deleted when ``test`` ends."""
 
     with patch("axidev_osk.windows.builder.configure_always_on_top_window", return_value=overlay or FakeOverlay()):
-        window = build_profile_window(config, context, attachments=attachments)
+        window = build_profile_window(config, engine, attachments=attachments)
     test.addCleanup(window.deleteLater)
     return window
 
@@ -163,7 +163,7 @@ def record_app_actions(dispatcher: Dispatcher) -> list[tuple[str, DataMap]]:
     """Register the window and app actions with their real decoders and record each one instead of running it.
 
     ``ApplicationRuntime`` owns these actions; profile tests built on
-    ``make_test_context`` record them to check what a profile asks for.
+    ``make_test_engine`` record them to check what a profile asks for.
     """
 
     recorded: list[tuple[str, DataMap]] = []

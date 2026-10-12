@@ -126,7 +126,7 @@ class StateTree:
         return deepcopy(self._lookup(path))
 
     def set(self, path: StatePath, value: DataValue) -> bool:
-        """Store ``value`` at ``path`` and return whether the tree changed.
+        """Store ``value`` at ``path`` and return whether the tree changed, including a map entry it created.
 
         ``None`` resets a variable or record field to its default and removes a
         map entry, the way Lua's ``nil`` removes a table field.
@@ -149,15 +149,17 @@ class StateTree:
         container = self._container(slot.variable)
         name = slot.variable[-1]
         var_type: VarType = self._variables[slot.variable].type
+        created = False
         for segment in path[len(slot.variable):]:
             child = container[name]
             assert isinstance(child, dict)
             var_type = _child_type(var_type, segment)
             if child.get(segment) is None:
                 child[segment] = empty_value(var_type)
+                created = True
             container, name = child, segment
         if data_equal(container[name], value):
-            return False
+            return created
         container[name] = value
         return True
 

@@ -12,7 +12,7 @@ from PySide6.QtTest import QTest
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import APP_ACTIVATED
 from axidev_osk.runtime.registries import ServiceRegistry
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.services import register_services
 from axidev_osk.services.single_instance import ExistingInstanceActivated, WindowsSingleInstanceService
 from support import RecordingBackend, qt_app
@@ -29,24 +29,24 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
 
     def test_service_is_inactive_off_windows(self) -> None:
         service = WindowsSingleInstanceService(parent=qt_app())
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
 
         with patch("axidev_osk.services.single_instance.sys.platform", "linux"):
-            service.start(context)
+            service.start(engine)
 
         self.assertIsNone(service._server)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows local-server integration test")
     def test_second_launch_activates_primary_instance(self) -> None:
         qt_app()
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         activations: list[DataMap] = []
 
         def record(event: DataMap) -> MessageResult:
             activations.append(event)
             return []
 
-        context.dispatcher.add_raw_event_handler(APP_ACTIVATED, record)
+        engine.dispatcher.add_raw_event_handler(APP_ACTIVATED, record)
         primary = WindowsSingleInstanceService()
         secondary = WindowsSingleInstanceService()
         server_name = f"axidev-osk-test-{uuid4().hex}"
@@ -58,10 +58,10 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
             "axidev_osk.services.single_instance._lock_path",
             return_value=Path(temp_dir) / "single-instance.lock",
         ):
-            primary.start(context)
+            primary.start(engine)
             try:
                 with self.assertRaises(ExistingInstanceActivated):
-                    secondary.start(context)
+                    secondary.start(engine)
                 QTest.qWait(100)
             finally:
                 secondary.stop()

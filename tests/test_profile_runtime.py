@@ -44,6 +44,9 @@ class FakeNodeKind:
     def decode_child_placement(self, reader: ConfigReader) -> object:
         return reader.integer("slot", 0)
 
+    def check_options(self, reader: ConfigReader, options: object, children: tuple[str, ...]) -> None:
+        return None
+
 
 def var(var_type: object, default: object = None) -> dict[str, object]:
     return {"var": var_type} if default is None else {"var": var_type, "default": default}
@@ -142,6 +145,13 @@ class StateTreeTests(unittest.TestCase):
         self.assertEqual(state.get(("held",)), {})
         self.assertIsNone(state.get(("held", "B")))
         self.assertFalse(state.set(("held", "B"), None))
+
+    def test_creating_a_map_entry_counts_as_a_change_even_at_its_default(self) -> None:
+        state = tree({"m": var({"map": {"record": {"f": var("boolean", False)}}})})
+
+        self.assertTrue(state.set(("m", "x", "f"), False))
+        self.assertEqual(state.get(("m",)), {"x": {"f": False}})
+        self.assertFalse(state.set(("m", "x", "f"), False))
 
     def test_record_fields_reset_to_their_own_defaults(self) -> None:
         state = tree({"size": var({"record": {"width": var("integer", 10), "height": var("integer", 20)}})})
@@ -428,7 +438,7 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.profile_runtime.set_observed(("input", "keys", "A"), True)
         self.dispatcher.dispatch(state_set("opacity", 0.5), state_set("mode", "b"))
         applied: list[object] = []
-        self.tracker.bind(reads(lambda state: state.mode), "node:a.label", applied.append, fallback=None)
+        self.tracker.bind(reads(lambda state: state.mode), "node:a.label", lambda value, previous: applied.append(value), fallback=None)
         self.changes.clear()
 
         self._start(shared, state={"mode": var("string", "a")})
@@ -489,7 +499,7 @@ class ProfileRuntimeTests(unittest.TestCase):
             calls.append(bool(shift))
             return "A" if shift else "a"
 
-        self.tracker.bind(reads(legend), "node:a.label", applied.append, fallback=None)
+        self.tracker.bind(reads(legend), "node:a.label", lambda value, previous: applied.append(value), fallback=None)
         self.dispatcher.dispatch(state_set("other", 1))
         self.dispatcher.dispatch(state_set("shift", True))
 
@@ -505,7 +515,7 @@ class ProfileRuntimeTests(unittest.TestCase):
                 raise ValueError("no mode yet")
             return state.mode.upper()  # type: ignore[attr-defined]
 
-        self.tracker.bind(reads(upper_mode), "node:a.label", applied.append, fallback="?")
+        self.tracker.bind(reads(upper_mode), "node:a.label", lambda value, previous: applied.append(value), fallback="?")
         self.dispatcher.dispatch(state_set("mode", "abc"))
 
         self.assertEqual(applied, ["?", "ABC"])
@@ -523,12 +533,62 @@ class ProfileRuntimeTests(unittest.TestCase):
                 raise ConfigError("test.size must be at least 0")
             return size
 
-        self.tracker.bind(decode, "node:a", applied.append, fallback=0)
+        self.tracker.bind(decode, "node:a", lambda value, previous: applied.append(value), fallback=0)
         self.dispatcher.dispatch(state_set("size", -1))
         self.dispatcher.dispatch(state_set("size", 2))
 
         self.assertEqual(applied, [1, 2])
         self.assertEqual([(failure.function, failure.message) for failure in self.failures], [(None, "test.size must be at least 0")])
+
+
+    def test_apply_gets_the_values_it_applied_before(self) -> None:
+        self._start(state={"mode": var("string", "a")})
+        calls: list[tuple[object, object]] = []
+
+        self.tracker.bind(reads(lambda state: state.mode), "node:a", lambda value, previous: calls.append((value, previous)), fallback=None)
+        self.dispatcher.dispatch(state_set("mode", "b"))
+
+        self.assertEqual(calls, [("a", None), ("b", "a")])
+
+    def test_true_and_one_are_different_values(self) -> None:
+        self._start(state={"flag": var("boolean", True)})
+        applied: list[object] = []
+
+        def decode(resolve: Resolver) -> object:
+            return 1 if resolve(lambda state: state.flag, "test.flag") is False else True
+
+        self.tracker.bind(decode, "node:a", lambda value, previous: applied.append(value), fallback=None)
+        self.dispatcher.dispatch(state_set("flag", False))
+
+        self.assertEqual(applied, [True, 1])
+
+    def test_a_fallback_that_cannot_apply_raises_once_and_stays_unbound(self) -> None:
+        self._start(state={"mode": var("string", "a")})
+        applied: list[object] = []
+
+        def apply(value: object, previous: object) -> None:
+            raise ValueError(f"cannot apply {value}")
+
+        with self.assertRaisesRegex(ValueError, "cannot apply fallback"), self.assertLogs(level="ERROR"):
+            self.tracker.bind(reads(lambda state: state.mode), "node:a", apply, fallback="fallback")
+        self.dispatcher.dispatch(state_set("mode", "b"))
+
+        self.assertEqual((applied, self.failures), ([], []))
+
+    def test_a_failure_handler_that_changes_state_reaches_the_new_binding(self) -> None:
+        self._start(state={"mode": var("string", "")})
+        applied: list[object] = []
+        self.dispatcher.add_event_handler(CALLBACK_FAILED, lambda failure: [state_set("mode", "fixed")])
+
+        def upper_mode(state: object) -> str:
+            if not state.mode:  # type: ignore[attr-defined]
+                raise ValueError("no mode yet")
+            return state.mode.upper()  # type: ignore[attr-defined]
+
+        with self.assertLogs(level="ERROR"):
+            self.tracker.bind(reads(upper_mode), "node:a", lambda value, previous: applied.append(value), fallback="?")
+
+        self.assertEqual(applied, ["?", "FIXED"])
 
 
 if __name__ == "__main__":

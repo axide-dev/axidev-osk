@@ -16,7 +16,7 @@ from ...runtime.engine_messages import (
 from .io import AxidevIoKeyboardBackend, KeyObservation, KeyPressHandle
 
 if TYPE_CHECKING:
-    from ...runtime.context import Context
+    from ...runtime.dispatcher import Dispatcher
 
 Unsubscribe = Callable[[], None]
 
@@ -35,19 +35,21 @@ class KeyboardService:
     def __init__(self, backend: AxidevIoKeyboardBackend | None = None) -> None:
         self._backend = backend or AxidevIoKeyboardBackend()
         self._shutdown = False
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._held: dict[str, KeyPressHandle] = {}
         self._observation_unsubscribe: Unsubscribe | None = None
 
-    def bind_context(self, context: "Context") -> None:
-        self._context = context
+    def bind_dispatcher(self, dispatcher: "Dispatcher") -> None:
+        """Send observations and status through ``dispatcher`` without starting output."""
+
+        self._dispatcher = dispatcher
         if self._observation_unsubscribe is None:
             self._observation_unsubscribe = self._backend.add_observation_listener(self._handle_observation)
 
-    def start(self, context: "Context") -> None:
+    def start(self, dispatcher: "Dispatcher") -> None:
         """Bind the runtime and initialize output; the runtime publishes status when ready."""
 
-        self.bind_context(context)
+        self.bind_dispatcher(dispatcher)
         self.initialize()
 
     def stop(self) -> None:
@@ -77,9 +79,9 @@ class KeyboardService:
     def publish_status(self) -> None:
         """Report backend readiness as an observation, plus a setup request if needed."""
 
-        if self._context is None:
+        if self._dispatcher is None:
             return
-        dispatcher = self._context.dispatcher
+        dispatcher = self._dispatcher
         dispatcher.dispatch(
             keyboard_status_changed(
                 self.ready,
@@ -127,7 +129,7 @@ class KeyboardService:
             del self._held[canonical]
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        self._backend.tap(key, mods)
+        self._backend.tap(self._backend.canonical_key(key), mods)
 
     def type_text(self, text: str) -> None:
         self._backend.type_text(text)
@@ -140,12 +142,12 @@ class KeyboardService:
                 self._release_canonical(canonical)
             except Exception:
                 _logger.exception("Failed to release %s during reset", canonical)
-        if self._context is not None:
-            self._context.dispatcher.dispatch(keyboard_reset())
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch(keyboard_reset())
 
     def _handle_observation(self, observation: KeyObservation) -> None:
         # Called on the listener thread; the dispatcher hands it to its owner thread.
-        if self._context is not None:
-            self._context.dispatcher.dispatch(
+        if self._dispatcher is not None:
+            self._dispatcher.dispatch(
                 input_key(observation.key, observation.text, observation.modifiers, observation.pressed)
             )

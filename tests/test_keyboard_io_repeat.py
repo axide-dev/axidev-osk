@@ -73,8 +73,8 @@ class KeyboardIoRepeatTests(unittest.TestCase):
     def test_tap_and_type_text_use_the_sender(self) -> None:
         backend, sender = self._ready_backend()
 
-        backend.tap("a", ())
-        backend.tap("a", ("Ctrl", "Alt"))
+        backend.tap("A", ())
+        backend.tap("A", ("Ctrl", "Alt"))
         backend.type_text("moo")
 
         self.assertEqual(

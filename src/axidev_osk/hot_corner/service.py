@@ -5,7 +5,10 @@ from __future__ import annotations
 from PySide6.QtCore import QObject
 
 from ..config.models import HotCornerConfig
-from ..runtime.context import Context
+from ..messages import MessageResult
+from ..runtime.app_messages import DISPLAY_CONFIGURATION_CHANGED
+from ..runtime.decoding import EmptyArguments
+from ..runtime.dispatcher import Dispatcher, Unsubscribe
 from .controller import HotCornerWindowToggleController
 
 
@@ -16,7 +19,8 @@ class HotCornerService:
         """Create an unstarted hot-corner service."""
 
         self._parent = parent
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
+        self._unsubscribe: Unsubscribe | None = None
         self._controller: HotCornerWindowToggleController | None = None
         self._settings: HotCornerConfig | None = None
         self._corners: frozenset[str] | None = None
@@ -26,33 +30,37 @@ class HotCornerService:
 
         self._settings = settings
         self._corners = corners
-        if self._context is not None:
+        if self._dispatcher is not None:
             self._restart()
 
-    def start(self, context: Context) -> None:
-        """Start corner sensors when the profile configured a hot_corners attachment."""
+    def start(self, dispatcher: Dispatcher) -> None:
+        """Start corner sensors when the profile configured a hot_corners attachment, and follow display changes."""
 
-        self._context = context
+        self._dispatcher = dispatcher
+        self._unsubscribe = dispatcher.add_event_handler(DISPLAY_CONFIGURATION_CHANGED, self._display_changed)
         self._restart()
 
     def stop(self) -> None:
         """Stop and forget the controller; ``start`` builds a new one."""
 
-        self._context = None
+        self._dispatcher = None
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
         self._stop_controller()
 
-    def refresh_screen_configuration(self) -> None:
-        """Apply the main runtime's display-change notification."""
-
+    def _display_changed(self, event: EmptyArguments) -> MessageResult:
+        del event
         if self._controller is not None:
             self._controller.refresh_screen_configuration()
+        return []
 
     def _restart(self) -> None:
         self._stop_controller()
-        if self._context is None or self._settings is None:
+        if self._dispatcher is None or self._settings is None:
             return
         self._controller = HotCornerWindowToggleController(
-            self._context.dispatcher,
+            self._dispatcher,
             config=self._settings,
             corners=self._corners,
             parent=self._parent,

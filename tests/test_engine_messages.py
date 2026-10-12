@@ -38,8 +38,7 @@ class Harness:
         self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
         processes = SimpleNamespace(spawn=lambda argv, tag, detached: self.spawned.append((argv, tag, detached)))
         self.engine = build_engine(self.dispatcher, keyboard=self.keyboard, processes=processes)  # type: ignore[arg-type]
-        self.context = SimpleNamespace(dispatcher=self.dispatcher)
-        self.keyboard.bind_context(self.context)  # type: ignore[arg-type]
+        self.keyboard.bind_dispatcher(self.dispatcher)
         decoder = ConfigDecoder(
             node_kinds={"probe": _ProbeKind()},
             attachment_kinds={},
@@ -79,6 +78,9 @@ class _ProbeKind:
         return None
 
     def decode_child_placement(self, reader: object) -> None:
+        return None
+
+    def check_options(self, reader: object, options: object, children: tuple[str, ...]) -> None:
         return None
 
 
@@ -175,6 +177,7 @@ class KeyboardEffectTests(unittest.TestCase):
         harness.act("keyboard.up", key="a")
         harness.act("keyboard.up", key="a")
         harness.act("keyboard.tap", key="F5", mods=["Ctrl"])
+        harness.act("keyboard.tap", key="b")
         harness.act("keyboard.type_text", text="moo")
 
         self.assertEqual(
@@ -183,6 +186,7 @@ class KeyboardEffectTests(unittest.TestCase):
                 ("down", "A", ("Shift",), True),
                 ("up", "A"),
                 ("tap", "F5", ("Ctrl",)),
+                ("tap", "B", ()),
                 ("type", "moo"),
             ],
         )
@@ -238,7 +242,7 @@ class ProcessServiceTests(unittest.TestCase):
             return []
 
         dispatcher.add_event_handler(PROCESS_EXITED, record)
-        service.start(SimpleNamespace(dispatcher=dispatcher))  # type: ignore[arg-type]
+        service.start(dispatcher)
         service.spawn(argv, "probe", False)
         deadline = QDeadlineTimer(10_000)
         while not exits and not deadline.hasExpired():

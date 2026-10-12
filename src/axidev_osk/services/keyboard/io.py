@@ -209,9 +209,9 @@ class AxidevIoKeyboardBackend:
         keyboard.sender.key_up(press.key_name, mods=list(press.mods))
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        """Send one key press and release with explicit modifiers."""
+        """Send one press and release of ``key`` (already canonical) with explicit modifiers."""
 
-        self._require_ready().sender.tap(self.canonical_key(key), mods=list(mods))
+        self._require_ready().sender.tap(key, mods=list(mods))
 
     def type_text(self, text: str) -> None:
         """Type text through the backend's layout-aware text output."""

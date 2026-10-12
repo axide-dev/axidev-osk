@@ -28,6 +28,8 @@ NAV_START = 68
 KEY_UNIT_PX = 48
 GRID_GAP_PX = 4
 OVERLAY = {"placement": "center", "screen_margin": 16}
+# Closing a prompt cancels it, so the profile hides it instead of the engine asking to quit.
+PROMPT_OPTS = {"overlay": OVERLAY, "default_close": False}
 
 # One entry per key: row, column in quarter units, width in key units, then
 # what the key is. Kinds: key, letter, shifted, modifier, lock, ghost, dwell.
@@ -218,7 +220,7 @@ def _notice(window: str, title: str, message: str | osk.Binding) -> osk.Map:
         message=message,
         glyph="i",
         buttons=[prompts.prompt_button(f"{window}:ok", "OK", _hide(window), accept=True)],
-        opts={"overlay": OVERLAY},
+        opts=PROMPT_OPTS,
     )
 
 
@@ -234,7 +236,7 @@ def prompt_windows() -> list[osk.Map]:
                 "the screen corner; the hot-corner sensor will hide it without "
                 "shutting the app down."
             ),
-            opts={"overlay": OVERLAY},
+            opts=PROMPT_OPTS,
             buttons=[
                 prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [osk.app.quit()], accept=True),
                 prompts.prompt_button(f"{QUIT_PROMPT}:no", "No", _hide(QUIT_PROMPT), accept=False),
@@ -249,7 +251,7 @@ def prompt_windows() -> list[osk.Map]:
                 "Choose Open In Terminal to run permission setup where sudo can prompt. "
                 "If you already ran setup, this session may just need a log out and back in."
             ),
-            opts={"overlay": OVERLAY, "minimum_size": [560, 150]},
+            opts={**PROMPT_OPTS, "minimum_size": [560, 150]},
             buttons=[
                 osk.button(
                     id=f"{PERMISSION_PROMPT}:open_terminal",
@@ -297,11 +299,11 @@ def prompt_windows() -> list[osk.Map]:
 
 
 def _on_close_requested(ctx: Any, event: Any) -> list[osk.Map]:
-    """Closing the keyboard asks first; every other window keeps the engine's close rule."""
+    """Closing the keyboard asks first; closing a prompt or notice hides it, like its cancel button."""
 
     if event["window"] == KEYBOARD:
         return [osk.window.show(QUIT_PROMPT)]
-    return []
+    return [osk.window.hide(event["window"])]
 
 
 def _on_permission_setup_opened(ctx: Any, event: Any) -> list[osk.Map]:

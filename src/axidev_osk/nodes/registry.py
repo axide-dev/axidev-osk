@@ -63,6 +63,8 @@ class NodeKind:
     """Widget properties ``build`` and ``apply`` set, which a profile style cannot set."""
     decode_structure: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
+    check_options: Callable[[ConfigReader, object, tuple[str, ...]], None] = lambda reader, options, children: None
+    """Reject decoded options that do not fit the node's children, given their IDs."""
 
     @property
     def events(self) -> tuple[str, ...]:
@@ -112,13 +114,10 @@ class NodeBuilder:
         widget.setProperty("componentId", node.id)
         if node.passes_input_block:
             widget.setProperty("passesInputBlock", True)
-        applied: list[NodeValues] = []
 
-        def apply(values: NodeValues) -> None:
-            previous = applied[0] if applied else None
+        def apply(values: NodeValues, previous: NodeValues | None) -> None:
             apply_style(widget, values.style, previous.style if previous is not None else None)
             kind.apply(widget, values.options, previous.options if previous is not None else None)
-            applied[:] = [values]
 
         unbind = self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial)
         widget.destroyed.connect(lambda _object=None: unbind())

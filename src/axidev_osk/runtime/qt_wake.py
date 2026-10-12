@@ -16,7 +16,8 @@ class QtDispatcherWake(QObject):
         super().__init__(parent)
         self._dispatcher = dispatcher
         self.requested.connect(self._process_pending, Qt.ConnectionType.QueuedConnection)
-        dispatcher.set_wake(self.requested.emit)
+        # The callback holds this object, so the dispatcher keeps it alive.
+        dispatcher.set_wake(lambda: self.requested.emit())
 
     @Slot()
     def _process_pending(self) -> None:

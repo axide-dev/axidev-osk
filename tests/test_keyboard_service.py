@@ -10,7 +10,7 @@ from axidev_osk.runtime.engine_messages import (
     KEYBOARD_RESET,
     KEYBOARD_STATUS_CHANGED,
 )
-from axidev_osk.runtime.testing import make_keyboard_test_context
+from axidev_osk.runtime.testing import make_keyboard_test_engine
 from axidev_osk.services.keyboard.io import KeyObservation, KeyPressHandle
 from support import RecordingBackend
 
@@ -40,10 +40,10 @@ class FailingReleaseBackend(RecordingBackend):
 class KeyboardServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.backend = RecordingBackend(canonical=_upper_letters)
-        self.context, self.service = make_keyboard_test_context(self.backend)
+        self.engine, self.service = make_keyboard_test_engine(self.backend)
         self.events: list[tuple[str, DataMap]] = []
         for name in (INPUT_KEY, KEYBOARD_RESET, KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED):
-            self.context.dispatcher.add_raw_event_handler(name, self._recorder(name))
+            self.engine.dispatcher.add_raw_event_handler(name, self._recorder(name))
 
     def _recorder(self, name: str):
         def record(arguments: DataMap) -> MessageResult:
@@ -56,8 +56,8 @@ class KeyboardServiceTests(unittest.TestCase):
         return [name for name, _arguments in self.events]
 
     def test_start_initializes_backend_and_listener_once_without_publishing_status(self) -> None:
-        self.service.start(self.context)
-        self.service.bind_context(self.context)
+        self.service.start(self.engine)
+        self.service.bind_dispatcher(self.engine)
 
         self.assertEqual(self.backend.initialized, 1)
         self.assertEqual(len(self.backend.observers), 1)
@@ -97,7 +97,7 @@ class KeyboardServiceTests(unittest.TestCase):
 
     def test_refused_press_holds_nothing(self) -> None:
         backend = RefusingKeyboardBackend(canonical=_upper_letters)
-        service = make_keyboard_test_context(backend)[1]
+        service = make_keyboard_test_engine(backend)[1]
 
         with self.assertRaisesRegex(RuntimeError, "not ready"):
             service.press("a", (), True)
@@ -107,7 +107,7 @@ class KeyboardServiceTests(unittest.TestCase):
 
     def test_a_key_whose_release_failed_stays_held_until_a_release_succeeds(self) -> None:
         backend = FailingReleaseBackend(canonical=_upper_letters)
-        service = make_keyboard_test_context(backend)[1]
+        service = make_keyboard_test_engine(backend)[1]
         service.press("a", (), True)
 
         with self.assertRaisesRegex(RuntimeError, "key_up failed"):
@@ -172,7 +172,7 @@ class KeyboardServiceTests(unittest.TestCase):
         self.service.publish_status()
 
         self.assertEqual(self._event_names(), [KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED])
-        self.assertEqual(self.context.engine.profile.state.get(("keyboard", "ready")), False)
+        self.assertEqual(self.engine.profile.state.get(("keyboard", "ready")), False)
 
     def test_observations_are_forwarded_as_input_key_events(self) -> None:
         self.backend.observe(KeyObservation("A", "a", ("CapsLock",), True))
@@ -191,7 +191,7 @@ class KeyboardServiceTests(unittest.TestCase):
         listener.join()
 
         self.assertEqual(self.events, [])
-        self.context.dispatcher.process_pending()
+        self.engine.dispatcher.process_pending()
 
         self.assertEqual(self._event_names(), [INPUT_KEY])
         self.assertEqual(self.events[0][1]["key"], "B")

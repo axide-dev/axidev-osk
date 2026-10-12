@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.components.button import Button
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.windows.chrome import OverlayTitleBar
 from support import RecordingBackend, build_window, find_node, qt_app
 
@@ -47,7 +47,7 @@ class ButtonTests(unittest.TestCase):
 
     def test_right_click_on_a_profile_button_dispatches_press_and_release(self) -> None:
         qt_app()
-        context = make_test_context(RecordingBackend())
+        engine = make_test_engine(RecordingBackend())
         events: list[tuple[str, DataMap]] = []
 
         def recorder(name: str):
@@ -57,10 +57,10 @@ class ButtonTests(unittest.TestCase):
 
             return record
 
-        context.dispatcher.add_raw_event_handler(BUTTON_PRESSED, recorder(BUTTON_PRESSED))
-        context.dispatcher.add_raw_event_handler(BUTTON_RELEASED, recorder(BUTTON_RELEASED))
+        engine.dispatcher.add_raw_event_handler(BUTTON_PRESSED, recorder(BUTTON_PRESSED))
+        engine.dispatcher.add_raw_event_handler(BUTTON_RELEASED, recorder(BUTTON_RELEASED))
         profile = start_test_profile(
-            context,
+            engine,
             {
                 "active_profile": "p",
                 "profiles": {
@@ -76,7 +76,7 @@ class ButtonTests(unittest.TestCase):
                 },
             },
         )
-        window = build_window(self, profile.window("pad"), context)
+        window = build_window(self, profile.window("pad"), engine)
         window.show()
 
         QTest.mouseClick(find_node(window, "moo"), Qt.MouseButton.RightButton)

@@ -16,7 +16,7 @@ from axidev_osk.python_defaults import osk
 from axidev_osk.runtime.engine_messages import keyboard_status_changed
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
-from axidev_osk.runtime.testing import make_test_context, start_test_profile
+from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from support import RecordingBackend, build_window, find_node, qt_app
 
 
@@ -27,19 +27,18 @@ def _button(node_id: str, **fields: object) -> dict[str, object]:
 class NodeTests(unittest.TestCase):
     def setUp(self) -> None:
         qt_app()
-        self.context = make_test_context(RecordingBackend())
-        self.engine = self.context.engine
+        self.engine = make_test_engine(RecordingBackend())
         self.pressed: list[DataMap] = []
 
     def _profile(self, content: dict[str, object], state: DataMap | None = None) -> ProfileConfig:
         window = {"id": "pad", "title": "Pad", "opacity": 0.9, "style": {"object_name": "padWindow"}, "content": content}
         return start_test_profile(
-            self.context,
+            self.engine,
             {"active_profile": "p", "profiles": {"p": {"state": state or {}, "windows": [window]}}},
         )
 
     def _window(self, profile: ProfileConfig) -> QWidget:
-        window = build_window(self, profile.window("pad"), self.context)
+        window = build_window(self, profile.window("pad"), self.engine)
         window.show()
         return window
 
@@ -67,7 +66,7 @@ class NodeTests(unittest.TestCase):
         assert isinstance(key, Button)
 
         self.assertEqual((key.text(), key.property("interactionState")), ("a", "idle"))
-        self.context.dispatcher.dispatch(state_set("shift", True))
+        self.engine.dispatcher.dispatch(state_set("shift", True))
 
         self.assertEqual((key.text(), key.property("latched"), key.property("interactionState")), ("A", True, "latched"))
         self.assertEqual(self._find(window, "plain").text(), "Plain")  # type: ignore[attr-defined]
@@ -124,14 +123,14 @@ class NodeTests(unittest.TestCase):
 
     def test_a_binding_result_of_the_wrong_type_is_reported_not_converted(self) -> None:
         failures: list[DataMap] = []
-        self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
+        self.engine.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
             {"kind": "box", "id": "row", "children": [_button("a", latched=lambda s: s.mode == "on" or s.mode)]},
             state={"mode": osk.var("string", "on")},
         )
         key = self._find(self._window(profile), "a")
 
-        self.context.dispatcher.dispatch(state_set("mode", "no"))
+        self.engine.dispatcher.dispatch(state_set("mode", "no"))
 
         self.assertTrue(key.property("latched"))
         self.assertEqual([failure["source"] for failure in failures], ["node:a"])
@@ -140,7 +139,7 @@ class NodeTests(unittest.TestCase):
     def test_a_kind_added_later_gets_its_events_and_collisions_are_rejected(self) -> None:
         nodes = self.engine.nodes
         nodes.register(NodeKind(name="dial", build=lambda node, builder: QWidget(), apply=lambda *args: None, decode_options=lambda reader: None, callbacks={"on_turn": "dial.turned"}))
-        self.assertTrue(self.context.dispatcher.has_event("dial.turned"))
+        self.assertTrue(self.engine.dispatcher.has_event("dial.turned"))
 
         clash = NodeKind(name="clash", build=lambda node, builder: QWidget(), apply=lambda *args: None, decode_options=lambda reader: None, callbacks={"on_x": "app.activated"})
         with self.assertRaisesRegex(ValueError, "already registered elsewhere: app.activated"):
@@ -190,7 +189,7 @@ class NodeTests(unittest.TestCase):
             },
             state={"page": osk.var("string", "one")},
         )
-        self.context.dispatcher.dispatch(keyboard_status_changed(True, "ready", False, ""))
+        self.engine.dispatcher.dispatch(keyboard_status_changed(True, "ready", False, ""))
         window = self._window(profile)
         status = self._find(window, "status")
         pages = self._find(window, "pages")
@@ -198,7 +197,7 @@ class NodeTests(unittest.TestCase):
 
         self.assertEqual((status.text(), status.objectName(), status.property("classes")), ("ready", "statusLabel", ["muted"]))
         self.assertEqual(pages.currentWidget().property("componentId"), "one")
-        self.context.dispatcher.dispatch(state_set("page", "two"))
+        self.engine.dispatcher.dispatch(state_set("page", "two"))
         self.assertEqual(pages.currentWidget().property("componentId"), "two")
 
     def test_style_hooks_follow_state(self) -> None:
@@ -209,13 +208,13 @@ class NodeTests(unittest.TestCase):
         )
         status = self._find(self._window(profile), "status")
 
-        self.context.dispatcher.dispatch(state_set("alert", True), state_set("level", 2))
+        self.engine.dispatcher.dispatch(state_set("alert", True), state_set("level", 2))
 
         self.assertEqual((status.property("classes"), status.property("level")), (["warning"], 2))
 
     def test_a_stack_page_that_does_not_exist_is_reported(self) -> None:
         failures: list[DataMap] = []
-        self.context.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
+        self.engine.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
             {"kind": "stack", "id": "pages", "current": lambda s: s.page, "children": [
                 {"kind": "label", "id": "one", "text": "One"},
@@ -225,10 +224,19 @@ class NodeTests(unittest.TestCase):
         pages = self._find(self._window(profile), "pages")
         assert isinstance(pages, QStackedWidget)
 
-        self.context.dispatcher.dispatch(state_set("page", "nope"))
+        self.engine.dispatcher.dispatch(state_set("page", "nope"))
 
-        self.assertEqual([failure["message"] for failure in failures], ["Stack 'pages' has no page 'nope'"])
+        self.assertEqual(
+            [failure["message"] for failure in failures],
+            ["config.profiles.p.windows[0].content.current names 'nope', which is not a page of this stack"],
+        )
         self.assertEqual(pages.currentWidget().property("componentId"), "one")
+
+    def test_a_stack_whose_current_names_no_page_fails_at_load(self) -> None:
+        with self.assertRaisesRegex(ConfigError, r"content\.current names 'nope', which is not a page of this stack"):
+            self._profile(
+                {"kind": "stack", "id": "pages", "current": "nope", "children": [{"kind": "label", "id": "one", "text": "One"}]}
+            )
 
     def test_stack_pages_cannot_set_visible(self) -> None:
         for visible in (True, lambda s: s.show):
