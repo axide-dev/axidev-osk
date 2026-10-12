@@ -28,7 +28,7 @@ variables with ``std.with_state``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from ... import axidev_osk
@@ -108,31 +108,49 @@ def at(
     a press sends all come from the active layout's entry for ``position``.
     """
 
-    variants = {name: behavior(table[position], opts) for name, table in layouts.items() if position in table}
-
-    def value(field: str, default: Any) -> axidev_osk.Binding:
-        def bound(state: Any) -> Any:
-            found = variants[layout(state)].get(field, default)
-            return found(state) if callable(found) else found
-
-        return bound
-
-    def callback(field: str) -> axidev_osk.Callback:
-        def run(ctx: Any, event: Any) -> list[axidev_osk.Map]:
-            handler = variants[layout(ctx.state)].get(field)
-            return handler(ctx, event) if handler is not None else []
-
-        return run
-
+    value, run = on_layout([position], layouts, layout, opts)
     defaults = {
         "id": f"key:{position}",
-        "label": value("label", ""),
-        "active": value("active", False),
-        "latched": value("latched", False),
-        "on_press": callback("on_press"),
-        "on_release": callback("on_release"),
+        "label": lambda state: value(state, position, "label", ""),
+        "active": lambda state: value(state, position, "active", False),
+        "latched": lambda state: value(state, position, "latched", False),
+        "on_press": lambda ctx, event: run(ctx, event, position, "on_press"),
+        "on_release": lambda ctx, event: run(ctx, event, position, "on_release"),
     }
     return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
+
+
+def on_layout(
+    positions: Iterable[str],
+    layouts: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    layout: axidev_osk.Binding,
+    opts: Mapping[str, Any] | None = None,
+) -> tuple[Callable[[Any, str, str, Any], Any], Callable[[Any, Any, str, str], list[axidev_osk.Map]]]:
+    """How ``positions`` behave under whichever layout the ``layout`` binding names.
+
+    Builds every position's ``behavior`` in every layout up front and returns
+    two functions: ``value(state, position, field, default)`` reads one of a
+    behavior's fields in the active layout, and ``run(ctx, event, position,
+    field)`` runs one of its callbacks there.
+    """
+
+    wanted = set(positions)
+    table = {
+        (name, position): behavior(entry, opts)
+        for name, entries in layouts.items()
+        for position, entry in entries.items()
+        if position in wanted
+    }
+
+    def value(state: Any, position: str, field: str, default: Any) -> Any:
+        found = table[(layout(state), position)].get(field, default)
+        return found(state) if callable(found) else found
+
+    def run(ctx: Any, event: Any, position: str, field: str) -> list[axidev_osk.Map]:
+        handler = table[(layout(ctx.state), position)].get(field)
+        return handler(ctx, event) if handler is not None else []
+
+    return value, run
 
 
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:

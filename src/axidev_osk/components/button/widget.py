@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
@@ -33,37 +33,45 @@ class Button(QPushButton):
 
     Its label is never cut: the font its style gives it is the largest size
     used, and a label that does not fit its content area, or its shape, is
-    drawn at the largest size that fits. A label given as several parts is
-    spread over the shape in rows, each row holding as many parts as the
-    shape is wide there.
+    drawn smaller, at the largest size that fits. A single label is drawn by
+    the style itself, scaled down when it must shrink, so every stylesheet
+    text rule still applies to it. A label given as several parts is spread
+    over the shape in rows, each row holding as many parts as the shape is
+    wide there.
 
     A parent may give the button a shape (``set_shape``): the button is then
     clipped to it and draws its border along it, in the color its style
-    gives a rectangular button's border in the same state.
+    gives a rectangular button's border in the same state. That color is
+    read from the left edge of a small rectangular sample, so it assumes a
+    solid left border, no margin, and a corner radius under half the sample.
     """
 
     def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
         super().__init__(label, parent)
-        self._parts: tuple[str, ...] = ()
+        self._parts: tuple[str, ...] | None = None
         self._outline: QPainterPath | None = None
+        self._border_colors: dict[int, QColor] = {}
 
-    def set_parts(self, parts: tuple[str, ...]) -> None:
-        """Show ``parts`` spread over the button instead of one label; empty restores the label."""
+    def set_parts(self, parts: tuple[str, ...] | None) -> None:
+        """Show ``parts`` spread over the button, or, given ``None``, the one label set with ``setText``."""
 
         self._parts = parts
-        if parts:
+        if parts is not None:
             self.setText(" ".join(parts).replace("&", "&&"))
         self.update()
 
-    def set_shape(self, outline: QPainterPath | None) -> None:
+    def set_shape(self, outline: QPainterPath) -> None:
         """Clip the button to ``outline``, in its own coordinates, and draw its border along it."""
 
         self._outline = outline
-        if outline is None:
-            self.clearMask()
-        else:
-            self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+        self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
         self.update()
+
+    def event(self, event: QEvent) -> bool:
+        # A new stylesheet or state property can change every border color.
+        if event.type() in (QEvent.Type.Polish, QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
+            self._border_colors.clear()
+        return super().event(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         del event
@@ -82,15 +90,27 @@ class Button(QPushButton):
             painter.drawPath(self._outline)
             painter.restore()
         area = style.subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
-        painter.setPen(option.palette.buttonText().color())
-        if self._parts:
+        if self._parts is not None:
+            painter.setPen(option.palette.buttonText().color())
             font, placed = self.spread(self._parts, area)
             painter.setFont(font)
             for box, part in placed:
                 painter.drawText(box, Qt.AlignmentFlag.AlignCenter, part)
         elif text:
-            painter.setFont(self.fitted_font(text, area))
-            painter.drawText(area, _TEXT_FLAGS, text)
+            # The style ignores any font but its own, so a label that must shrink is drawn scaled down.
+            scale = self.fitted_font(text, area).pixelSize() / max(1, QFontInfo(self.font()).pixelSize())
+            center = QRectF(area).center()
+            painter.translate(center)
+            painter.scale(scale, scale)
+            painter.translate(-center)
+            option.rect = QRectF(
+                center.x() - area.width() / (2 * scale),
+                center.y() - area.height() / (2 * scale),
+                area.width() / scale,
+                area.height() / scale,
+            ).toAlignedRect()
+            option.text = text
+            style.drawControl(QStyle.ControlElement.CE_PushButtonLabel, option, painter, self)
 
     def fitted_font(self, text: str, area: QRect) -> QFont:
         """The style's font, made smaller until ``text`` fits ``area`` and the button's mask."""
@@ -176,8 +196,14 @@ class Button(QPushButton):
         return low
 
     def _border_color(self, option: QStyleOptionButton) -> QColor:
-        """The border color the style draws for this button's state, read off a small rectangular sample."""
+        """The border color the style draws for this button's state, read off a small rectangular sample once per state."""
 
+        key = option.state.value
+        if key not in self._border_colors:
+            self._border_colors[key] = self._sample_border(option)
+        return self._border_colors[key]
+
+    def _sample_border(self, option: QStyleOptionButton) -> QColor:
         sample = QImage(_SAMPLE_SIZE, _SAMPLE_SIZE, QImage.Format.Format_ARGB32_Premultiplied)
         sample.fill(Qt.GlobalColor.transparent)
         painter = QPainter(sample)

@@ -238,6 +238,18 @@ def settings_strip(window: str) -> axidev_osk.Map:
     )
 
 
+def _status_label() -> axidev_osk.Map:
+    """Why keyboard output is unavailable, shown under a keyboard only while it is."""
+
+    return axidev_osk.label(
+        id="keyboard-status",
+        text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
+        visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
+        word_wrap=True,
+        style={"object_name": "statusLabel"},
+    )
+
+
 def _with_settings(windows: list[axidev_osk.Map]) -> list[axidev_osk.Map]:
     """Give every window the settings strip, which takes the place of its content's bottom margin."""
 
@@ -271,13 +283,7 @@ def keyboard_window() -> axidev_osk.Map:
                     style={"object_name": "keyboard"},
                     children=[_key_node(spot, cell) for spot, cell in zip(SPOTS, _cells(), strict=True)],
                 ),
-                axidev_osk.label(
-                    id="keyboard-status",
-                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
-                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
-                    word_wrap=True,
-                    style={"object_name": "statusLabel"},
-                ),
+                _status_label(),
             ],
         ),
     )
@@ -416,13 +422,7 @@ def social_window() -> axidev_osk.Map:
                         for label, output in SOCIAL_KEYS
                     ],
                 ),
-                axidev_osk.label(
-                    id="keyboard-status",
-                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
-                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
-                    word_wrap=True,
-                    style={"object_name": "statusLabel"},
-                ),
+                _status_label(),
             ],
         ),
     )
@@ -479,13 +479,7 @@ def wheel_window() -> axidev_osk.Map:
                     inner=0.22,
                     spacing=GRID_GAP_PX,
                 ),
-                axidev_osk.label(
-                    id="keyboard-status",
-                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
-                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
-                    word_wrap=True,
-                    style={"object_name": "statusLabel"},
-                ),
+                _status_label(),
             ],
         ),
     )

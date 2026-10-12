@@ -2,12 +2,13 @@
 
 Every value a kind reads from its options may be a binding. Fixed fields (a
 box's direction, a grid child's cell, a box child's stretch) are read
-separately and never change while the widget lives. A canvas child's place is
-its ``shape``, a value like any other, so it may follow state.
+separately and never change while the widget lives. A canvas child's place,
+its ``shape`` and ``anchor``, is a value like any other, so it may follow state.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
@@ -105,6 +106,14 @@ class CanvasOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class CanvasPlacement:
+    """Where a canvas child sits: its ``shape`` corners and the optional ``anchor`` its box centers on, in pixels."""
+
+    shape: tuple[tuple[float, float], ...]
+    anchor: tuple[float, float] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class BoxStructure:
     direction: str = "vertical"
 
@@ -178,7 +187,8 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             apply=_apply_canvas,
             decode_options=_decode_canvas,
             has_children=True,
-            shapes_children=True,
+            decode_live_placement=_decode_canvas_placement,
+            place_child=_place_on_canvas,
         )
     )
 
@@ -243,6 +253,30 @@ def _decode_canvas(reader: ConfigReader) -> CanvasOptions:
     return CanvasOptions(visible=_visible(reader), size=_decode_size(reader))
 
 
+def _decode_canvas_placement(reader: ConfigReader) -> CanvasPlacement:
+    """Read a canvas child's ``shape``, at least three ``[x, y]`` corners, and its optional ``anchor`` point."""
+
+    shape = reader.raw("shape")
+    corners = [_point(corner) for corner in shape] if isinstance(shape, list) else []
+    if len(corners) < 3 or None in corners:
+        raise ConfigError(f"{reader.field_path('shape')} must be a list of at least three [x, y] corners in pixels")
+    anchor = reader.raw("anchor", None)
+    point = _point(anchor) if anchor is not None else None
+    if anchor is not None and point is None:
+        raise ConfigError(f"{reader.field_path('anchor')} must be an [x, y] point in pixels")
+    return CanvasPlacement(shape=tuple(corner for corner in corners if corner is not None), anchor=point)
+
+
+def _point(value: object) -> tuple[float, float] | None:
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in value)
+    ):
+        return (float(value[0]), float(value[1]))
+    return None
+
+
 def _decode_box_structure(reader: ConfigReader) -> BoxStructure:
     return BoxStructure(direction=reader.choice("direction", frozenset({"vertical", "horizontal"}), "vertical"))
 
@@ -303,7 +337,7 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
         if isinstance(options.label, tuple):
             widget.set_parts(options.label)
         else:
-            widget.set_parts(())
+            widget.set_parts(None)
             # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
             widget.setText(options.label.replace("&", "&&"))
     if old is None or options.enabled != old.enabled:
@@ -440,8 +474,13 @@ def _apply_stack(widget: QWidget, options: object, previous: object | None) -> N
 def _build_canvas(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     canvas = Canvas()
     for child in node.children:
-        builder.build(child, place=canvas.place)
+        builder.build(child, into=canvas)
     return canvas
+
+
+def _place_on_canvas(parent: QWidget, child: QWidget, placement: object) -> None:
+    assert isinstance(parent, Canvas) and isinstance(placement, CanvasPlacement)
+    parent.place(child, placement.shape, placement.anchor)
 
 
 def _apply_canvas(widget: QWidget, options: object, previous: object | None) -> None:

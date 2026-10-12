@@ -6,8 +6,10 @@ from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QPainterPath, QPolygonF, QRegion
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from ...config.profile import Point, Shape
-from ..button import Button
+Point = tuple[float, float]
+"""A point in pixels, relative to the canvas's top-left corner."""
+Shape = tuple[Point, ...]
+"""A polygon's corners."""
 
 
 class Canvas(QWidget):
@@ -15,8 +17,9 @@ class Canvas(QWidget):
 
     The child's box is the polygon's bounding box, or, given an anchor, the
     smallest box centered on the anchor that holds the polygon, so a widget
-    that centers its content centers it on the anchor. A ``Button`` takes the polygon as its shape and draws its border along it;
-    any other widget gets a mask. Clicks, hover, and dwell targeting follow
+    that centers its content centers it on the anchor. A child with a
+    ``set_shape(outline)`` method, such as a button, takes the polygon as its
+    shape and draws its border along it; any other widget gets a mask. Clicks, hover, and dwell targeting follow
     the clipped shape. The canvas never sizes itself from its children: its
     size comes from its own limits and its parent's layout, and whoever sets
     the polygons decides how they follow that size.
@@ -38,8 +41,9 @@ class Canvas(QWidget):
         outline = QPainterPath()
         outline.addPolygon(polygon.translated(-rect.x(), -rect.y()))
         outline.closeSubpath()
-        if isinstance(widget, Button):
-            widget.set_shape(outline)
+        set_shape = getattr(widget, "set_shape", None)
+        if callable(set_shape):
+            set_shape(outline)
         else:
             widget.setMask(QRegion(outline.toFillPolygon().toPolygon()))
 

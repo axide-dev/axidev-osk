@@ -124,9 +124,15 @@ def wheel(
         """The wheel's radii, from its reported size or its minimum size before the first report."""
 
         size = axidev_osk.read(state, size_var)
-        width = size["width"] if size is not None else _value(fields.get("min_width", 0), state)
-        height = size["height"] if size is not None else _value(fields.get("min_height", 0), state)
-        return max(width, 1) / 2, max(height, 1) / 2
+        if size is not None:
+            return max(size["width"], 1) / 2, max(size["height"], 1) / 2
+
+        def minimum(name: str) -> float:
+            found = fields.get(name, 0)
+            pixels: Any = found(state) if callable(found) else found
+            return max(pixels, 1) / 2
+
+        return minimum("min_width"), minimum("min_height")
 
     def path(state: Any) -> list[int]:
         return list(axidev_osk.read(state, path_var) or [])
@@ -137,25 +143,16 @@ def wheel(
             node = node[step] if isinstance(node, list) else None
         return node
 
-    behaviors: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def behavior(state: Any, position: str) -> dict[str, Any]:
-        """The key behavior the active layout gives ``position``, built once per layout."""
-
-        name = layout(state)
-        if (name, position) not in behaviors:
-            behaviors[(name, position)] = keys.behavior(layouts[name][position])
-        return behaviors[(name, position)]
+    value, run = keys.on_layout(_positions(tree), layouts, layout)
 
     def slice_button(index: int) -> axidev_osk.Map:
         def field(name: str, default: Any) -> axidev_osk.Binding:
             def bound(state: Any) -> Any:
                 found = item(state, index)
                 if isinstance(found, list):
-                    return _preview([_value(behavior(state, position)["label"], state) for position in _positions(found)]) if name == "label" else default
-                if found is None:
-                    return default
-                return _value(behavior(state, found).get(name, default), state)
+                    # A menu shows every key inside it, spread over its wedge.
+                    return [value(state, position, "label", "") for position in _positions(found)] if name == "label" else default
+                return value(state, found, name, default) if found is not None else default
 
             return bound
 
@@ -165,16 +162,14 @@ def wheel(
 
         def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
             found = item(ctx.state, index)
-            handler = behavior(ctx.state, found).get("on_press") if isinstance(found, str) else None
-            return handler(ctx, event) if handler is not None else []
+            return run(ctx, event, found, "on_press") if isinstance(found, str) else []
 
         def on_release(ctx: Any, event: Any) -> list[axidev_osk.Map]:
             found = item(ctx.state, index)
             if isinstance(found, list):
                 return [axidev_osk.state.set(path_var, [*path(ctx.state), index])]
             if isinstance(found, str):
-                handler = behavior(ctx.state, found).get("on_release")
-                return [*(handler(ctx, event) if handler is not None else []), axidev_osk.state.set(path_var, None)]
+                return [*run(ctx, event, found, "on_release"), axidev_osk.state.set(path_var, None)]
             return []
 
         return axidev_osk.button(
@@ -295,10 +290,6 @@ def _arc(
     return corners[::-1] if backward else corners
 
 
-def _value(found: Any, state: Any) -> Any:
-    return found(state) if callable(found) else found
-
-
 def _positions(tree: Tree) -> list[str]:
     """Every position under a menu, in the left-to-right order ``row`` places them."""
 
@@ -310,8 +301,3 @@ def _positions(tree: Tree) -> list[str]:
             found.extend(_positions(node))
     return found
 
-
-def _preview(legends: list[str]) -> list[str]:
-    """A menu's label: the legend of every key in it, as parts the button spreads over its wedge."""
-
-    return legends

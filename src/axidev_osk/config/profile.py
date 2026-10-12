@@ -18,13 +18,13 @@ The root config is plain data plus functions:
 Node kinds and attachment kinds register how their options decode, and a
 node kind with children also decodes the placement fields its children carry,
 such as a grid ``cell``. The decoder here owns everything common to every
-kind: IDs, style, bindings, callbacks, children, a canvas child's ``shape``
-and ``anchor``, and ``report_size``.
+kind: IDs, style, bindings, callbacks, children, and ``report_size``. A kind
+whose children's placement may follow state, as a canvas child's shape does,
+decodes that placement with each child's values.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Generic, Protocol, TypeVar
@@ -64,8 +64,8 @@ class NodeKindSpec(Protocol):
     def has_children(self) -> bool: ...
 
     @property
-    def shapes_children(self) -> bool:
-        """Whether the kind places each child by the child's own ``shape``, as a canvas does."""
+    def decode_live_placement(self) -> Callable[[ConfigReader], object] | None:
+        """Read the placement fields of a child that may follow state, such as a canvas child's ``shape``."""
         ...
 
     @property
@@ -111,20 +111,13 @@ class StyleConfig:
     qss: str | None = None
 
 
-Point = tuple[float, float]
-"""A point in pixels, relative to the top-left corner of the canvas holding the node."""
-Shape = tuple[Point, ...]
-"""A polygon's corners, as points of the canvas holding the node."""
-
-
 @dataclass(frozen=True, slots=True)
 class NodeValues:
-    """A node's values: its kind's options, its style hooks, and its shape and anchor when a canvas holds it."""
+    """A node's values: its kind's options, its style hooks, and the placement its parent may let follow state."""
 
     options: object
     style: StyleConfig
-    shape: Shape | None = None
-    anchor: Point | None = None
+    placement: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,18 +411,14 @@ class ConfigDecoder:
         structure = kind.decode_structure(reader)
         # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
         child_placement = parent.decode_child_placement(reader) if parent is not None else None
-        shaped = parent is not None and parent.shapes_children
-        for key in ("shape", "anchor"):
-            if not shaped and reader.has(key):
-                raise ConfigError(f"{reader.field_path(key)} can only be set on a child of a canvas")
+        live_placement = parent.decode_live_placement if parent is not None else None
         child_ids = tuple(child.id for child in children)
 
         def decode_values(values: ConfigReader) -> NodeValues:
             options = kind.decode_options(values)
             kind.check_options(values, options, child_ids)
-            shape = _decode_shape(values) if shaped else None
-            anchor = _decode_anchor(values) if shaped else None
-            return NodeValues(options=options, style=_decode_style(values, reserved), shape=shape, anchor=anchor)
+            placed = live_placement(values) if live_placement is not None else None
+            return NodeValues(options=options, style=_decode_style(values, reserved), placement=placed)
 
         return NodeConfig(
             kind=kind_name,
@@ -521,38 +510,6 @@ def _decode_style(reader: ConfigReader, reserved: frozenset[str] = ENGINE_WIDGET
         )
 
     return style_reader.decode(decode)
-
-
-def _decode_shape(reader: ConfigReader) -> Shape:
-    """Read a canvas child's ``shape``: at least three ``[x, y]`` corners in pixels."""
-
-    value = reader.raw("shape")
-    corners = [_point(corner) for corner in value] if isinstance(value, list) else []
-    if not isinstance(value, list) or len(corners) < 3 or None in corners:
-        raise ConfigError(f"{reader.field_path('shape')} must be a list of at least three [x, y] corners in pixels")
-    return tuple(corner for corner in corners if corner is not None)
-
-
-def _decode_anchor(reader: ConfigReader) -> Point | None:
-    """Read a canvas child's optional ``anchor``: the ``[x, y]`` point its content centers on."""
-
-    value = reader.raw("anchor", None)
-    if value is None:
-        return None
-    point = _point(value)
-    if point is None:
-        raise ConfigError(f"{reader.field_path('anchor')} must be an [x, y] point in pixels")
-    return point
-
-
-def _point(value: object) -> Point | None:
-    if (
-        isinstance(value, list)
-        and len(value) == 2
-        and all(isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in value)
-    ):
-        return (float(value[0]), float(value[1]))
-    return None
 
 
 def _decode_overlay(reader: ConfigReader) -> OverlayConfig:

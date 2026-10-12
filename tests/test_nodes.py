@@ -322,6 +322,17 @@ class NodeTests(unittest.TestCase):
         self.assertIsNone(hit(20, 20))
         self.assertEqual(hit(120, 20), "corner")
 
+    def test_a_kind_with_live_child_placement_must_also_place_its_children(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must set both decode_live_placement and place_child"):
+            NodeKind(
+                name="half",
+                build=lambda node, builder: QWidget(),
+                apply=lambda *args: None,
+                decode_options=lambda reader: None,
+                has_children=True,
+                decode_live_placement=lambda reader: None,
+            )
+
     def test_a_canvas_child_with_an_anchor_centers_its_box_on_it(self) -> None:
         profile = self._profile(
             {
@@ -338,15 +349,15 @@ class NodeTests(unittest.TestCase):
         self.assertEqual((box.x() + box.width() / 2, box.y() + box.height() / 2), (120, 30))
         self.assertTrue(box.contains(100, 0) and box.contains(199, 0) and box.contains(100, 99))
 
-    def test_shape_is_required_under_a_canvas_and_rejected_anywhere_else(self) -> None:
+    def test_shape_is_required_under_a_canvas_and_unknown_anywhere_else(self) -> None:
         square = [[0, 0], [10, 0], [10, 10], [0, 10]]
         cases = {
-            r"children\[0\]\.shape can only be set on a child of a canvas": {
+            r"children\[0\] has unknown keys: shape": {
                 "kind": "box",
                 "id": "row",
                 "children": [_button("a", shape=square)],
             },
-            r"children\[0\]\.anchor can only be set on a child of a canvas": {
+            r"children\[0\] has unknown keys: anchor": {
                 "kind": "box",
                 "id": "row",
                 "children": [_button("a", anchor=[0, 0])],

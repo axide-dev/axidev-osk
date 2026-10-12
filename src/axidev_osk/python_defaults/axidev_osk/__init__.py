@@ -3,7 +3,7 @@
 Everything here builds plain maps. Nothing calls the engine directly. A Lua
 ``axidev_osk`` module will expose the same names and return the same tables:
 
-- Node builders: ``window``, ``grid``, ``box``, ``stack``, ``wheel``,
+- Node builders: ``window``, ``grid``, ``box``, ``stack``, ``canvas``,
   ``button``, ``label``, ``spacer``.
 - Attachment builders: ``dwell``, ``pointer_locator``, ``hot_corners``,
   ``secure_input_panel``.

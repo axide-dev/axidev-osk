@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QContextMenuEvent, QFontInfo, QFontMetrics, QRegion
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QContextMenuEvent, QFontInfo, QFontMetrics, QPainterPath, QPolygonF, QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from axidev_osk.components.button import Button
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
+from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.windows.chrome import OverlayTitleBar
 from support import RecordingBackend, build_window, find_node, make_test_engine, qt_app, start_test_profile
 
@@ -33,6 +34,97 @@ class ButtonTests(unittest.TestCase):
         button.setMask(QRegion(QRect(20, 10, 20, 20)))
         clipped = button.fitted_font("Back", area)
         self.assertLessEqual(QFontMetrics(clipped).horizontalAdvance("Back"), 20)
+
+    def test_state_text_colors_apply_even_to_a_label_that_shrinks(self) -> None:
+        qt_app()
+        button = Button("Backspace")
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { font-size: 40px; color: #ffffff; background: #000000; border: none; padding: 0px; }"
+            "QPushButton:pressed { color: #0000ff; }"
+        )
+        button.resize(60, 30)
+        button.show()
+
+        def text_pixels() -> list[QColor]:
+            image = button.grab().toImage()
+            return [
+                image.pixelColor(x, y)
+                for x in range(image.width())
+                for y in range(image.height())
+                if image.pixelColor(x, y).lightness() > 60
+            ]
+
+        idle = text_pixels()
+        button.setDown(True)
+        pressed = text_pixels()
+
+        self.assertTrue(idle and all(color.blue() >= color.red() for color in idle))
+        self.assertTrue(pressed)
+        self.assertTrue(all(color.red() < 80 and color.blue() > 120 for color in pressed))
+
+    def test_a_shaped_button_draws_its_border_along_its_shape(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { background: #000000; border: 1px solid #ff0000; border-radius: 0px; }")
+        button.resize(100, 100)
+        triangle = QPainterPath()
+        triangle.addPolygon(QPolygonF([QPointF(0, 0), QPointF(100, 0), QPointF(0, 100)]))
+        triangle.closeSubpath()
+        button.set_shape(triangle)
+        button.show()
+
+        image = button.grab().toImage()
+
+        # Just inside the long side, the border shows; well inside, only the background does.
+        edge = image.pixelColor(49, 49)
+        inside = image.pixelColor(20, 20)
+        self.assertGreater(edge.red(), 120)
+        self.assertLess(inside.red(), 40)
+
+    def test_parts_are_spread_inside_the_shape_in_order(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 14px; padding: 0px; border: none; }")
+        button.resize(120, 120)
+        button.setMask(QRegion(QPolygonF([QPointF(0, 0), QPointF(120, 0), QPointF(60, 120)]).toPolygon()))
+        button.show()
+        parts = ("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
+
+        _font, placed = button.spread(parts, button.rect())
+
+        self.assertEqual([part for _box, part in placed], list(parts))
+        mask = button.mask()
+        for box, part in placed:
+            with self.subTest(part):
+                self.assertEqual(mask.intersected(box), QRegion(box))
+        rows = [box.top() for box, _part in placed]
+        self.assertEqual(rows, sorted(rows))
+
+    def test_a_list_label_that_empties_shows_nothing(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        content = {"kind": "button", "id": "menu", "label": lambda state: list(state.parts)}
+        profile = start_test_profile(
+            engine,
+            {
+                "active_profile": "p",
+                "profiles": {
+                    "p": {
+                        "state": {"parts": {"var": {"list": "string"}, "default": ["a", "b"]}},
+                        "windows": [{"id": "pad", "title": "Pad", "content": content}],
+                    }
+                },
+            },
+        )
+        button = find_node(build_window(self, profile.window("pad"), engine), "menu")
+        self.assertEqual(button.text(), "a b")  # type: ignore[attr-defined]
+
+        engine.dispatcher.dispatch(state_set("parts", []))
+
+        self.assertEqual(button.text(), "")  # type: ignore[attr-defined]
 
     def test_right_click_has_the_same_signal_cycle_as_left_click(self) -> None:
         qt_app()
