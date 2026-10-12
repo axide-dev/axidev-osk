@@ -31,6 +31,7 @@ from .app_messages import (
     APP_QUIT,
     APP_QUIT_REQUESTED,
     LINUX_OPEN_PERMISSION_SETUP,
+    PROFILE_START,
     PROFILE_SWITCH,
     SECURE_INPUT_PANEL_PREPARE,
     SECURE_INPUT_PANEL_RELEASE,
@@ -43,10 +44,10 @@ from .app_messages import (
     decode_app_quit,
     decode_profile_switch,
     linux_permission_setup_opened,
+    profile_start,
     secure_input_panel_prepared,
     secure_input_panel_released,
     window_close,
-    window_show,
 )
 from .decoding import EmptyArguments, decode_empty
 from .dispatcher import Dispatcher, Unsubscribe
@@ -57,6 +58,16 @@ from .registries import ServiceRegistry
 from .window_manager import WindowFactory, WindowManager
 
 _logger = logging.getLogger(__name__)
+
+
+class ProfileRollbackFailed(RuntimeError):
+    """The previous profile could not start again after a switch failed, so no profile runs."""
+
+    def __init__(self, previous: str, target: str, error: Exception) -> None:
+        super().__init__(
+            f"Profile {previous!r} could not start again after switching to {target!r} failed: "
+            f"{type(error).__name__}: {error}"
+        )
 
 
 class ApplicationRuntime:
@@ -107,6 +118,7 @@ class ApplicationRuntime:
         self._root: RootConfig = engine.decoder().decode_config(root_config)
         self._profile: ProfileConfig = self._root.active
         self._unbind_theme: Unsubscribe | None = None
+        self._switching_to: str | None = None
         self._window_manager = WindowManager({})
         self._quit_controller = ApplicationQuitController(
             app,
@@ -121,6 +133,7 @@ class ApplicationRuntime:
         self._pointer_drag.register(self._dispatcher)
         self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit, when_idle=True)
         self._dispatcher.register_action(PROFILE_SWITCH, decode_profile_switch, self._switch_profile, when_idle=True)
+        self._dispatcher.register_action(PROFILE_START, decode_empty, self._start_switched_profile, when_idle=True)
         self._dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel)
         self._dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, self._release_secure_input_panel)
         self._dispatcher.register_action(LINUX_OPEN_PERMISSION_SETUP, decode_empty, self._open_permission_setup)
@@ -133,8 +146,7 @@ class ApplicationRuntime:
     def start(self) -> int:
         """Start the profile, services, and startup windows, then run the Qt event loop.
 
-        Startup windows are shown through the queue, so every window is built
-        inside a queue drain like the windows profiles show later. Shutdown
+        Startup and a profile switch show start windows the same way. Shutdown
         closes the queue, then stops the profile, so its callbacks never see
         teardown. The shutdown steps are registered first: when a step of
         starting fails, they run before the error is raised.
@@ -152,10 +164,7 @@ class ApplicationRuntime:
             self._activate(self._profile)
             for service in self._services.autostart_services():
                 service.start(self._dispatcher)
-            if self._show_startup_windows:
-                self._dispatcher.dispatch(
-                    *(window_show(window.id) for window in self._profile.windows if window.show_on_start)
-                )
+            self._show_start_windows()
         except BaseException:
             self._quit_controller.shutdown(1)
             raise
@@ -195,9 +204,15 @@ class ApplicationRuntime:
         self._window_manager.set_factories({window.id: self._window_factory(profile, window.id) for window in profile.windows})
 
     def _deactivate(self) -> None:
-        """Stop the running profile's callbacks, theme, and attachments, and close its windows."""
+        """Tear the running profile down: callbacks, held keys, theme, attachments, then windows.
+
+        This is the one place a profile stops while the app keeps running.
+        Held keys are released because the profile that latched them, and
+        its record of the latch, are gone.
+        """
 
         self.engine.profile.stop()
+        self._keyboard.reset_state()
         if self._unbind_theme is not None:
             self._unbind_theme()
             self._unbind_theme = None
@@ -205,38 +220,64 @@ class ApplicationRuntime:
         self._window_manager.close_all()
 
     def _switch_profile(self, arguments: ProfileSwitchArguments) -> MessageResult:
-        """Replace the running profile once nothing else is waiting.
+        """Tear the running profile down and send ``profile.start`` for the requested one.
 
-        Each window the new profile shows on start is built at the position a
-        window with the same ID last reported, and refits its size to its new
-        content. If the new profile fails to build, the previous one is built
-        again and the failure is reported as ``action.failed``.
+        Both actions run once nothing else is waiting, so the reports of the
+        closing windows reach no profile. A switch requested while one is in
+        progress only replaces its target: the last one requested starts.
         """
 
         target = self._root.profiles.get(arguments.profile)
         if target is None:
             raise ValueError(f"No profile named {arguments.profile!r} in the root config")
+        self._refuse_without_panel(target)
+        if self._switching_to is not None:
+            self._switching_to = target.id
+            return []
         if target is self._profile:
             return []
-        if self._panel_prepared and not any(attachment.kind == "secure_input_panel" for attachment in target.attachments):
-            raise ValueError(
-                f"Profile {target.id!r} has no secure_input_panel attachment for the prepared lock-screen panel"
-            )
-        previous = self._profile
         self._deactivate()
+        self._switching_to = target.id
+        return [profile_start()]
+
+    def _start_switched_profile(self, arguments: EmptyArguments) -> MessageResult:
+        """Start the profile a switch is moving to.
+
+        Each window it shows on start is built at the position a window with
+        the same ID last reported. If it fails to build, the previous profile
+        starts again, with its own variables back at their defaults, and the
+        failure is reported as ``action.failed``; if that fails too, the
+        report is ``ProfileRollbackFailed``.
+        """
+
+        del arguments
+        if self._switching_to is None:
+            raise ValueError("No profile switch is in progress")
+        target = self._root.profiles[self._switching_to]
+        self._switching_to = None
+        previous = self._profile
         try:
             self._activate(target)
-            self._show_switched_windows()
-        except Exception:
+            self._show_start_windows()
+        except Exception as error:
             _logger.exception("Failed to build profile %s; building %s again", target.id, previous.id)
             self._deactivate()
-            self._activate(previous)
-            self._show_switched_windows()
+            try:
+                self._activate(previous)
+                self._show_start_windows()
+            except Exception as rollback_error:
+                raise ProfileRollbackFailed(previous.id, target.id, error) from rollback_error
             raise
         return []
 
-    def _show_switched_windows(self) -> None:
-        """Show the running profile's start windows where windows with their IDs last were."""
+    def _refuse_without_panel(self, target: ProfileConfig) -> None:
+        """Reject a switch that would leave a prepared lock-screen panel without a window."""
+
+        if self._panel_prepared and not any(attachment.kind == "secure_input_panel" for attachment in target.attachments):
+            raise ValueError(f"Profile {target.id!r} has no secure_input_panel attachment for the prepared lock-screen panel")
+
+    def _show_start_windows(self) -> None:
+        """Show the running profile's start windows where windows with their IDs last were, and a prepared panel."""
 
         state = self.engine.profile.state
         for window_config in self._profile.windows:

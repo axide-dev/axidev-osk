@@ -128,6 +128,12 @@ class FakeOverlay:
     def move_by(self, dx: int, dy: int) -> None:
         del dx, dy
 
+    def restore_position(self, x: int, y: int) -> None:
+        del x, y
+
+    def keep_on_screen(self) -> None:
+        return None
+
     def resize_by(self, dx: int, dy: int) -> None:
         del dx, dy
 

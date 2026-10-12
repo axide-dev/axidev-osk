@@ -484,6 +484,7 @@ class AlwaysOnTopWindowController:
             return
         self._window.move(x, y)
         self._floating_position_initialized = True
+        self.keep_on_screen()
 
     def move_by(self, dx: int, dy: int) -> None:
         """Move the overlay by a bounded delta."""
@@ -492,14 +493,26 @@ class AlwaysOnTopWindowController:
             self._move_layer_shell_by(dx, dy)
             return
 
+        self._window.move(self._window.x() + dx, self._window.y() + dy)
+        self._floating_position_initialized = True
+        self.keep_on_screen()
+
+    def keep_on_screen(self) -> None:
+        """Move a floating window back inside its screen's available area.
+
+        Layer-shell margins are bounded when they move, and KWin places the
+        input panel itself, so neither changes here.
+        """
+
+        if self._backend in (OverlayBackend.WAYLAND_LAYER_SHELL, OverlayBackend.WAYLAND_INPUT_PANEL):
+            return
         geometry = self._current_screen_geometry()
         max_x = geometry.x() + max(0, geometry.width() - self._window.width())
         max_y = geometry.y() + max(0, geometry.height() - self._window.height())
-
-        next_x = max(geometry.x(), min(self._window.x() + dx, max_x))
-        next_y = max(geometry.y(), min(self._window.y() + dy, max_y))
-        self._window.move(next_x, next_y)
-        self._floating_position_initialized = True
+        next_x = max(geometry.x(), min(self._window.x(), max_x))
+        next_y = max(geometry.y(), min(self._window.y(), max_y))
+        if (next_x, next_y) != (self._window.x(), self._window.y()):
+            self._window.move(next_x, next_y)
 
     def resize_by(self, dx: int, dy: int) -> None:
         """Resize the overlay by a bounded delta."""
@@ -789,6 +802,11 @@ class PlainWindowController:
         """Put the window's top-left corner back at ``(x, y)``."""
 
         self._window.move(x, y)
+
+    def keep_on_screen(self) -> None:
+        """Leave plain windows where the window manager put them."""
+
+        return
 
     def move_by(self, _dx: int, _dy: int) -> None:
         """Ignore overlay move requests for plain windows."""

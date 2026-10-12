@@ -20,9 +20,9 @@ Each decision below was made by the project owner. Do not reopen one without a n
 
 3. An inline panel grows the window. The engine shrinks the window back to its minimum size when content shrinks, the way `apply_startup_size` sizes it at show time. The same test showed a layer-shell window growing from 200x100 to 200x200 when a panel appeared and staying at 200x200 after it hid.
 
-4. Checkboxes, steppers, dropdowns, and menus are standard-library helpers built from existing node kinds, not new engine node kinds. A checkbox is a button with a `latched` binding. A dropdown or menu is a button that flips `std.menus.<id>.open` plus a box whose `visible` binding reads it. A stepper is a pair of buttons around a label, and its minimum, maximum, and value are bindings, so linked settings can bound each other.
+4. Checkboxes, steppers, dropdowns, and menus are standard-library helpers built from existing node kinds, not new engine node kinds. A checkbox is a button with a `latched` binding. A dropdown or menu is a button that sets or clears its ID in `std.menus.<group>` plus a box whose `visible` binding reads it, so menus in one group close each other. A stepper is a pair of buttons around a label, and its minimum, maximum, and value are bindings, so linked settings can bound each other.
 
-5. Profiles switch at runtime through `profile.switch {profile}`. The engine exposes `app.profile` and `app.profiles` as read-only variables. A switch requested from a callback runs once the queue is empty, the same way `app.quit` waits.
+5. Profiles switch at runtime through `profile.switch {profile}`. The engine exposes `app.profile` and `app.profiles` as read-only variables. A switch requested from a callback runs once the queue is empty, the same way `app.quit` waits. It tears the running profile down, releasing held keys, then sends the engine's own `profile.start`, which also waits for an empty queue, so the closing windows' reports reach no profile. A switch requested while one is in progress only replaces its target: the last one requested starts.
 
 6. A window whose id exists in both profiles keeps its screen position through `windows.<id>.position`, and its size refits to the new content.
 
@@ -31,22 +31,23 @@ Each decision below was made by the project owner. Do not reopen one without a n
 ## Engine Work
 
 - Shrink a window back to its minimum size after its content shrinks.
-- `profile.switch`, with teardown of the old profile's windows, bindings, callbacks, and attachments, then the build of the new one.
+- `profile.switch`, with teardown of the old profile's windows, bindings, callbacks, attachments, and held keys, then `profile.start` to build the new one.
 - `app.profile` and `app.profiles` as engine-declared, read-only variables.
 - Keep `windows.<id>.position` across a rebuild on every backend. Layer shell places windows through margins, so each backend needs its own test.
-- Rebuild the previous profile when a switch fails.
+- Rebuild the previous profile when a switch fails, and report `ProfileRollbackFailed` when that fails too.
 
 ## Standard Library
 
 - `checkbox`, `stepper`, `dropdown`, and `menu` in `python_defaults/axidev_osk/std/`, each taking `opts` merged last with `axidev_osk.merge`.
-- Their state lives under `std`, declared in the registry, for example `std.menus` as a map of booleans.
+- `strip`, `with_strip`, and `strip_group`, which put a collapsible row of these controls under any window's content.
+- Their state lives under `std`, declared in the registry, for example `std.menus` as a map from group to the ID of its open menu.
 - Tests in `tests/test_std_library.py`.
 
 ## Bundled Config
 
 ### Default Keyboard Strip
 
-A strip at the bottom of the `keyboard` window holds:
+Every window of both bundled profiles gets the same strip, collapsed behind a `⋯` button until it is opened. It holds:
 
 - A profile dropdown listing `default` and `social`.
 - An opacity stepper, 0.30 to 1.00 in steps of 0.05.
@@ -74,7 +75,7 @@ Opacity and every dwell option are declared in the root config's `state`, so the
 A second profile named `social`, a small keyboard for scrolling a feed:
 
 - Four keys: Up, Down, L, and K.
-- A strip with only the profile dropdown, so the user can switch back.
+- The same strip as every other window, so the user can switch back.
 - It reuses the window id `keyboard`, so it opens where the keyboard was.
 - Its opacity binds to the same root variable as the default keyboard.
 - It has a pointer locator. It has no dwell, hot corners, or lock-screen panel.

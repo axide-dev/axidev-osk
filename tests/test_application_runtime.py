@@ -18,6 +18,7 @@ from axidev_osk.runtime.app_messages import (
     app_activated,
     app_quit,
     pointer_motion_observed,
+    profile_switch,
     secure_input_panel_prepare,
     secure_input_panel_release,
     window_close,
@@ -29,7 +30,7 @@ from axidev_osk.runtime.app_messages import (
 )
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
-from axidev_osk.runtime.engine_messages import keyboard_reset
+from axidev_osk.runtime.engine_messages import keyboard_down, keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
@@ -537,10 +538,21 @@ def _switch_root(on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, 
     )
 
 
+def _profile_c() -> axidev_osk.Map:
+    """A profile that records the ``visible`` value of every ``window.state_changed`` it hears."""
+
+    return axidev_osk.profile(
+        state={"seen": axidev_osk.var(axidev_osk.list_of("boolean"))},
+        windows=[axidev_osk.window(id="pad", title="c", show_on_start=True, content=axidev_osk.box(id="c:root"))],
+        on={"window.state_changed": lambda ctx, event: [axidev_osk.state.set("seen", [*ctx.state.seen, event["visible"]])]},
+    )
+
+
 class ProfileSwitchTests(unittest.TestCase):
     def _runtime(self, root: axidev_osk.Map, *, show_startup_windows: bool = True) -> ApplicationRuntime:
+        self.backend = RecordingBackend()
         services = ServiceRegistry()
-        services.register("keyboard", KeyboardService(RecordingBackend()), autostart=False)
+        services.register("keyboard", KeyboardService(self.backend), autostart=False)
         runtime = ApplicationRuntime(qt_app(), root_config=root, services=services, show_startup_windows=show_startup_windows)
         _start(self, runtime)
         self.addCleanup(runtime._window_manager.close_all)
@@ -604,7 +616,7 @@ class ProfileSwitchTests(unittest.TestCase):
 
         self.assertEqual(
             [(failure.action, failure.message) for failure in failures],
-            [("profile.switch", "the window cannot be built")],
+            [("profile.start", "the window cannot be built")],
         )
         self.assertEqual(self._state(runtime, "app", "profile"), "a")
         window = runtime._window_manager.get("pad")
@@ -613,6 +625,59 @@ class ProfileSwitchTests(unittest.TestCase):
         self.assertIn("a:go", nodes_by_id(window))
         runtime.engine.dispatcher.dispatch(app_activated())
         self.assertEqual(self._state(runtime, "activated"), ["a"])
+
+    def test_a_failed_rollback_reports_its_own_error(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")]))
+        failures = _record_failures(runtime)
+
+        with (
+            patch("axidev_osk.runtime.application.build_profile_window", side_effect=RuntimeError("no window")),
+            self.assertLogs(level="ERROR"),
+        ):
+            self._release(runtime, "a:go")
+
+        self.assertEqual(
+            [(failure.action, failure.exception_type) for failure in failures],
+            [("profile.start", "ProfileRollbackFailed")],
+        )
+
+    def test_a_switch_releases_held_keys(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")]))
+        runtime.engine.dispatcher.dispatch(keyboard_down("A"))
+
+        self._release(runtime, "a:go")
+
+        self.assertEqual(self.backend.sent[-1], ("up", "A"))
+        self.assertEqual(self._state(runtime, "app", "profile"), "b")
+
+    def test_the_last_of_several_queued_switches_wins(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [], extra={"c": _profile_c()}))
+
+        runtime.engine.dispatcher.dispatch(profile_switch("b"), profile_switch("c"))
+
+        self.assertEqual(self._state(runtime, "app", "profile"), "c")
+        window = runtime._window_manager.get("pad")
+        assert window is not None
+        self.assertIn("c:root", nodes_by_id(window))
+
+    def test_the_new_profile_hears_nothing_from_the_old_windows(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("c")], extra={"c": _profile_c()}))
+
+        self._release(runtime, "a:go")
+
+        self.assertEqual(self._state(runtime, "app", "profile"), "c")
+        # Only the new window's own reports while it is built and shown; the
+        # old window's closing reports ran before c started.
+        self.assertEqual(self._state(runtime, "seen"), [False, False, True])
+
+    def test_a_quit_queued_after_a_switch_still_exits(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: []))
+
+        with patch.object(qt_app(), "exit") as exit_app:
+            runtime.engine.dispatcher.dispatch(profile_switch("b"), app_quit())
+
+        exit_app.assert_called_once_with(0)
+        self.assertEqual([window for window in runtime._window_manager.all_windows() if window.isVisible()], [])
 
     def test_switching_to_an_unknown_profile_fails_and_changes_nothing(self) -> None:
         runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("typo")]))

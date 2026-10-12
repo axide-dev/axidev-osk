@@ -110,7 +110,7 @@ class NodeTests(unittest.TestCase):
         watcher = ShowWatcher()
         qt_app().installEventFilter(watcher)
         try:
-            row = self.engine.node_builder.build(profile.window("pad").content)
+            row, _unbinds = self.engine.node_builder.build_tree(profile.window("pad").content)
         finally:
             qt_app().removeEventFilter(watcher)
         self.addCleanup(row.deleteLater)

@@ -9,8 +9,7 @@ they read changes and hands the kind the new values with the previous ones.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -111,25 +110,34 @@ class NodeBuilder:
         self._kinds = kinds
         self._dispatcher = dispatcher
         self._bindings = bindings
-        self._collectors: list[list[Unsubscribe]] = []
+        self._unbinds: list[Unsubscribe] | None = None
 
-    @contextmanager
-    def collecting(self) -> Iterator[list[Unsubscribe]]:
-        """Collect the unbind of every node built inside the block, so its owner can drop them at once.
+    def build_tree(self, node: NodeConfig) -> tuple[QWidget, list[Unsubscribe]]:
+        """Build ``node`` and its children, returning the widget and every binding they made.
 
-        A closed window drops its bindings right away instead of when Qt
-        deletes its widgets later, so they never decode against another
-        profile's state.
+        The caller owns the bindings and drops them when it closes, so they
+        never decode against another profile's state. When building fails,
+        the bindings made so far are dropped before the error is raised.
         """
 
         unbinds: list[Unsubscribe] = []
-        self._collectors.append(unbinds)
+        self._unbinds = unbinds
         try:
-            yield unbinds
+            widget = self.build(node)
+        except BaseException:
+            for unbind in unbinds:
+                unbind()
+            raise
         finally:
-            self._collectors.pop()
+            self._unbinds = None
+        return widget, unbinds
 
     def build(self, node: NodeConfig) -> QWidget:
+        """Build one node inside ``build_tree``; node kinds call it for their children."""
+
+        unbinds = self._unbinds
+        if unbinds is None:
+            raise RuntimeError("Nodes are built through build_tree, which owns their bindings")
         kind = self._kinds[node.kind]
         widget = kind.build(node, self)
         widget.setProperty(COMPONENT_TYPE, node.kind)
@@ -141,10 +149,7 @@ class NodeBuilder:
             apply_style(widget, values.style, previous.style if previous is not None else None)
             kind.apply(widget, values.options, previous.options if previous is not None else None)
 
-        unbind = self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial)
-        widget.destroyed.connect(lambda _object=None: unbind())
-        if self._collectors:
-            self._collectors[-1].append(unbind)
+        unbinds.append(self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial))
         return widget
 
     def emit(self, event_name: str, node_id: str) -> None:

@@ -43,6 +43,7 @@ WINDOW_DRAG_STARTED = "window.drag_started"
 
 APP_QUIT = "app.quit"
 PROFILE_SWITCH = "profile.switch"
+PROFILE_START = "profile.start"
 LINUX_OPEN_PERMISSION_SETUP = "linux.open_permission_setup"
 SECURE_INPUT_PANEL_PREPARE = "secure_input_panel.prepare"
 SECURE_INPUT_PANEL_RELEASE = "secure_input_panel.release"
@@ -145,6 +146,12 @@ def app_quit(exit_code: int = 0) -> RuntimeAction:
 
 def profile_switch(profile: str) -> RuntimeAction:
     return validated_action(PROFILE_SWITCH, {"profile": profile}, decode_profile_switch)
+
+
+def profile_start() -> RuntimeAction:
+    """Start the profile a switch tore the running one down for; the switch sends it."""
+
+    return validated_action(PROFILE_START, {}, decode_empty)
 
 
 def window_show(window_id: str) -> RuntimeAction:

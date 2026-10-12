@@ -209,11 +209,12 @@ class AttachmentRuntimeTests(unittest.TestCase):
         self.assertIn("'hc' does nothing", logs.output[0])
         self.assertEqual([config.delay_ms for config in harness.windows["pad"].dwell], [250])
 
-    def test_starting_a_profile_without_hot_corners_turns_them_off(self) -> None:
+    def test_stopping_turns_hot_corners_off_until_a_profile_with_them_starts(self) -> None:
         harness = AttachmentHarness([axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS)])
         harness.start()
         self.assertIsNotNone(harness.hot_corners.active)
 
+        harness.runtime.stop()
         harness.runtime.start(harness.engine.decoder().decode_root(_root([])))
 
         self.assertIsNone(harness.hot_corners.active)

@@ -50,7 +50,6 @@ class AttachmentRuntime:
     def start(self, profile: ProfileConfig) -> None:
         """Attach and bind every attachment of ``profile``; the config decoder already checked their references."""
 
-        self.stop()
         for attachment in profile.attachments:
             try:
                 apply = self._kinds[attachment.kind].attach(self, attachment.target)

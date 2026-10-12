@@ -81,7 +81,7 @@ class RuntimeWindow(QMainWindow):
         overlay: OverlayConfig,
         chrome: ChromeConfig,
         values: Live[WindowValues],
-        build_content: Callable[[], QWidget],
+        build_content: Callable[[], tuple[QWidget, list[Callable[[], None]]]],
         engine: Engine,
         dwell: DwellClickConfig | None = None,
     ) -> None:
@@ -111,8 +111,7 @@ class RuntimeWindow(QMainWindow):
         else:
             self._overlay = configure_plain_window(self)
         try:
-            with engine.node_builder.collecting() as node_unbinds:
-                central = build_content()
+            central, node_unbinds = build_content()
             self._unbinds.extend(node_unbinds)
             if chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
@@ -142,7 +141,9 @@ class RuntimeWindow(QMainWindow):
             self._opacity = WindowOpacityController(self)
             unbind = engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
             self._unbinds.append(unbind)
-            self.destroyed.connect(lambda _object=None: unbind())
+            # A window Qt deletes without closing it first drops its bindings too.
+            unbinds = self._unbinds
+            self.destroyed.connect(lambda _object=None: [drop() for drop in unbinds])
             self.apply_startup_size(minimum_size=self._minimum_size)
         except Exception:
             self.release_platform_resources()
@@ -237,11 +238,7 @@ class RuntimeWindow(QMainWindow):
     def restore_position(self, x: int, y: int) -> None:
         """Place the window's top-left corner at ``(x, y)`` through its overlay backend, before it shows."""
 
-        restore = getattr(self._overlay, "restore_position", None)
-        if restore is not None:
-            restore(x, y)
-        else:
-            self.move(x, y)
+        self._overlay.restore_position(x, y)
 
     def release_platform_resources(self) -> None:
         """Release native resources, the input block, and every binding before Qt destroys this window.
@@ -305,6 +302,7 @@ class RuntimeWindow(QMainWindow):
             if fitted != self.minimumSize():
                 self.setMinimumSize(fitted)
                 self.resize(fitted)
+                self._overlay.keep_on_screen()
         return handled
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
@@ -380,7 +378,7 @@ def build_profile_window(
 
     installed = attachments or WindowAttachments()
 
-    def build_content() -> QWidget:
+    def build_content() -> tuple[QWidget, list[Callable[[], None]]]:
         surface = RootSurface()
         surface.setObjectName("rootSurface")
         surface.setProperty(COMPONENT_TYPE, "surface")
@@ -389,8 +387,9 @@ def build_profile_window(
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(engine.node_builder.build(config.content))
-        return surface
+        content, unbinds = engine.node_builder.build_tree(config.content)
+        layout.addWidget(content)
+        return surface, unbinds
 
     window = RuntimeWindow(
         window_id=config.id,
