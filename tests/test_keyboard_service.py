@@ -132,13 +132,14 @@ class KeyboardServiceTests(unittest.TestCase):
         self.assertEqual(self.backend.sent[2:], [("up", "A"), ("up", "ShiftLeft")])
         self.assertEqual(self._event_names(), [KEYBOARD_RESET])
 
-    def test_shutdown_releases_held_keys_and_runs_once(self) -> None:
+    def test_shutdown_stops_listening_then_releases_held_keys_and_runs_once(self) -> None:
         self.service.press("a", (), True)
 
         self.service.shutdown()
         self.service.shutdown()
 
-        self.assertEqual(self.backend.sent[1:], [("up", "A")])
+        # Listening stops first, so the releases cannot race the listener's stop.
+        self.assertEqual(self.backend.sent[1:], [("stop_listening",), ("up", "A")])
         self.assertEqual(self.backend.shutdowns, 1)
         self.assertEqual(self._event_names(), [KEYBOARD_RESET])
 

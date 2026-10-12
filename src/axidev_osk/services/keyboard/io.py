@@ -153,7 +153,7 @@ class AxidevIoKeyboardBackend:
             return
 
         try:
-            self._stop_listener()
+            self.stop_listening()
             self._keyboard.shutdown()
         except Exception as exc:
             _logger.exception("axidev_io shutdown failed: %s", exc)
@@ -273,7 +273,9 @@ class AxidevIoKeyboardBackend:
         except Exception as exc:
             _logger.exception("axidev_io listener startup failed: %s", exc)
 
-    def _stop_listener(self) -> None:
+    def stop_listening(self) -> None:
+        """Stop observing keys; the backend keeps sending until ``shutdown``."""
+
         if self._listener_unsubscribe is None:
             return
         try:
