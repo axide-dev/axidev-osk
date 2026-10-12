@@ -1,9 +1,9 @@
-"""Built-in node kinds: button, label, spacer, grid, box, stack, and wheel.
+"""Built-in node kinds: button, label, spacer, grid, box, stack, and canvas.
 
 Every value a kind reads from its options may be a binding. Fixed fields (a
-box's direction, a wheel's slice count, a grid child's cell, a box child's
-stretch, a wheel child's slice) are read
-separately and never change while the widget lives.
+box's direction, a grid child's cell, a box child's stretch) are read
+separately and never change while the widget lives. A canvas child's place is
+its ``shape``, a value like any other, so it may follow state.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..components.button.widget import Button
-from ..components.wheel import Wheel
+from ..components.canvas import Canvas
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
 from ..widget_properties import COMPONENT_ID
@@ -59,7 +59,8 @@ class SizeOptions:
 
 @dataclass(frozen=True, slots=True)
 class ButtonOptions:
-    label: str = ""
+    label: str | tuple[str, ...] = ""
+    """One label, or several parts the button spreads over its shape."""
     active: bool = False
     latched: bool = False
     enabled: bool = True
@@ -98,11 +99,7 @@ class StackOptions:
 
 
 @dataclass(frozen=True, slots=True)
-class WheelOptions:
-    """A wheel's center disc radius as a percent of its own, the gap between parts, and whether it shows."""
-
-    inner_percent: int = 25
-    spacing: int = 0
+class CanvasOptions:
     visible: bool = True
     size: SizeOptions = SizeOptions()
 
@@ -110,11 +107,6 @@ class WheelOptions:
 @dataclass(frozen=True, slots=True)
 class BoxStructure:
     direction: str = "vertical"
-
-
-@dataclass(frozen=True, slots=True)
-class WheelStructure:
-    slices: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,13 +124,6 @@ class BoxPlacement:
     """How much spare space a box child takes, read from its ``stretch`` field."""
 
     stretch: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class WheelPlacement:
-    """Which slice a wheel child fills, read from its ``slice`` field; ``None`` is the center disc."""
-
-    slice: int | None
 
 
 def register_builtin_nodes(registry: NodeKindRegistry) -> None:
@@ -188,14 +173,12 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
     )
     registry.register(
         NodeKind(
-            name="wheel",
-            build=_build_wheel,
-            apply=_apply_wheel,
-            decode_options=_decode_wheel,
+            name="canvas",
+            build=_build_canvas,
+            apply=_apply_canvas,
+            decode_options=_decode_canvas,
             has_children=True,
-            decode_structure=_decode_wheel_structure,
-            decode_child_placement=_decode_wheel_placement,
-            check_children=_check_wheel_children,
+            shapes_children=True,
         )
     )
 
@@ -214,8 +197,13 @@ def _visible(reader: ConfigReader) -> bool:
 
 
 def _decode_button(reader: ConfigReader) -> ButtonOptions:
+    label = reader.raw("label", "")
+    if isinstance(label, list) and all(isinstance(part, str) for part in label):
+        label = tuple(label)
+    elif not isinstance(label, str):
+        raise ConfigError(f"{reader.field_path('label')} must be a string or a list of strings")
     return ButtonOptions(
-        label=reader.optional_string("label") or "",
+        label=label,
         active=reader.boolean("active", False),
         latched=reader.boolean("latched", False),
         enabled=reader.boolean("enabled", True),
@@ -251,41 +239,8 @@ def _decode_stack(reader: ConfigReader) -> StackOptions:
     return StackOptions(current=reader.optional_string("current"), visible=_visible(reader))
 
 
-def _decode_wheel(reader: ConfigReader) -> WheelOptions:
-    inner_percent = reader.integer("inner_percent", 25, minimum=0)
-    if inner_percent > 90:
-        raise ConfigError(f"{reader.field_path('inner_percent')} must be at most 90")
-    return WheelOptions(
-        inner_percent=inner_percent,
-        spacing=reader.integer("spacing", 0, minimum=0),
-        visible=_visible(reader),
-        size=_decode_size(reader),
-    )
-
-
-def _decode_wheel_structure(reader: ConfigReader) -> WheelStructure:
-    return WheelStructure(slices=reader.integer("slices", minimum=2))
-
-
-def _decode_wheel_placement(reader: ConfigReader) -> WheelPlacement:
-    center = reader.boolean("center", False)
-    if center == reader.has("slice"):
-        raise ConfigError(f"{reader.path} must set either slice or center = true")
-    return WheelPlacement(slice=None if center else reader.integer("slice", minimum=0))
-
-
-def _check_wheel_children(reader: ConfigReader, structure: object, children: tuple[NodeConfig, ...]) -> None:
-    assert isinstance(structure, WheelStructure)
-    taken: dict[int | None, str] = {}
-    for child in children:
-        place = child.placement
-        assert isinstance(place, WheelPlacement)
-        where = "the center" if place.slice is None else f"slice {place.slice}"
-        if place.slice is not None and place.slice >= structure.slices:
-            raise ConfigError(f"{reader.field_path('children')}: {child.id!r} takes {where}, but the wheel has {structure.slices} slices")
-        if place.slice in taken:
-            raise ConfigError(f"{reader.field_path('children')}: {child.id!r} takes {where}, which {taken[place.slice]!r} already takes")
-        taken[place.slice] = child.id
+def _decode_canvas(reader: ConfigReader) -> CanvasOptions:
+    return CanvasOptions(visible=_visible(reader), size=_decode_size(reader))
 
 
 def _decode_box_structure(reader: ConfigReader) -> BoxStructure:
@@ -345,8 +300,12 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
     if old is None or options.size != old.size:
         options.size.apply(widget)
     if old is None or options.label != old.label:
-        # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
-        widget.setText(options.label.replace("&", "&&"))
+        if isinstance(options.label, tuple):
+            widget.set_parts(options.label)
+        else:
+            widget.set_parts(())
+            # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
+            widget.setText(options.label.replace("&", "&&"))
     if old is None or options.enabled != old.enabled:
         widget.setEnabled(options.enabled)
     if old is None or (options.active, options.latched) != (old.active, old.latched):
@@ -478,26 +437,17 @@ def _apply_stack(widget: QWidget, options: object, previous: object | None) -> N
         _apply_visible(widget, options.visible)
 
 
-def _build_wheel(node: NodeConfig, builder: NodeBuilder) -> QWidget:
-    structure = node.structure
-    assert isinstance(structure, WheelStructure)
-    wheel = Wheel(structure.slices)
+def _build_canvas(node: NodeConfig, builder: NodeBuilder) -> QWidget:
+    canvas = Canvas()
     for child in node.children:
-        place = child.placement
-        assert isinstance(place, WheelPlacement)
-        widget = builder.build(child)
-        if place.slice is None:
-            wheel.add_center(widget)
-        else:
-            wheel.add_slice(widget, place.slice)
-    return wheel
+        builder.build(child, place=canvas.place)
+    return canvas
 
 
-def _apply_wheel(widget: QWidget, options: object, previous: object | None) -> None:
-    assert isinstance(widget, Wheel) and isinstance(options, WheelOptions)
-    old = previous if isinstance(previous, WheelOptions) else None
+def _apply_canvas(widget: QWidget, options: object, previous: object | None) -> None:
+    assert isinstance(widget, Canvas) and isinstance(options, CanvasOptions)
+    old = previous if isinstance(previous, CanvasOptions) else None
     if old is None or options.size != old.size:
         options.size.apply(widget)
-    widget.set_shape(options.inner_percent / 100, options.spacing)
     if old is None or options.visible != old.visible:
         _apply_visible(widget, options.visible)

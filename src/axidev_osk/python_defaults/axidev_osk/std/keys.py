@@ -1,9 +1,10 @@
 """Keyboard key builders built only from ``axidev_osk`` primitives.
 
-Every key is built from a layout entry (``std.layouts``): ``key``, ``letter``,
-``shifted``, ``modifier``, and ``lock`` build one fixed entry, ``at`` builds the
-entry the active layout puts on a board position, and ``tap`` uses an entry at
-once, for menus such as ``std.wheel``.
+Every key is built from a layout entry (``std.layouts``), and ``behavior``
+says how an entry acts as a key whatever widget shows it: ``key``, ``letter``,
+``shifted``, ``modifier``, and ``lock`` build a button for one fixed entry,
+``at`` one for the entry the active layout puts on a board position, and
+``std.wheel`` lends the same behavior to a wheel slice.
 
 Library state lives under ``std``:
 
@@ -90,7 +91,7 @@ def legend(state: Any, entry: Mapping[str, Any]) -> str:
 def from_entry(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A key button for one layout entry; ``opts`` overrides any button field."""
 
-    defaults = {"id": f"key:{entry['output']}", **entry_fields(entry, opts)}
+    defaults = {"id": f"key:{entry['output']}", **behavior(entry, opts)}
     return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
 
 
@@ -107,7 +108,7 @@ def at(
     a press sends all come from the active layout's entry for ``position``.
     """
 
-    variants = {name: entry_fields(table[position], opts) for name, table in layouts.items() if position in table}
+    variants = {name: behavior(table[position], opts) for name, table in layouts.items() if position in table}
 
     def value(field: str, default: Any) -> axidev_osk.Binding:
         def bound(state: Any) -> Any:
@@ -132,32 +133,6 @@ def at(
         "on_release": callback("on_release"),
     }
     return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
-
-
-def tap(state: Any, entry: Mapping[str, Any]) -> list[axidev_osk.Map]:
-    """Actions that use a layout entry at once, the way one click on a menu item does.
-
-    A modifier toggles as a one-shot modifier for the next key. Any other key
-    is tapped with the waiting one-shot modifiers, which then clear.
-    """
-
-    if entry["kind"] == "modifier":
-        path = _one_shot_path(entry)
-        return [axidev_osk.state.set(path, None if waiting(state, entry) else entry["output"])]
-    held = _one_shot(state)
-    actions = [axidev_osk.keyboard.tap(entry["output"], sorted(held.values()) or None)]
-    actions += [axidev_osk.state.set(["std", "one_shot", latch], None) for latch in sorted(held)]
-    return actions
-
-
-def waiting(state: Any, entry: Mapping[str, Any]) -> bool:
-    """Whether a modifier entry waits for the next key, as ``tap`` left it."""
-
-    return entry["kind"] == "modifier" and axidev_osk.read(state, _one_shot_path(entry)) is not None
-
-
-def _one_shot_path(entry: Mapping[str, Any]) -> list[str]:
-    return ["std", "one_shot", _default_latch(entry["label"], entry["output"], "one_shot", True)]
 
 
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
@@ -196,8 +171,13 @@ def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axid
     return from_entry(layouts.lock(label, output), opts)
 
 
-def entry_fields(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The button fields a layout entry gives a key: its label, lit states, and callbacks.
+def behavior(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """How a layout entry behaves as a key, whatever widget shows it.
+
+    Returns button fields: its ``label``, ``active`` while its key is down,
+    ``latched`` while a modifier or lock holds, and the ``on_press`` and
+    ``on_release`` callbacks. Pressing sends the key down, repeating while it
+    is held, and releasing lets it go; a modifier latches instead.
 
     ``opts`` may set ``repeat`` for any key, and ``mode`` and ``latch`` for a modifier.
     """

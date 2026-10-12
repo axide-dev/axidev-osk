@@ -1,7 +1,7 @@
 """Engine actions, observation events, and the handlers that record observations.
 
 Observations arrive as events. The handlers here copy them into runtime-owned
-state (``input.*``, ``keyboard.*``, ``windows.*``) before profile callbacks
+state (``input.*``, ``keyboard.*``, ``windows.*``, ``nodes.*``) before profile callbacks
 for the same event run, so profiles always read up-to-date state.
 """
 
@@ -37,6 +37,7 @@ KEYBOARD_PERMISSION_REQUIRED = "keyboard.permission_required"
 KEYBOARD_RESET = "keyboard.reset"
 PROCESS_EXITED = "process.exited"
 WINDOW_STATE_CHANGED = "window.state_changed"
+NODE_RESIZED = "node.resized"
 
 KEYBOARD_DOWN = "keyboard.down"
 KEYBOARD_UP = "keyboard.up"
@@ -93,8 +94,10 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         ),
         {},
     ),
+    ("nodes",): Variable(MapOf(Record({"size": _record(width=_integer(), height=_integer())})), {}),
 }
-"""What the engine observes: keys and locks, keyboard output status, the running and available profiles, and each built window."""
+"""What the engine observes: keys and locks, keyboard output status, the running and available profiles,
+each built window, and each node built with ``report_size``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +130,13 @@ class WindowStateArguments:
     minimized: bool
     x: int
     y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class NodeResizedArguments:
+    node: str
     width: int
     height: int
 
@@ -250,6 +260,12 @@ def window_state_changed(
     )
 
 
+def node_resized(node_id: str, width: int, height: int) -> RuntimeEvent:
+    """Report the size a node built with ``report_size`` now has on screen."""
+
+    return validated_event(NODE_RESIZED, {"node": node_id, "width": width, "height": height}, decode_node_resized)
+
+
 def keyboard_down(key: str, mods: tuple[str, ...] = (), repeat: bool = True) -> RuntimeAction:
     return validated_action(KEYBOARD_DOWN, {"key": key, "mods": list(mods), "repeat": repeat}, decode_keyboard_down)
 
@@ -291,6 +307,15 @@ def decode_window_state(arguments: DataMap) -> WindowStateArguments:
         minimized=bool_value(arguments, "minimized"),
         x=int_value(arguments, "x"),
         y=int_value(arguments, "y"),
+        width=int_value(arguments, "width"),
+        height=int_value(arguments, "height"),
+    )
+
+
+def decode_node_resized(arguments: DataMap) -> NodeResizedArguments:
+    require_keys(arguments, ("node", "width", "height"))
+    return NodeResizedArguments(
+        node=non_empty_string_value(arguments, "node"),
         width=int_value(arguments, "width"),
         height=int_value(arguments, "height"),
     )
@@ -347,6 +372,7 @@ def register_engine_events(dispatcher: Dispatcher) -> None:
     dispatcher.register_event(KEYBOARD_RESET, decode_empty)
     dispatcher.register_event(PROCESS_EXITED, decode_process_exited)
     dispatcher.register_event(WINDOW_STATE_CHANGED, decode_window_state)
+    dispatcher.register_event(NODE_RESIZED, decode_node_resized)
 
 
 def install_engine_handlers(
@@ -389,6 +415,9 @@ def install_engine_handlers(
             messages.extend(profile_runtime.set_observed(("windows", event.window_id, name), value))
         return messages
 
+    def record_node_size(event: NodeResizedArguments) -> MessageResult:
+        return profile_runtime.set_observed(("nodes", event.node, "size"), {"width": event.width, "height": event.height})
+
     def press(arguments: KeyboardDownArguments) -> MessageResult:
         keyboard.press(arguments.key, arguments.mods, arguments.repeat)
         return []
@@ -419,6 +448,7 @@ def install_engine_handlers(
     dispatcher.add_event_handler(INPUT_KEY, record_input_key)
     dispatcher.add_event_handler(KEYBOARD_STATUS_CHANGED, record_keyboard_status)
     dispatcher.add_event_handler(WINDOW_STATE_CHANGED, record_window_state)
+    dispatcher.add_event_handler(NODE_RESIZED, record_node_size)
     dispatcher.register_action(KEYBOARD_DOWN, decode_keyboard_down, press)
     dispatcher.register_action(KEYBOARD_UP, decode_keyboard_key, release)
     dispatcher.register_action(KEYBOARD_TAP, decode_keyboard_tap, tap)

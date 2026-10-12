@@ -96,5 +96,22 @@ US: dict[str, Entry] = {
 }
 """The bundled US layout on the ``std.board.TKL`` positions."""
 
-LAYOUTS: dict[str, dict[str, Entry]] = {"us": US}
+DVORAK: dict[str, Entry] = {
+    **US,
+    "AE11": shifted("[", "{", "["),
+    "AE12": shifted("]", "}", "]"),
+    "AD01": shifted("'", '"', "'"),
+    "AD02": shifted(",", "<", ","),
+    "AD03": shifted(".", ">", "."),
+    **{f"AD{index:02d}": letter(char) for index, char in enumerate("pyfgcrl", start=4)},
+    "AD11": shifted("/", "?", "/"),
+    "AD12": shifted("=", "+", "="),
+    **{f"AC{index:02d}": letter(char) for index, char in enumerate("aoeuidhtns", start=1)},
+    "AC11": shifted("-", "_", "-"),
+    "AB01": shifted(";", ":", ";"),
+    **{f"AB{index:02d}": letter(char) for index, char in enumerate("qjkxbmwvz", start=2)},
+}
+"""The US Dvorak layout: the US table with the letters and the symbols around them moved."""
+
+LAYOUTS: dict[str, dict[str, Entry]] = {"us": US, "dvorak": DVORAK}
 """Every bundled layout by name."""

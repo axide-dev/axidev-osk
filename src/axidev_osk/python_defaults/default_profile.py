@@ -26,7 +26,7 @@ NO_TERMINAL_NOTICE = "permission-no-terminal"
 
 UNIT = 4
 NAV_START = 68
-KEY_UNIT_PX = 48
+KEY_UNIT_PX = 32
 GRID_GAP_PX = 4
 OVERLAY = {"placement": "center", "screen_margin": 16}
 # Closing a prompt cancels it, so the profile hides it instead of the engine asking to quit.
@@ -165,6 +165,18 @@ def _profile_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_o
     )
 
 
+def _layout_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map]:
+    return controls.dropdown(
+        f"{window}:layout-menu",
+        [(name, name.upper()) for name in layouts.LAYOUTS],
+        value=_setting("layout"),
+        on_select=lambda ctx, name: [axidev_osk.state.set("settings.layout", name)],
+        label="Layout",
+        group=group,
+        panel_opts={"direction": "horizontal"},
+    )
+
+
 def _dwell_menu(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map]:
     items: list[axidev_osk.Map] = [
         controls.checkbox(
@@ -198,16 +210,18 @@ def _dwell_menu(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map
 
 
 def settings_strip(window: str) -> axidev_osk.Map:
-    """The collapsed settings strip every window carries: profile, keyboard opacity, and dwell settings."""
+    """The collapsed settings strip every window carries: profile, layout, keyboard opacity, and dwell settings."""
 
     strip_id = f"{window}:strip"
     group = controls.strip_group(strip_id)
     profile_button, profile_panel = _profile_dropdown(window, group)
+    layout_button, layout_panel = _layout_dropdown(window, group)
     dwell_button, dwell_panel = _dwell_menu(window, group)
     return controls.strip(
         strip_id,
         [
             profile_button,
+            layout_button,
             controls.stepper(
                 f"{window}:opacity",
                 "settings.opacity",
@@ -219,7 +233,7 @@ def settings_strip(window: str) -> axidev_osk.Map:
             ),
             dwell_button,
         ],
-        panels=[profile_panel, dwell_panel],
+        panels=[profile_panel, layout_panel, dwell_panel],
         opts={"margins": [10, 0, 10, 2], "style": STRIP_STYLE},
     )
 
@@ -440,7 +454,7 @@ def social_profile() -> axidev_osk.Map:
 
 
 def wheel_window() -> axidev_osk.Map:
-    """The keyboard as a 6-slice wheel, opening where the main keyboard was."""
+    """The keyboard as a 10-slice wheel, opening where the main keyboard was."""
 
     return axidev_osk.window(
         id=KEYBOARD,
@@ -461,7 +475,9 @@ def wheel_window() -> axidev_osk.Map:
                     wheel.TKL,
                     layouts.LAYOUTS,
                     _setting("layout"),
-                    {"inner_percent": 22, "spacing": GRID_GAP_PX, "min_width": 440, "min_height": 440},
+                    {"min_width": 260, "min_height": 260},
+                    inner=0.22,
+                    spacing=GRID_GAP_PX,
                 ),
                 axidev_osk.label(
                     id="keyboard-status",

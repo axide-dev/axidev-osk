@@ -283,9 +283,9 @@ def strip(
 
 
 def with_strip(window: Mapping[str, Any], strip_node: axidev_osk.Map) -> axidev_osk.Map:
-    """Return ``window`` with ``strip_node`` placed under its content."""
+    """Return ``window`` with ``strip_node`` placed under its content, which takes all spare height."""
 
-    content = window["content"]
+    content = axidev_osk.merge(window["content"], {"stretch": 1})
     return axidev_osk.window(
         **axidev_osk.merge(
             window,

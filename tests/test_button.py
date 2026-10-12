@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QContextMenuEvent
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QContextMenuEvent, QFontInfo, QFontMetrics, QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -15,6 +15,25 @@ from support import RecordingBackend, build_window, find_node, make_test_engine,
 
 
 class ButtonTests(unittest.TestCase):
+    def test_labels_shrink_to_fit_but_never_grow_past_the_style_size(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 18px; padding: 0px; border: none; }")
+        button.resize(60, 40)
+        button.show()
+        area = button.rect()
+
+        self.assertEqual(QFontInfo(button.fitted_font("a", area)).pixelSize(), 18)
+        long = button.fitted_font("Backspace Backspace", area)
+        self.assertLess(QFontInfo(long).pixelSize(), 18)
+        self.assertLessEqual(QFontMetrics(long).horizontalAdvance("Backspace Backspace"), area.width())
+
+        # A clipped button fits its label inside the clipped shape, not its rectangle.
+        button.setMask(QRegion(QRect(20, 10, 20, 20)))
+        clipped = button.fitted_font("Back", area)
+        self.assertLessEqual(QFontMetrics(clipped).horizontalAdvance("Back"), 20)
+
     def test_right_click_has_the_same_signal_cycle_as_left_click(self) -> None:
         qt_app()
         button = Button("Test")

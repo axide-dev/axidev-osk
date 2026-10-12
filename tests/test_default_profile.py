@@ -3,6 +3,8 @@
 ``EXPECTED_GRID`` and ``EXPECTED_OUTPUTS`` were measured from the original
 engine-built keyboard widget before it was deleted. Each grid row is
 (row, column, row span, column span, minimum width, minimum height, legend).
+The minimum sizes were later scaled down on purpose to a 32 px key unit;
+the cells, legends, and outputs are still the original measurements.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_d
 from axidev_osk.python_defaults.axidev_osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
+from axidev_osk.runtime.profile_runtime import state_set
 from support import RecordingBackend, build_window, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
 
 _MODIFIERS = {"LFSH", "RTSH", "LCTL", "RCTL", "LWIN", "RWIN", "LALT", "RALT"}
@@ -318,96 +321,119 @@ class BehaviorParityTests(unittest.TestCase):
         self.assertTrue(status.isHidden())
 
 
+class LayoutSwitchTests(unittest.TestCase):
+    def test_both_keyboards_follow_the_layout_setting_to_dvorak(self) -> None:
+        for profile_name, node_id in (("default", "key:AD01"), ("wheel", "wheel:slice:9")):
+            with self.subTest(profile_name):
+                qt_app()
+                backend = RecordingBackend()
+                engine = make_test_engine(backend)
+                config = build_default_config()
+                config["active_profile"] = profile_name
+                window = build_window(self, start_test_profile(engine, config).window("keyboard"), engine)
+                engine.dispatcher.dispatch(state_set("settings.layout", "dvorak"))
+                if profile_name == "wheel":
+                    # Slice 9 opens the top letter row; its first key sits on the left, slice 7.
+                    engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+                    node_id = "wheel:slice:7"
+                key = nodes_by_id(window)[node_id]
+
+                self.assertEqual(key.text(), "'")  # type: ignore[attr-defined]
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+                self.assertEqual(backend.sent, [("down", "'", (), True), ("up", "'")])
+
+
 EXPECTED_GRID = [
-    (0, 0, 1, 4, 48, 48, 'Esc'),
-    (0, 4, 1, 4, 48, 48, 'F1'),
-    (0, 8, 1, 4, 48, 48, 'F2'),
-    (0, 12, 1, 4, 48, 48, 'F3'),
-    (0, 16, 1, 4, 48, 48, 'F4'),
-    (0, 20, 1, 4, 48, 48, 'F5'),
-    (0, 24, 1, 4, 48, 48, 'F6'),
-    (0, 28, 1, 4, 48, 48, 'F7'),
-    (0, 32, 1, 4, 48, 48, 'F8'),
-    (0, 36, 1, 4, 48, 48, 'F9'),
-    (0, 40, 1, 4, 48, 48, 'F10'),
-    (0, 44, 1, 4, 48, 48, 'F11'),
-    (0, 48, 1, 4, 48, 48, 'F12'),
-    (0, 52, 1, 4, 48, 48, 'Dwell'),
-    (0, 60, 1, 4, 48, 48, 'PrtSc'),
-    (0, 64, 1, 4, 48, 48, 'ScrLk'),
-    (0, 68, 1, 4, 48, 48, 'Pause'),
-    (1, 0, 1, 4, 48, 48, '`'),
-    (1, 4, 1, 4, 48, 48, '1'),
-    (1, 8, 1, 4, 48, 48, '2'),
-    (1, 12, 1, 4, 48, 48, '3'),
-    (1, 16, 1, 4, 48, 48, '4'),
-    (1, 20, 1, 4, 48, 48, '5'),
-    (1, 24, 1, 4, 48, 48, '6'),
-    (1, 28, 1, 4, 48, 48, '7'),
-    (1, 32, 1, 4, 48, 48, '8'),
-    (1, 36, 1, 4, 48, 48, '9'),
-    (1, 40, 1, 4, 48, 48, '0'),
-    (1, 44, 1, 4, 48, 48, '-'),
-    (1, 48, 1, 4, 48, 48, '='),
-    (1, 52, 1, 8, 96, 48, 'Backspace'),
-    (1, 60, 1, 4, 48, 48, 'Ins'),
-    (1, 64, 1, 4, 48, 48, 'Home'),
-    (1, 68, 1, 4, 48, 48, 'PgUp'),
-    (2, 0, 1, 6, 72, 48, 'Tab'),
-    (2, 6, 1, 4, 48, 48, 'q'),
-    (2, 10, 1, 4, 48, 48, 'w'),
-    (2, 14, 1, 4, 48, 48, 'e'),
-    (2, 18, 1, 4, 48, 48, 'r'),
-    (2, 22, 1, 4, 48, 48, 't'),
-    (2, 26, 1, 4, 48, 48, 'y'),
-    (2, 30, 1, 4, 48, 48, 'u'),
-    (2, 34, 1, 4, 48, 48, 'i'),
-    (2, 38, 1, 4, 48, 48, 'o'),
-    (2, 42, 1, 4, 48, 48, 'p'),
-    (2, 46, 1, 4, 48, 48, '['),
-    (2, 50, 1, 4, 48, 48, ']'),
-    (2, 54, 1, 4, 48, 48, 'Ghost'),
-    (2, 60, 1, 4, 48, 48, 'Del'),
-    (2, 64, 1, 4, 48, 48, 'End'),
-    (2, 68, 1, 4, 48, 48, 'PgDn'),
-    (3, 0, 1, 7, 84, 48, 'Caps'),
-    (3, 7, 1, 4, 48, 48, 'a'),
-    (3, 11, 1, 4, 48, 48, 's'),
-    (3, 15, 1, 4, 48, 48, 'd'),
-    (3, 19, 1, 4, 48, 48, 'f'),
-    (3, 23, 1, 4, 48, 48, 'g'),
-    (3, 27, 1, 4, 48, 48, 'h'),
-    (3, 31, 1, 4, 48, 48, 'j'),
-    (3, 35, 1, 4, 48, 48, 'k'),
-    (3, 39, 1, 4, 48, 48, 'l'),
-    (3, 43, 1, 4, 48, 48, ';'),
-    (3, 47, 1, 4, 48, 48, "'"),
-    (3, 51, 1, 9, 108, 48, 'Enter'),
-    (4, 0, 1, 5, 60, 48, 'Shift'),
-    (4, 5, 1, 4, 48, 48, '\\'),
-    (4, 9, 1, 4, 48, 48, 'z'),
-    (4, 13, 1, 4, 48, 48, 'x'),
-    (4, 17, 1, 4, 48, 48, 'c'),
-    (4, 21, 1, 4, 48, 48, 'v'),
-    (4, 25, 1, 4, 48, 48, 'b'),
-    (4, 29, 1, 4, 48, 48, 'n'),
-    (4, 33, 1, 4, 48, 48, 'm'),
-    (4, 37, 1, 4, 48, 48, ','),
-    (4, 41, 1, 4, 48, 48, '.'),
-    (4, 45, 1, 4, 48, 48, '/'),
-    (4, 49, 1, 11, 132, 48, 'Shift'),
-    (4, 64, 1, 4, 48, 48, '↑'),
-    (5, 0, 1, 5, 60, 48, 'Ctrl'),
-    (5, 5, 1, 5, 60, 48, 'Super'),
-    (5, 10, 1, 5, 60, 48, 'Alt'),
-    (5, 15, 1, 25, 300, 48, 'Space'),
-    (5, 40, 1, 5, 60, 48, 'AltGr'),
-    (5, 45, 1, 5, 60, 48, 'Super'),
-    (5, 50, 1, 5, 60, 48, 'Menu'),
-    (5, 55, 1, 5, 60, 48, 'Ctrl'),
-    (5, 60, 1, 4, 48, 48, '←'),
-    (5, 64, 1, 4, 48, 48, '↓'),
-    (5, 68, 1, 4, 48, 48, '→'),
+    (0, 0, 1, 4, 32, 32, 'Esc'),
+    (0, 4, 1, 4, 32, 32, 'F1'),
+    (0, 8, 1, 4, 32, 32, 'F2'),
+    (0, 12, 1, 4, 32, 32, 'F3'),
+    (0, 16, 1, 4, 32, 32, 'F4'),
+    (0, 20, 1, 4, 32, 32, 'F5'),
+    (0, 24, 1, 4, 32, 32, 'F6'),
+    (0, 28, 1, 4, 32, 32, 'F7'),
+    (0, 32, 1, 4, 32, 32, 'F8'),
+    (0, 36, 1, 4, 32, 32, 'F9'),
+    (0, 40, 1, 4, 32, 32, 'F10'),
+    (0, 44, 1, 4, 32, 32, 'F11'),
+    (0, 48, 1, 4, 32, 32, 'F12'),
+    (0, 52, 1, 4, 32, 32, 'Dwell'),
+    (0, 60, 1, 4, 32, 32, 'PrtSc'),
+    (0, 64, 1, 4, 32, 32, 'ScrLk'),
+    (0, 68, 1, 4, 32, 32, 'Pause'),
+    (1, 0, 1, 4, 32, 32, '`'),
+    (1, 4, 1, 4, 32, 32, '1'),
+    (1, 8, 1, 4, 32, 32, '2'),
+    (1, 12, 1, 4, 32, 32, '3'),
+    (1, 16, 1, 4, 32, 32, '4'),
+    (1, 20, 1, 4, 32, 32, '5'),
+    (1, 24, 1, 4, 32, 32, '6'),
+    (1, 28, 1, 4, 32, 32, '7'),
+    (1, 32, 1, 4, 32, 32, '8'),
+    (1, 36, 1, 4, 32, 32, '9'),
+    (1, 40, 1, 4, 32, 32, '0'),
+    (1, 44, 1, 4, 32, 32, '-'),
+    (1, 48, 1, 4, 32, 32, '='),
+    (1, 52, 1, 8, 64, 32, 'Backspace'),
+    (1, 60, 1, 4, 32, 32, 'Ins'),
+    (1, 64, 1, 4, 32, 32, 'Home'),
+    (1, 68, 1, 4, 32, 32, 'PgUp'),
+    (2, 0, 1, 6, 48, 32, 'Tab'),
+    (2, 6, 1, 4, 32, 32, 'q'),
+    (2, 10, 1, 4, 32, 32, 'w'),
+    (2, 14, 1, 4, 32, 32, 'e'),
+    (2, 18, 1, 4, 32, 32, 'r'),
+    (2, 22, 1, 4, 32, 32, 't'),
+    (2, 26, 1, 4, 32, 32, 'y'),
+    (2, 30, 1, 4, 32, 32, 'u'),
+    (2, 34, 1, 4, 32, 32, 'i'),
+    (2, 38, 1, 4, 32, 32, 'o'),
+    (2, 42, 1, 4, 32, 32, 'p'),
+    (2, 46, 1, 4, 32, 32, '['),
+    (2, 50, 1, 4, 32, 32, ']'),
+    (2, 54, 1, 4, 32, 32, 'Ghost'),
+    (2, 60, 1, 4, 32, 32, 'Del'),
+    (2, 64, 1, 4, 32, 32, 'End'),
+    (2, 68, 1, 4, 32, 32, 'PgDn'),
+    (3, 0, 1, 7, 56, 32, 'Caps'),
+    (3, 7, 1, 4, 32, 32, 'a'),
+    (3, 11, 1, 4, 32, 32, 's'),
+    (3, 15, 1, 4, 32, 32, 'd'),
+    (3, 19, 1, 4, 32, 32, 'f'),
+    (3, 23, 1, 4, 32, 32, 'g'),
+    (3, 27, 1, 4, 32, 32, 'h'),
+    (3, 31, 1, 4, 32, 32, 'j'),
+    (3, 35, 1, 4, 32, 32, 'k'),
+    (3, 39, 1, 4, 32, 32, 'l'),
+    (3, 43, 1, 4, 32, 32, ';'),
+    (3, 47, 1, 4, 32, 32, "'"),
+    (3, 51, 1, 9, 72, 32, 'Enter'),
+    (4, 0, 1, 5, 40, 32, 'Shift'),
+    (4, 5, 1, 4, 32, 32, '\\'),
+    (4, 9, 1, 4, 32, 32, 'z'),
+    (4, 13, 1, 4, 32, 32, 'x'),
+    (4, 17, 1, 4, 32, 32, 'c'),
+    (4, 21, 1, 4, 32, 32, 'v'),
+    (4, 25, 1, 4, 32, 32, 'b'),
+    (4, 29, 1, 4, 32, 32, 'n'),
+    (4, 33, 1, 4, 32, 32, 'm'),
+    (4, 37, 1, 4, 32, 32, ','),
+    (4, 41, 1, 4, 32, 32, '.'),
+    (4, 45, 1, 4, 32, 32, '/'),
+    (4, 49, 1, 11, 88, 32, 'Shift'),
+    (4, 64, 1, 4, 32, 32, '↑'),
+    (5, 0, 1, 5, 40, 32, 'Ctrl'),
+    (5, 5, 1, 5, 40, 32, 'Super'),
+    (5, 10, 1, 5, 40, 32, 'Alt'),
+    (5, 15, 1, 25, 200, 32, 'Space'),
+    (5, 40, 1, 5, 40, 32, 'AltGr'),
+    (5, 45, 1, 5, 40, 32, 'Super'),
+    (5, 50, 1, 5, 40, 32, 'Menu'),
+    (5, 55, 1, 5, 40, 32, 'Ctrl'),
+    (5, 60, 1, 4, 32, 32, '←'),
+    (5, 64, 1, 4, 32, 32, '↓'),
+    (5, 68, 1, 4, 32, 32, '→'),
 ]
 
 EXPECTED_OUTPUTS = ['Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'PrintScreen', 'ScrollLock', 'Pause', '`', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace', 'Insert', 'Home', 'PageUp', 'Tab', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']', 'Delete', 'End', 'PageDown', 'CapsLock', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'", 'Enter', 'ShiftLeft', '\\', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', 'ShiftRight', 'Up', 'CtrlLeft', 'SuperLeft', 'AltLeft', 'Space', 'AltRight', 'SuperRight', 'Menu', 'CtrlRight', 'Left', 'Down', 'Right']

@@ -4,9 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QContextMenuEvent, QMouseEvent
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import (
+    QColor,
+    QContextMenuEvent,
+    QFont,
+    QFontInfo,
+    QFontMetrics,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPaintEvent,
+    QPen,
+    QRegion,
+)
+from PySide6.QtWidgets import QPushButton, QStyle, QStyleOptionButton, QWidget
+
+_TEXT_FLAGS = Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextShowMnemonic
+_SAMPLE_SIZE = 32
 
 
 class Button(QPushButton):
@@ -14,10 +30,162 @@ class Button(QPushButton):
 
     The widget keeps no interaction state of its own. Callers render
     pressed and latched state from runtime snapshots.
+
+    Its label is never cut: the font its style gives it is the largest size
+    used, and a label that does not fit its content area, or its shape, is
+    drawn at the largest size that fits. A label given as several parts is
+    spread over the shape in rows, each row holding as many parts as the
+    shape is wide there.
+
+    A parent may give the button a shape (``set_shape``): the button is then
+    clipped to it and draws its border along it, in the color its style
+    gives a rectangular button's border in the same state.
     """
 
     def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
         super().__init__(label, parent)
+        self._parts: tuple[str, ...] = ()
+        self._outline: QPainterPath | None = None
+
+    def set_parts(self, parts: tuple[str, ...]) -> None:
+        """Show ``parts`` spread over the button instead of one label; empty restores the label."""
+
+        self._parts = parts
+        if parts:
+            self.setText(" ".join(parts).replace("&", "&&"))
+        self.update()
+
+    def set_shape(self, outline: QPainterPath | None) -> None:
+        """Clip the button to ``outline``, in its own coordinates, and draw its border along it."""
+
+        self._outline = outline
+        if outline is None:
+            self.clearMask()
+        else:
+            self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
+        del event
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        text = option.text
+        option.text = ""
+        painter = QPainter(self)
+        style = self.style()
+        style.drawControl(QStyle.ControlElement.CE_PushButtonBevel, option, painter, self)
+        if self._outline is not None:
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            # The mask cuts the outer half of the pen, leaving a one pixel border.
+            painter.setPen(QPen(self._border_color(option), 2))
+            painter.drawPath(self._outline)
+            painter.restore()
+        area = style.subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
+        painter.setPen(option.palette.buttonText().color())
+        if self._parts:
+            font, placed = self.spread(self._parts, area)
+            painter.setFont(font)
+            for box, part in placed:
+                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, part)
+        elif text:
+            painter.setFont(self.fitted_font(text, area))
+            painter.drawText(area, _TEXT_FLAGS, text)
+
+    def fitted_font(self, text: str, area: QRect) -> QFont:
+        """The style's font, made smaller until ``text`` fits ``area`` and the button's mask."""
+
+        font = QFont(self.font())
+        mask = self.mask()
+
+        def fits(size: int) -> bool:
+            font.setPixelSize(size)
+            needed = QFontMetrics(font).boundingRect(QRect(), _TEXT_FLAGS, text)
+            box = QRect(0, 0, needed.width(), needed.height())
+            box.moveCenter(area.center())
+            if not area.contains(box):
+                return False
+            return mask.isEmpty() or mask.intersected(box) == QRegion(box)
+
+        font.setPixelSize(self._largest_fitting(fits))
+        return font
+
+    def spread(self, parts: tuple[str, ...], area: QRect) -> tuple[QFont, list[tuple[QRect, str]]]:
+        """Place ``parts`` in rows over ``area`` and the button's mask, at the largest size that fits them all."""
+
+        font = QFont(self.font())
+        mask = self.mask()
+
+        def span(top: int, bottom: int) -> tuple[int, int] | None:
+            # Where a row is free across its whole height; the shapes are convex, so its two edges decide.
+            left, right = area.left(), area.right()
+            if not mask.isEmpty():
+                for y in (top, bottom):
+                    line = mask.intersected(QRect(area.left(), y, area.width(), 1)).boundingRect()
+                    if line.isEmpty():
+                        return None
+                    left, right = max(left, line.left()), min(right, line.right())
+            return (left, right) if right > left else None
+
+        def place(size: int, top: int) -> list[tuple[QRect, str]] | None:
+            font.setPixelSize(size)
+            metrics = QFontMetrics(font)
+            height, gap = metrics.height(), metrics.horizontalAdvance(" ")
+            placed: list[tuple[QRect, str]] = []
+            index, y = 0, top
+            while index < len(parts):
+                if y + height - 1 > area.bottom():
+                    return None
+                free = span(y, y + height - 1)
+                row: list[tuple[str, int]] = []
+                used = 0
+                while free is not None and index < len(parts):
+                    width = metrics.horizontalAdvance(parts[index])
+                    needed = width if not row else used + gap + width
+                    if needed > free[1] - free[0] + 1:
+                        break
+                    row.append((parts[index], width))
+                    used, index = needed, index + 1
+                if free is not None and row:
+                    x = free[0] + (free[1] - free[0] + 1 - used) // 2
+                    for part, width in row:
+                        placed.append((QRect(x, y, width, height), part))
+                        x += width + gap
+                y += height
+            return placed
+
+        size = self._largest_fitting(lambda candidate: place(candidate, area.top()) is not None)
+        placed = place(size, area.top()) or []
+        if placed:
+            # Center the rows vertically when they still fit there.
+            slack = area.bottom() - max(box.bottom() for box, _ in placed)
+            placed = place(size, area.top() + slack // 2) or place(size, area.top()) or []
+        font.setPixelSize(size)
+        return font, placed
+
+    def _largest_fitting(self, fits: Callable[[int], bool]) -> int:
+        """The largest pixel size up to the style's that ``fits``, by bisection; 1 when none does."""
+
+        low, high = 1, max(1, QFontInfo(self.font()).pixelSize())
+        while low < high:
+            middle = (low + high + 1) // 2
+            if fits(middle):
+                low = middle
+            else:
+                high = middle - 1
+        return low
+
+    def _border_color(self, option: QStyleOptionButton) -> QColor:
+        """The border color the style draws for this button's state, read off a small rectangular sample."""
+
+        sample = QImage(_SAMPLE_SIZE, _SAMPLE_SIZE, QImage.Format.Format_ARGB32_Premultiplied)
+        sample.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(sample)
+        rectangle = QStyleOptionButton(option)
+        rectangle.rect = QRect(0, 0, _SAMPLE_SIZE, _SAMPLE_SIZE)
+        self.style().drawControl(QStyle.ControlElement.CE_PushButtonBevel, rectangle, painter, self)
+        painter.end()
+        return sample.pixelColor(0, _SAMPLE_SIZE // 2)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Treat a right-button press as a left-button press."""

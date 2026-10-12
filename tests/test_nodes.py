@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import unittest
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt
@@ -289,49 +288,91 @@ class NodeTests(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 self._profile(content)
 
-    def test_wheel_children_take_the_shape_of_their_slice(self) -> None:
+    def test_canvas_children_take_the_shape_their_binding_gives_and_follow_it(self) -> None:
+        def triangle(state: object) -> list[list[int]]:
+            left = 100 if state.moved else 0  # type: ignore[attr-defined]
+            return [[left, 0], [left + 100, 0], [left, 100]]
+
         profile = self._profile(
             {
-                "kind": "wheel",
-                "id": "wheel",
-                "slices": 6,
-                "inner_percent": 30,
-                "spacing": 4,
+                "kind": "canvas",
+                "id": "board",
                 "min_width": 300,
-                "min_height": 300,
+                "min_height": 200,
                 "children": [
-                    *[_button(f"s{index}", slice=index, label=str(index)) for index in range(6)],
-                    _button("middle", center=True),
+                    _button("corner", shape=triangle),
+                    _button("square", shape=[[0, 150], [50, 150], [50, 200], [0, 200]]),
                 ],
+            },
+            state={"moved": {"var": "boolean", "default": False}},
+        )
+        window = self._window(profile)
+        board = self._find(window, "board")
+
+        def hit(x: int, y: int) -> object:
+            found = board.childAt(QPoint(x, y))
+            return found.property("componentId") if found else None
+
+        self.assertEqual(hit(20, 20), "corner")
+        # Inside the triangle's bounding box but past its long side.
+        self.assertIsNone(hit(80, 80))
+        self.assertEqual(hit(25, 175), "square")
+
+        self.engine.dispatcher.dispatch(state_set("moved", True))
+        self.assertIsNone(hit(20, 20))
+        self.assertEqual(hit(120, 20), "corner")
+
+    def test_a_canvas_child_with_an_anchor_centers_its_box_on_it(self) -> None:
+        profile = self._profile(
+            {
+                "kind": "canvas",
+                "id": "board",
+                "min_width": 300,
+                "min_height": 200,
+                "children": [_button("wedge", shape=[[100, 0], [200, 0], [100, 100]], anchor=[120, 30])],
             }
         )
         window = self._window(profile)
-        wheel = self._find(window, "wheel")
-        wheel.resize(300, 300)
-        center = wheel.rect().center()
 
-        for index in range(6):
-            # Two thirds of the way out along the slice's middle, slice 0 straight up.
-            angle = index * math.pi / 3
-            point = QPoint(round(center.x() + 100 * math.sin(angle)), round(center.y() - 100 * math.cos(angle)))
-            hit = wheel.childAt(point)
-            self.assertEqual(hit.property("componentId") if hit else None, f"s{index}")
-        hit = wheel.childAt(center)
-        self.assertEqual(hit.property("componentId") if hit else None, "middle")
+        box = self._find(window, "wedge").geometry()
+        self.assertEqual((box.x() + box.width() / 2, box.y() + box.height() / 2), (120, 30))
+        self.assertTrue(box.contains(100, 0) and box.contains(199, 0) and box.contains(100, 99))
 
-    def test_wheel_slices_must_exist_and_hold_one_child_each(self) -> None:
+    def test_shape_is_required_under_a_canvas_and_rejected_anywhere_else(self) -> None:
+        square = [[0, 0], [10, 0], [10, 10], [0, 10]]
         cases = {
-            r"content\.children: 'b' takes slice 0, which 'a' already takes": [
-                _button("a", slice=0),
-                _button("b", slice=0),
-            ],
-            r"content\.children: 'a' takes slice 6, but the wheel has 6 slices": [_button("a", slice=6)],
-            r"children\[0\] must set either slice or center = true": [_button("a")],
+            r"children\[0\]\.shape can only be set on a child of a canvas": {
+                "kind": "box",
+                "id": "row",
+                "children": [_button("a", shape=square)],
+            },
+            r"children\[0\]\.anchor can only be set on a child of a canvas": {
+                "kind": "box",
+                "id": "row",
+                "children": [_button("a", anchor=[0, 0])],
+            },
+            r"children\[0\]\.shape is required": {"kind": "canvas", "id": "board", "children": [_button("a")]},
+            r"children\[0\]\.shape must be a list of at least three \[x, y\] corners": {
+                "kind": "canvas",
+                "id": "board",
+                "children": [_button("a", shape=[[0, 0], [10, 0]])],
+            },
         }
-        for message, children in cases.items():
-            content = {"kind": "wheel", "id": "wheel", "slices": 6, "children": children}
+        for message, content in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 self._profile(content)
+
+    def test_a_node_that_reports_its_size_writes_it_to_state(self) -> None:
+        profile = self._profile({"kind": "canvas", "id": "board", "report_size": True, "children": []})
+        window = self._window(profile)
+        window.resize(320, 240)
+        qt_app().processEvents()
+
+        board = self._find(window, "board")
+        self.assertEqual(
+            self.engine.profile.state.get(("nodes", "board", "size")),
+            {"width": board.width(), "height": board.height()},
+        )
 
 
 if __name__ == "__main__":

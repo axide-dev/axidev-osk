@@ -270,41 +270,64 @@ class WheelTests(unittest.TestCase):
     def test_picking_slices_opens_menus_then_sends_the_key_and_returns_to_the_top(self) -> None:
         harness = self._harness()
 
+        harness.tap("w:slice:9")
+        self.assertEqual(harness.widget("w:slice:8").text(), "w")  # type: ignore[attr-defined]
+        harness.tap("w:slice:8")
         harness.tap("w:slice:5")
-        self.assertEqual(harness.widget("w:slice:0").text(), "w s")  # type: ignore[attr-defined]
-        harness.tap("w:slice:0")
-        self.assertEqual(harness.widget("w:slice:0").text(), "w")  # type: ignore[attr-defined]
-        harness.tap("w:slice:0")
 
-        self.assertEqual(harness.backend.sent, [("tap", "W", ())])
+        # A key slice holds its key like a key button does, repeating until released.
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "W", (), True), ("up", "W"), ("down", "Space", (), True), ("up", "Space")],
+        )
         self.assertIsNone(harness.state("std", "wheels", "w"))
 
-    def test_a_modifier_waits_for_the_next_key_only(self) -> None:
+    def test_a_modifier_latches_until_picked_again(self) -> None:
         harness = self._harness()
 
-        harness.tap("w:slice:3")
-        harness.tap("w:slice:5")
-        harness.tap("w:slice:3")
-        self.assertTrue(harness.widget("w:slice:5").property("latched"))
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        self.assertTrue(harness.widget("w:slice:7").property("latched"))
         harness.tap("w:center")
-        harness.tap("w:slice:4")
-        harness.tap("w:slice:3")
-        harness.tap("w:slice:1")
-        harness.tap("w:slice:3")
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
 
-        self.assertEqual(harness.backend.sent, [("tap", "Space", ("ShiftLeft",)), ("tap", "Backspace", ())])
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), True), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
+        )
 
     def test_the_center_goes_back_to_the_top(self) -> None:
         harness = self._harness()
 
-        harness.tap("w:slice:0")
-        harness.tap("w:slice:0")
+        harness.tap("w:slice:3")
+        harness.tap("w:slice:8")
         self.assertEqual(harness.widget("w:center").text(), "×")  # type: ignore[attr-defined]
         harness.tap("w:center")
 
         self.assertEqual(harness.widget("w:center").text(), "")  # type: ignore[attr-defined]
-        self.assertEqual(harness.widget("w:slice:3").text(), "Ctrl Shift Alt\nShift AltGr …")  # type: ignore[attr-defined]
+        self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
         self.assertEqual(harness.backend.sent, [])
+
+    def test_the_slices_fill_the_wheel_whatever_size_it_takes(self) -> None:
+        harness = StdHarness(
+            self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"min_width": 200, "min_height": 200})]
+        )
+        harness.window.show()
+        canvas = harness.widget("w")
+        for width, height in ((200, 200), (500, 260)):
+            harness.window.resize(width + 100, height + 100)
+            qt_app().processEvents()
+            slices = [harness.widget(f"w:slice:{index}").geometry() for index in range(wheel.SLICES)]
+            with self.subTest(size=(canvas.width(), canvas.height())):
+                self.assertGreater(canvas.width(), canvas.height() if width > height else 0)
+                self.assertLessEqual(min(rect.left() for rect in slices), 1)
+                self.assertLessEqual(min(rect.top() for rect in slices), 1)
+                self.assertGreaterEqual(max(rect.right() for rect in slices), canvas.width() - 2)
+                self.assertGreaterEqual(max(rect.bottom() for rect in slices), canvas.height() - 2)
 
 
 class ControlTests(unittest.TestCase):
@@ -402,6 +425,23 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(controls_row.isHidden())
         harness.tap("s:toggle")
         self.assertTrue(panel.isHidden())
+
+    def test_a_window_with_a_strip_gives_its_spare_height_to_its_content(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        content = axidev_osk.grid(id="keys", children=[axidev_osk.button(id="key", label="A", cell={"row": 0, "column": 0})])
+        window = controls.with_strip(axidev_osk.window(id="pad", title="Pad", content=content), controls.strip("s", []))
+        root = axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[window], state=std.with_state(None))})
+        built = build_window(self, start_test_profile(engine, root).window("pad"), engine)
+        built.show()
+        key, strip = find_node(built, "key"), find_node(built, "s")
+        key_height, strip_height = key.height(), strip.height()
+
+        built.resize(built.width(), built.height() + 200)
+        qt_app().processEvents()
+
+        self.assertEqual(key.height(), key_height + 200)
+        self.assertEqual(strip.height(), strip_height)
 
 
 class WindowHelperTests(unittest.TestCase):

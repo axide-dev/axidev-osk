@@ -145,8 +145,8 @@ def stack(**fields: Any) -> Map:
     return _node("stack", fields)
 
 
-def wheel(**fields: Any) -> Map:
-    return _node("wheel", fields)
+def canvas(**fields: Any) -> Map:
+    return _node("canvas", fields)
 
 
 def button(**fields: Any) -> Map:

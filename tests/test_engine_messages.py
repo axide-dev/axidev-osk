@@ -69,6 +69,7 @@ class Harness:
 class _ProbeKind:
     callbacks: dict[str, str] = {}
     has_children = False
+    shapes_children = False
     widget_properties: frozenset[str] = frozenset()
 
     def decode_structure(self, reader: object) -> None:
@@ -82,9 +83,6 @@ class _ProbeKind:
 
     def check_options(self, reader: object, options: object, children: tuple[str, ...]) -> None:
         return None
-
-    def check_children(self, reader: object, structure: object, children: tuple[object, ...]) -> None:
-        del reader, structure, children
 
 
 class ObservationTests(unittest.TestCase):

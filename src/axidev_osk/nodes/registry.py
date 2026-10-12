@@ -5,6 +5,8 @@ callback fields and events, how its fixed fields and its values decode, how it
 builds a widget, and how a set of values is applied to that widget. Any value
 may be a binding; the builder decodes a node's values again whenever the state
 they read changes and hands the kind the new values with the previous ones.
+The builder also places a canvas child by its ``shape`` and reports the size
+of a node built with ``report_size``.
 """
 
 from __future__ import annotations
@@ -13,13 +15,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QWidget
 
-from ..config.profile import NodeConfig, NodeValues, StyleConfig
+from ..config.profile import NodeConfig, NodeValues, Point, Shape, StyleConfig
 from ..config.reader import ConfigReader
 from ..kind_registry import KindRegistry
 from ..messages import DataMap, RuntimeEvent, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
+from ..runtime.engine_messages import node_resized
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 
 if TYPE_CHECKING:
@@ -30,6 +34,8 @@ NodeBuild = Callable[[NodeConfig, "NodeBuilder"], QWidget]
 """Build a node's widget and children from its fixed fields; its values are applied afterwards."""
 NodeApply = Callable[[QWidget, object, object | None], None]
 """Apply a kind's options to its widget, given the options applied before or ``None`` the first time."""
+PlaceShaped = Callable[[QWidget, Shape, Point | None], None]
+"""Place a child by its shape and anchor inside the parent that built it; called again whenever either changes."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +75,8 @@ class NodeKind:
 
     It runs at load and on every later decode.
     """
-    check_children: Callable[[ConfigReader, object, tuple[NodeConfig, ...]], None] = (
-        lambda reader, structure, children: None
-    )
-    """Reject children whose placements do not fit together or the fixed fields; runs once at load."""
+    shapes_children: bool = False
+    """Children take a ``shape`` value and ``build`` places them with ``NodeBuilder.build(..., place=...)``."""
 
     @property
     def events(self) -> tuple[str, ...]:
@@ -137,8 +141,13 @@ class NodeBuilder:
             self._unbinds = outer
         return widget, unbinds
 
-    def build(self, node: NodeConfig) -> QWidget:
-        """Build one node inside ``build_tree``; node kinds call it for their children."""
+    def build(self, node: NodeConfig, *, place: PlaceShaped | None = None) -> QWidget:
+        """Build one node inside ``build_tree``; node kinds call it for their children.
+
+        A kind that shapes its children passes ``place``, which receives the
+        child's shape and anchor before anything else is applied and again on
+        each change.
+        """
 
         unbinds = self._unbinds
         if unbinds is None:
@@ -149,8 +158,13 @@ class NodeBuilder:
         widget.setProperty(COMPONENT_ID, node.id)
         if node.passes_input_block:
             widget.setProperty(PASSES_INPUT_BLOCK, True)
+        if node.report_size:
+            _SizeReporter(widget, node.id, self._dispatcher)
 
         def apply(values: NodeValues, previous: NodeValues | None) -> None:
+            placed = (values.shape, values.anchor)
+            if place is not None and values.shape is not None and (previous is None or placed != (previous.shape, previous.anchor)):
+                place(widget, values.shape, values.anchor)
             apply_style(widget, values.style, previous.style if previous is not None else None)
             kind.apply(widget, values.options, previous.options if previous is not None else None)
 
@@ -159,6 +173,22 @@ class NodeBuilder:
 
     def emit(self, event_name: str, node_id: str) -> None:
         self._dispatcher.post(node_event(event_name, node_id))
+
+
+class _SizeReporter(QObject):
+    """Post ``node.resized`` whenever a node built with ``report_size`` changes size."""
+
+    def __init__(self, widget: QWidget, node_id: str, dispatcher: "Dispatcher") -> None:
+        super().__init__(widget)
+        self._node_id = node_id
+        self._dispatcher = dispatcher
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.Resize and isinstance(watched, QWidget):
+            # Posted, so bindings reading the size never run inside this Qt event.
+            self._dispatcher.post(node_resized(self._node_id, watched.width(), watched.height()))
+        return False
 
 
 def apply_style(widget: QWidget, style: StyleConfig, previous: StyleConfig | None = None) -> None:
