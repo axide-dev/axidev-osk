@@ -22,7 +22,7 @@ from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
 from support import RecordingBackend, build_window, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
 
-_MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "SuperRight", "AltLeft", "AltRight"}
+_MODIFIERS = {"LFSH", "RTSH", "LCTL", "RCTL", "LWIN", "RWIN", "LALT", "RALT"}
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
 
 
@@ -160,27 +160,27 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_modifiers_hold_their_key_until_tapped_again_and_legends_follow(self) -> None:
         harness = self.harness
-        harness.tap("key:ShiftLeft")
+        harness.tap("key:LFSH")
         harness.emit(input_key("ShiftLeft", None, ("Shift",), True))
 
         self.assertEqual(harness.backend.sent, [("down", "ShiftLeft", (), True)])
-        self.assertTrue(harness.nodes["key:ShiftLeft"].property("latched"))
-        self.assertEqual(harness.nodes["key:A"].text(), "A")  # type: ignore[attr-defined]
-        self.assertEqual(harness.nodes["key:1"].text(), "!")  # type: ignore[attr-defined]
+        self.assertTrue(harness.nodes["key:LFSH"].property("latched"))
+        self.assertEqual(harness.nodes["key:AC01"].text(), "A")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AE01"].text(), "!")  # type: ignore[attr-defined]
 
-        harness.tap("key:ShiftLeft")
+        harness.tap("key:LFSH")
         harness.emit(input_key("ShiftLeft", None, (), False))
 
         self.assertEqual(harness.backend.sent[-1], ("up", "ShiftLeft"))
-        self.assertEqual(harness.nodes["key:A"].text(), "a")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AC01"].text(), "a")  # type: ignore[attr-defined]
 
     def test_paired_modifiers_share_a_latch_like_the_original(self) -> None:
         harness = self.harness
-        harness.tap("key:ShiftLeft")
-        self.assertTrue(harness.nodes["key:ShiftRight"].property("latched"))
-        harness.tap("key:ShiftRight")
-        harness.tap("key:AltLeft")
-        harness.tap("key:AltRight")
+        harness.tap("key:LFSH")
+        self.assertTrue(harness.nodes["key:RTSH"].property("latched"))
+        harness.tap("key:RTSH")
+        harness.tap("key:LALT")
+        harness.tap("key:RALT")
 
         self.assertEqual(
             harness.backend.sent,
@@ -196,9 +196,9 @@ class BehaviorParityTests(unittest.TestCase):
         harness = self.harness
         harness.emit(input_key("CapsLock", None, ("CapsLock",), True))
 
-        self.assertTrue(harness.nodes["key:CapsLock"].property("latched"))
-        self.assertEqual(harness.nodes["key:Q"].text(), "Q")  # type: ignore[attr-defined]
-        self.assertEqual(harness.nodes["key:1"].text(), "1")  # type: ignore[attr-defined]
+        self.assertTrue(harness.nodes["key:CAPS"].property("latched"))
+        self.assertEqual(harness.nodes["key:AD01"].text(), "Q")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AE01"].text(), "1")  # type: ignore[attr-defined]
 
     def test_ghost_fades_and_restores_the_keyboard(self) -> None:
         harness = self.harness
@@ -209,7 +209,7 @@ class BehaviorParityTests(unittest.TestCase):
         self.assertAlmostEqual(harness.window.windowOpacity(), GHOST_OPACITY, delta=0.005)
         blocker = harness.window._input_blocker
         assert blocker is not None
-        self.assertTrue(blocker.eventFilter(harness.nodes["key:A"], press))
+        self.assertTrue(blocker.eventFilter(harness.nodes["key:AC01"], press))
         self.assertFalse(blocker.eventFilter(harness.nodes["ghost"], press))
         self.assertFalse(harness.nodes["ghost"].property("latched"))
 

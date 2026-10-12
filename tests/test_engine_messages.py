@@ -83,6 +83,9 @@ class _ProbeKind:
     def check_options(self, reader: object, options: object, children: tuple[str, ...]) -> None:
         return None
 
+    def check_children(self, reader: object, structure: object, children: tuple[object, ...]) -> None:
+        del reader, structure, children
+
 
 class ObservationTests(unittest.TestCase):
     def test_key_observation_updates_state_before_profile_callbacks(self) -> None:

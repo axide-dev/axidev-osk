@@ -232,6 +232,23 @@ QWidget[pointerLocatorEnabled="true"] QPushButton:disabled {
     background-color: rgba(15, 15, 22, 153);
 }
 
+QPushButton[wheelItem] {
+    border: none;
+    border-radius: 0px;
+    padding: 0px;
+}
+QPushButton[wheelItem="key"] {
+    font-size: 22px;
+}
+QPushButton[wheelItem="menu"] {
+    font-size: 13px;
+    font-weight: 500;
+    color: #b9bbc7;
+}
+QPushButton[wheelItem="empty"] {
+    background: transparent;
+}
+
 QWidget#settingsStrip QPushButton {
     font-size: 13px;
     font-weight: 500;

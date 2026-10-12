@@ -47,6 +47,9 @@ class FakeNodeKind:
     def check_options(self, reader: ConfigReader, options: object, children: tuple[str, ...]) -> None:
         return None
 
+    def check_children(self, reader: ConfigReader, structure: object, children: tuple[object, ...]) -> None:
+        del reader, structure, children
+
 
 def var(var_type: object, default: object = None) -> dict[str, object]:
     return {"var": var_type} if default is None else {"var": var_type, "default": default}

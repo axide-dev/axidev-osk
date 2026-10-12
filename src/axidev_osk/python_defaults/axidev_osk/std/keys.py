@@ -1,5 +1,10 @@
 """Keyboard key builders built only from ``axidev_osk`` primitives.
 
+Every key is built from a layout entry (``std.layouts``): ``key``, ``letter``,
+``shifted``, ``modifier``, and ``lock`` build one fixed entry, ``at`` builds the
+entry the active layout puts on a board position, and ``tap`` uses an entry at
+once, for menus such as ``std.wheel``.
+
 Library state lives under ``std``:
 
 - ``std.latched.<latch>``: the output a latched modifier holds down.
@@ -26,10 +31,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from ... import axidev_osk
+from . import layouts
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
 _SIDES = ("Left", "Right")
+_BEHAVIOR = ("repeat", "mode", "latch")
 
 STATE = {
     "latched": axidev_osk.var(axidev_osk.map_of("string")),
@@ -68,11 +75,150 @@ def one_shot_keys(state: Any) -> list[str]:
     return sorted(_one_shot(state).values())
 
 
+def legend(state: Any, entry: Mapping[str, Any]) -> str:
+    """What a layout entry shows: its shifted legend while Shift (and, for letters, not Caps Lock) is on."""
+
+    shifted = entry.get("shifted")
+    if shifted is None:
+        return entry["label"]
+    shift = shift_active(state)
+    if entry["kind"] == "letter":
+        shift = shift != caps_active(state)
+    return shifted if shift else entry["label"]
+
+
+def from_entry(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A key button for one layout entry; ``opts`` overrides any button field."""
+
+    defaults = {"id": f"key:{entry['output']}", **entry_fields(entry, opts)}
+    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
+
+
+def at(
+    position: str,
+    layouts: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    layout: axidev_osk.Binding,
+    opts: Mapping[str, Any] | None = None,
+) -> axidev_osk.Map:
+    """A key for a board position whose meaning follows the active layout.
+
+    ``layouts`` maps layout names to tables of entries by position, and the
+    ``layout`` binding names the active one. Its legend, lit state, and what
+    a press sends all come from the active layout's entry for ``position``.
+    """
+
+    variants = {name: entry_fields(table[position], opts) for name, table in layouts.items() if position in table}
+
+    def value(field: str, default: Any) -> axidev_osk.Binding:
+        def bound(state: Any) -> Any:
+            found = variants[layout(state)].get(field, default)
+            return found(state) if callable(found) else found
+
+        return bound
+
+    def callback(field: str) -> axidev_osk.Callback:
+        def run(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+            handler = variants[layout(ctx.state)].get(field)
+            return handler(ctx, event) if handler is not None else []
+
+        return run
+
+    defaults = {
+        "id": f"key:{position}",
+        "label": value("label", ""),
+        "active": value("active", False),
+        "latched": value("latched", False),
+        "on_press": callback("on_press"),
+        "on_release": callback("on_release"),
+    }
+    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
+
+
+def tap(state: Any, entry: Mapping[str, Any]) -> list[axidev_osk.Map]:
+    """Actions that use a layout entry at once, the way one click on a menu item does.
+
+    A modifier toggles as a one-shot modifier for the next key. Any other key
+    is tapped with the waiting one-shot modifiers, which then clear.
+    """
+
+    if entry["kind"] == "modifier":
+        path = _one_shot_path(entry)
+        return [axidev_osk.state.set(path, None if waiting(state, entry) else entry["output"])]
+    held = _one_shot(state)
+    actions = [axidev_osk.keyboard.tap(entry["output"], sorted(held.values()) or None)]
+    actions += [axidev_osk.state.set(["std", "one_shot", latch], None) for latch in sorted(held)]
+    return actions
+
+
+def waiting(state: Any, entry: Mapping[str, Any]) -> bool:
+    """Whether a modifier entry waits for the next key, as ``tap`` left it."""
+
+    return entry["kind"] == "modifier" and axidev_osk.read(state, _one_shot_path(entry)) is not None
+
+
+def _one_shot_path(entry: Mapping[str, Any]) -> list[str]:
+    return ["std", "one_shot", _default_latch(entry["label"], entry["output"], "one_shot", True)]
+
+
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A momentary key: press sends ``output`` down, release sends it up."""
 
-    repeat = _flag(opts, "repeat", True)
+    return from_entry({"kind": "key", "label": label, "output": output}, opts)
 
+
+def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A letter key whose legend follows Shift and Caps Lock."""
+
+    return from_entry(layouts.letter(char), opts)
+
+
+def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A symbol key whose legend switches with Shift only."""
+
+    return from_entry(layouts.shifted(label, shifted_label, output), opts)
+
+
+def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A latching modifier.
+
+    ``mode = "held"`` (default) holds the real key down from the first tap
+    until the second. ``mode = "one_shot"`` sends nothing itself; the next key
+    press holds the real modifier key down around it. See the module docstring
+    for how keys share a latch.
+    """
+
+    return from_entry(layouts.modifier(label, output), opts)
+
+
+def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A lock key such as Caps Lock, lit from the system's observed lock state."""
+
+    return from_entry(layouts.lock(label, output), opts)
+
+
+def entry_fields(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The button fields a layout entry gives a key: its label, lit states, and callbacks.
+
+    ``opts`` may set ``repeat`` for any key, and ``mode`` and ``latch`` for a modifier.
+    """
+
+    kind, output = entry["kind"], entry["output"]
+    if kind == "modifier":
+        return _modifier_fields(entry["label"], output, opts)
+    repeat = False if kind == "lock" else _flag(opts, "repeat", True)
+    fields = _key_fields(output, repeat)
+    fields["label"] = entry["label"] if kind in {"key", "lock"} else (lambda state: legend(state, entry))
+    if kind == "lock":
+        lock_name = _LOCK_NAMES.get(output)
+        if lock_name is None:
+            raise ValueError(f"{output!r} is not an observed lock key")
+        fields["latched"] = lambda state: bool(axidev_osk.read(state, ["input", "locks", lock_name]))
+    elif kind not in {"key", "letter", "shifted"}:
+        raise ValueError(f"Unknown layout entry kind {kind!r}")
+    return fields
+
+
+def _key_fields(output: str, repeat: bool) -> dict[str, Any]:
     def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         held = _one_shot(ctx.state)
         actions = [axidev_osk.keyboard.down(name, repeat=False) for _latch, name in sorted(held.items())]
@@ -92,44 +238,15 @@ def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axide
         actions.append(axidev_osk.state.set(["std", "held", event["node"]], None))
         return actions
 
-    defaults = {
-        "id": f"key:{output}",
-        "label": label,
+    return {
         "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, "repeat")))
 
 
-def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A letter key whose legend follows Shift and Caps Lock."""
-
-    lower, upper = char.lower(), char.upper()
-    return key(
-        lambda state: upper if shift_active(state) != caps_active(state) else lower,
-        upper,
-        opts,
-    )
-
-
-def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A symbol key whose legend switches with Shift only."""
-
-    return key(lambda state: shifted_label if shift_active(state) else label, output, opts)
-
-
-def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A latching modifier.
-
-    ``mode = "held"`` (default) holds the real key down from the first tap
-    until the second. ``mode = "one_shot"`` sends nothing itself; the next key
-    press holds the real modifier key down around it. See the module docstring
-    for how keys share a latch.
-    """
-
+def _modifier_fields(label: str, output: str, opts: Mapping[str, Any] | None) -> dict[str, Any]:
     repeat = _flag(opts, "repeat", True)
-    options = _without(opts, "mode", "repeat", "latch")
     mode = (opts or {}).get("mode") or "held"
     latch = (opts or {}).get("latch") or _default_latch(label, output, mode, repeat)
     if mode not in {"held", "one_shot"}:
@@ -145,13 +262,7 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
             del event
             return [axidev_osk.state.set(latch_path, None if latched(ctx.state) else output)]
 
-        defaults: dict[str, Any] = {
-            "id": f"key:{output}",
-            "label": label,
-            "latched": latched,
-            "on_release": toggle_one_shot,
-        }
-        return axidev_osk.button(**axidev_osk.merge(defaults, options))
+        return {"label": label, "latched": latched, "on_release": toggle_one_shot}
 
     def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
@@ -166,31 +277,13 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
             return [axidev_osk.state.set(latch_path, None), axidev_osk.keyboard.up(held)]
         return [axidev_osk.state.set(latch_path, output)]
 
-    defaults = {
-        "id": f"key:{output}",
+    return {
         "label": label,
         "latched": latched,
         "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return axidev_osk.button(**axidev_osk.merge(defaults, options))
-
-
-def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A lock key such as Caps Lock, lit from the system's observed lock state."""
-
-    lock_name = _LOCK_NAMES.get(output)
-    if lock_name is None:
-        raise ValueError(f"{output!r} is not an observed lock key")
-    return key(
-        label,
-        output,
-        axidev_osk.merge(
-            {"repeat": False, "latched": lambda state: bool(axidev_osk.read(state, ["input", "locks", lock_name]))},
-            opts,
-        ),
-    )
 
 
 def on_reset(ctx: Any, event: Any) -> list[axidev_osk.Map]:

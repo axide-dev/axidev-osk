@@ -1,7 +1,7 @@
-"""Default config: the bundled US ISO keyboard and a small social profile, written like a Lua config.
+"""Default config: the bundled US ISO keyboard, a small social profile, and a wheel keyboard, written like a Lua config.
 
-Everything here is profile knowledge: the layout table, the grid math that
-places keys, which keys latch, the settings strip, the prompts, and how
+Everything here is profile knowledge: where each board position sits on the
+grid, which layout is active, which keys latch, the settings strip, the prompts, and how
 corners and quit requests behave. The engine knows none of it.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 from . import axidev_osk
 from .axidev_osk import std
-from .axidev_osk.std import controls, keys, prompts, windows
+from .axidev_osk.std import board, controls, keys, layouts, prompts, wheel, windows
 from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR, POINTER_LOCATOR
 
 KEYBOARD = "keyboard"
@@ -32,113 +32,47 @@ OVERLAY = {"placement": "center", "screen_margin": 16}
 # Closing a prompt cancels it, so the profile hides it instead of the engine asking to quit.
 PROMPT_OPTS = {"overlay": OVERLAY, "default_close": False}
 
-# One entry per key: row, column in quarter units, width in key units, then
-# what the key is. Kinds: key, letter, shifted, modifier, lock, ghost, dwell.
-LAYOUT: list[tuple[Any, ...]] = [
-    (0, 0, 1.0, "key", "Esc", "Escape"),
-    *[(0, column, 1.0, "key", f"F{number}", f"F{number}") for number, column in enumerate(
-        (8, 12, 16, 20, 28, 32, 36, 40, 48, 52, 56, 60), start=1)],
+# Where each button of the keyboard sits: row, column in quarter units, width
+# in key units, then a board position (whose key comes from the active layout)
+# or one of the profile's own buttons, "ghost" or "dwell".
+SPOTS: list[tuple[int, int, float, str]] = [
+    *[(row, column, width, position) for position, row, column, width in board.TKL],
     (0, 64, 1.0, "dwell"),
-    (0, 68, 1.0, "key", "PrtSc", "PrintScreen"),
-    (0, 72, 1.0, "key", "ScrLk", "ScrollLock"),
-    (0, 76, 1.0, "key", "Pause", "Pause"),
-    (1, 0, 1.0, "shifted", "`", "~", "`"),
-    (1, 4, 1.0, "shifted", "1", "!", "1"),
-    (1, 8, 1.0, "shifted", "2", "@", "2"),
-    (1, 12, 1.0, "shifted", "3", "#", "3"),
-    (1, 16, 1.0, "shifted", "4", "$", "4"),
-    (1, 20, 1.0, "shifted", "5", "%", "5"),
-    (1, 24, 1.0, "shifted", "6", "^", "6"),
-    (1, 28, 1.0, "shifted", "7", "&", "7"),
-    (1, 32, 1.0, "shifted", "8", "*", "8"),
-    (1, 36, 1.0, "shifted", "9", "(", "9"),
-    (1, 40, 1.0, "shifted", "0", ")", "0"),
-    (1, 44, 1.0, "shifted", "-", "_", "-"),
-    (1, 48, 1.0, "shifted", "=", "+", "="),
-    (1, 52, 2.0, "key", "Backspace", "Backspace"),
-    (1, 68, 1.0, "key", "Ins", "Insert"),
-    (1, 72, 1.0, "key", "Home", "Home"),
-    (1, 76, 1.0, "key", "PgUp", "PageUp"),
-    (2, 0, 1.5, "key", "Tab", "Tab"),
-    *[(2, 6 + 4 * index, 1.0, "letter", char) for index, char in enumerate("qwertyuiop")],
-    (2, 46, 1.0, "shifted", "[", "{", "["),
-    (2, 50, 1.0, "shifted", "]", "}", "]"),
     (2, 54, 1.0, "ghost"),
-    (2, 68, 1.0, "key", "Del", "Delete"),
-    (2, 72, 1.0, "key", "End", "End"),
-    (2, 76, 1.0, "key", "PgDn", "PageDown"),
-    (3, 0, 1.75, "lock", "Caps", "CapsLock"),
-    *[(3, 7 + 4 * index, 1.0, "letter", char) for index, char in enumerate("asdfghjkl")],
-    (3, 43, 1.0, "shifted", ";", ":", ";"),
-    (3, 47, 1.0, "shifted", "'", '"', "'"),
-    (3, 51, 2.25, "key", "Enter", "Enter"),
-    (4, 0, 1.25, "modifier", "Shift", "ShiftLeft"),
-    (4, 5, 1.0, "shifted", "\\", "|", "\\"),
-    *[(4, 9 + 4 * index, 1.0, "letter", char) for index, char in enumerate("zxcvbnm")],
-    (4, 37, 1.0, "shifted", ",", "<", ","),
-    (4, 41, 1.0, "shifted", ".", ">", "."),
-    (4, 45, 1.0, "shifted", "/", "?", "/"),
-    (4, 49, 2.75, "modifier", "Shift", "ShiftRight"),
-    (4, 72, 1.0, "key", "↑", "Up"),
-    (5, 0, 1.25, "modifier", "Ctrl", "CtrlLeft"),
-    (5, 5, 1.25, "modifier", "Super", "SuperLeft"),
-    (5, 10, 1.25, "modifier", "Alt", "AltLeft"),
-    (5, 15, 6.25, "key", "Space", "Space"),
-    (5, 40, 1.25, "modifier", "AltGr", "AltRight"),
-    (5, 45, 1.25, "modifier", "Super", "SuperRight"),
-    (5, 50, 1.25, "key", "Menu", "Menu"),
-    (5, 55, 1.25, "modifier", "Ctrl", "CtrlRight"),
-    (5, 68, 1.0, "key", "←", "Left"),
-    (5, 72, 1.0, "key", "↓", "Down"),
-    (5, 76, 1.0, "key", "→", "Right"),
 ]
 
 
-def _dense_columns(entries: list[tuple[Any, ...]]) -> dict[int, int]:
+def _dense_columns(spots: list[tuple[int, int, float, str]]) -> dict[int, int]:
     """Map sparse quarter-unit columns to grid columns, dropping empty ones."""
 
-    occupied = sorted({column + offset for _row, column, width, *_ in entries for offset in range(int(width * UNIT))})
+    occupied = sorted({column + offset for _row, column, width, _ in spots for offset in range(int(width * UNIT))})
     return {column: index for index, column in enumerate(occupied)}
 
 
 def _cells() -> list[dict[str, int]]:
-    body = [entry for entry in LAYOUT if entry[0] > 0]
-    function_left = [entry for entry in LAYOUT if entry[0] == 0 and entry[1] < NAV_START]
+    body = [spot for spot in SPOTS if spot[0] > 0]
+    function_left = [spot for spot in SPOTS if spot[0] == 0 and spot[1] < NAV_START]
     body_columns = _dense_columns(body)
     left_columns = _dense_columns(function_left)
     cells = []
-    for row, column, width, *_ in LAYOUT:
+    for row, column, width, _ in SPOTS:
         columns = left_columns if row == 0 and column < NAV_START else body_columns
         cells.append({"row": row, "column": columns[column], "row_span": 1, "column_span": int(width * UNIT)})
     return cells
 
 
-def _key_node(entry: tuple[Any, ...], cell: dict[str, int]) -> axidev_osk.Map:
-    _row, _column, width, kind, *arguments = entry
+def _key_node(spot: tuple[int, int, float, str], cell: dict[str, int]) -> axidev_osk.Map:
+    _row, _column, width, what = spot
     placement = {
         "cell": cell,
         "min_width": max(KEY_UNIT_PX, round(KEY_UNIT_PX * width)),
         "min_height": KEY_UNIT_PX,
     }
-    if kind == "key":
-        label, output = arguments
-        return keys.key(label, output, placement)
-    if kind == "letter":
-        return keys.letter(arguments[0], placement)
-    if kind == "shifted":
-        label, shifted_label, output = arguments
-        return keys.shifted(label, shifted_label, output, placement)
-    if kind == "modifier":
-        label, output = arguments
-        return keys.modifier(label, output, placement)
-    if kind == "lock":
-        label, output = arguments
-        return keys.lock(label, output, placement)
-    if kind == "ghost":
+    if what == "ghost":
         return windows.ghost_button(KEYBOARD, {"id": "ghost", **placement})
-    if kind == "dwell":
+    if what == "dwell":
         return _dwell_button(placement)
-    raise ValueError(f"Unknown layout entry kind {kind!r}")
+    return keys.at(what, layouts.LAYOUTS, _setting("layout"), placement)
 
 
 # Settings every profile shares, so they survive a profile switch.
@@ -157,6 +91,7 @@ DWELL_SETTINGS: dict[str, tuple[str, Any]] = {
 }
 SHARED_STATE = {
     "settings": {
+        "layout": axidev_osk.var("string", "us"),
         "opacity": axidev_osk.var("number", KEYBOARD_OPACITY),
         "dwell": {name: axidev_osk.var(var_type, default) for name, (var_type, default) in DWELL_SETTINGS.items()},
     }
@@ -320,7 +255,7 @@ def keyboard_window() -> axidev_osk.Map:
                     id="keyboard-grid",
                     spacing=GRID_GAP_PX,
                     style={"object_name": "keyboard"},
-                    children=[_key_node(entry, cell) for entry, cell in zip(LAYOUT, _cells(), strict=True)],
+                    children=[_key_node(spot, cell) for spot, cell in zip(SPOTS, _cells(), strict=True)],
                 ),
                 axidev_osk.label(
                     id="keyboard-status",
@@ -504,6 +439,91 @@ def social_profile() -> axidev_osk.Map:
     )
 
 
+def wheel_window() -> axidev_osk.Map:
+    """The keyboard as a 6-slice wheel, opening where the main keyboard was."""
+
+    return axidev_osk.window(
+        id=KEYBOARD,
+        title="axidev OSK: wheel",
+        opacity=windows.ghost_opacity(KEYBOARD, _setting("opacity")),
+        input_blocked=windows.ghost_blocked(KEYBOARD),
+        show_on_start=True,
+        default_close=False,
+        overlay=OVERLAY,
+        chrome={"enabled": True},
+        content=axidev_osk.box(
+            id="wheel-surface",
+            margins=[10, 10, 10, 10],
+            spacing=8,
+            children=[
+                wheel.wheel(
+                    "wheel",
+                    wheel.TKL,
+                    layouts.LAYOUTS,
+                    _setting("layout"),
+                    {"inner_percent": 22, "spacing": GRID_GAP_PX, "min_width": 440, "min_height": 440},
+                ),
+                axidev_osk.label(
+                    id="keyboard-status",
+                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
+                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
+                    word_wrap=True,
+                    style={"object_name": "statusLabel"},
+                ),
+            ],
+        ),
+    )
+
+
+def _keyboard_attachments() -> list[axidev_osk.Map]:
+    """Dwell, the pointer glow, hot corners, and the lock-screen panel, all on the keyboard window."""
+
+    return [
+        axidev_osk.dwell(
+            id=DWELL,
+            window=KEYBOARD,
+            **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
+        ),
+        axidev_osk.pointer_locator(
+            id="keyboard-locator",
+            window=KEYBOARD,
+            radius_percent=30,
+            maximum_opacity_percent=60,
+            radius_standard_deviations=3,
+            **POINTER_LOCATOR,
+        ),
+        axidev_osk.hot_corners(
+            id="hot-corners",
+            corners=["top_left", "top_right", "bottom_left", "bottom_right"],
+            **HOT_CORNER_INDICATOR,
+        ),
+        axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
+    ]
+
+
+def _keyboard_handlers() -> dict[str, Any]:
+    return std.with_handlers(
+        {
+            "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
+            "window.close_requested": _on_close_requested,
+            "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
+            "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
+            "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
+            "linux.permission_setup_opened": _on_permission_setup_opened,
+        }
+    )
+
+
+def wheel_profile() -> axidev_osk.Map:
+    return axidev_osk.profile(
+        state=std.with_state(),
+        theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
+        windows=_with_settings([wheel_window(), *prompt_windows()]),
+        attachments=_keyboard_attachments(),
+        on=_keyboard_handlers(),
+    )
+
+
 def keyboard_profile() -> axidev_osk.Map:
     """The keyboard the app starts with."""
 
@@ -511,49 +531,21 @@ def keyboard_profile() -> axidev_osk.Map:
         state=std.with_state(),
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
         windows=_with_settings([keyboard_window(), *prompt_windows()]),
-        attachments=[
-            axidev_osk.dwell(
-                id=DWELL,
-                window=KEYBOARD,
-                **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
-            ),
-            axidev_osk.pointer_locator(
-                id="keyboard-locator",
-                window=KEYBOARD,
-                radius_percent=30,
-                maximum_opacity_percent=60,
-                radius_standard_deviations=3,
-                **POINTER_LOCATOR,
-            ),
-            axidev_osk.hot_corners(
-                id="hot-corners",
-                corners=["top_left", "top_right", "bottom_left", "bottom_right"],
-                **HOT_CORNER_INDICATOR,
-            ),
-            axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
-        ],
-        on=std.with_handlers(
-            {
-                "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
-                "window.close_requested": _on_close_requested,
-                "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
-                "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
-                "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
-                "linux.permission_setup_opened": _on_permission_setup_opened,
-            }
-        ),
+        attachments=_keyboard_attachments(),
+        on=_keyboard_handlers(),
     )
 
 
 PROFILES: list[tuple[str, str, Callable[[], axidev_osk.Map]]] = [
     ("default", "Default", keyboard_profile),
     ("social", "Social", social_profile),
+    ("wheel", "Wheel", wheel_profile),
 ]
 """Every bundled profile: its name, its caption in the profile menu, and how it is built."""
 
 
 def build_default_config() -> axidev_osk.Map:
-    """Return the bundled root config: the keyboard the app starts with, and the social profile."""
+    """Return the bundled root config: the keyboard the app starts with, the social profile, and the wheel."""
 
     return axidev_osk.config(
         active_profile="default",

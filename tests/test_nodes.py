@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 import unittest
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel, QStackedWidget, QWidget
@@ -285,6 +286,50 @@ class NodeTests(unittest.TestCase):
             r"content has unknown keys: direction": {"kind": "grid", "id": "keys", "direction": "vertical"},
         }
         for message, content in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
+                self._profile(content)
+
+    def test_wheel_children_take_the_shape_of_their_slice(self) -> None:
+        profile = self._profile(
+            {
+                "kind": "wheel",
+                "id": "wheel",
+                "slices": 6,
+                "inner_percent": 30,
+                "spacing": 4,
+                "min_width": 300,
+                "min_height": 300,
+                "children": [
+                    *[_button(f"s{index}", slice=index, label=str(index)) for index in range(6)],
+                    _button("middle", center=True),
+                ],
+            }
+        )
+        window = self._window(profile)
+        wheel = self._find(window, "wheel")
+        wheel.resize(300, 300)
+        center = wheel.rect().center()
+
+        for index in range(6):
+            # Two thirds of the way out along the slice's middle, slice 0 straight up.
+            angle = index * math.pi / 3
+            point = QPoint(round(center.x() + 100 * math.sin(angle)), round(center.y() - 100 * math.cos(angle)))
+            hit = wheel.childAt(point)
+            self.assertEqual(hit.property("componentId") if hit else None, f"s{index}")
+        hit = wheel.childAt(center)
+        self.assertEqual(hit.property("componentId") if hit else None, "middle")
+
+    def test_wheel_slices_must_exist_and_hold_one_child_each(self) -> None:
+        cases = {
+            r"content\.children: 'b' takes slice 0, which 'a' already takes": [
+                _button("a", slice=0),
+                _button("b", slice=0),
+            ],
+            r"content\.children: 'a' takes slice 6, but the wheel has 6 slices": [_button("a", slice=6)],
+            r"children\[0\] must set either slice or center = true": [_button("a")],
+        }
+        for message, children in cases.items():
+            content = {"kind": "wheel", "id": "wheel", "slices": 6, "children": children}
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 self._profile(content)
 

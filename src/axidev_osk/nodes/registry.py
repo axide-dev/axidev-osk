@@ -69,6 +69,10 @@ class NodeKind:
 
     It runs at load and on every later decode.
     """
+    check_children: Callable[[ConfigReader, object, tuple[NodeConfig, ...]], None] = (
+        lambda reader, structure, children: None
+    )
+    """Reject children whose placements do not fit together or the fixed fields; runs once at load."""
 
     @property
     def events(self) -> tuple[str, ...]:

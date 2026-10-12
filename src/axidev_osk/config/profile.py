@@ -82,6 +82,10 @@ class NodeKindSpec(Protocol):
         """Reject options that do not fit the node's children, given their IDs."""
         ...
 
+    def check_children(self, reader: ConfigReader, structure: object, children: tuple["NodeConfig", ...], /) -> None:
+        """Reject children whose placements do not fit together or the node's fixed fields."""
+        ...
+
 
 PlacementDecoder = Callable[[ConfigReader], object]
 
@@ -402,6 +406,7 @@ class ConfigDecoder:
             )
         reserved = ENGINE_WIDGET_PROPERTIES | kind.widget_properties
         structure = kind.decode_structure(reader)
+        kind.check_children(reader, structure, children)
         # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
         child_placement = placement(reader) if placement is not None else None
         child_ids = tuple(child.id for child in children)
