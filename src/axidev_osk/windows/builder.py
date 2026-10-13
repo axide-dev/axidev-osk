@@ -20,6 +20,8 @@ from ..runtime.app_messages import (
     window_drag_ended,
     window_drag_started,
     window_dragged,
+    window_resize_drag_ended,
+    window_resize_drag_started,
     window_resize_dragged,
 )
 from ..runtime.engine_messages import window_state_changed
@@ -105,6 +107,8 @@ class RuntimeWindow(QMainWindow):
         self._default_close = values.initial.default_close
         self._input_blocker: _WindowInputBlocker | None = None
         self._minimum_size = values.initial.minimum_size
+        self._fit_content = values.initial.fit_content
+        self._shown_before = False
         self._chrome_widgets: OverlayChromeWidgets | None = None
         self._dwell_click: DwellClickController | None = None
         self._pointer_locators: dict[str, PointerLocator] = {}
@@ -135,17 +139,15 @@ class RuntimeWindow(QMainWindow):
                             window_resize_dragged(window_id, dx, dy, button)
                         ),
                         on_close=lambda button: engine.dispatcher.post(window_close_requested(window_id, button)),
+                        on_drag_started=lambda button: engine.dispatcher.post(
+                            window_drag_started(window_id, button)
+                        ),
+                        on_drag_ended=lambda: engine.dispatcher.post(window_drag_ended(window_id)),
+                        on_resize_started=lambda button: engine.dispatcher.post(
+                            window_resize_drag_started(window_id, button)
+                        ),
+                        on_resize_ended=lambda: engine.dispatcher.post(window_resize_drag_ended(window_id)),
                         use_runtime_drag_motion=use_runtime_drag_motion,
-                        on_drag_started=(
-                            lambda button: engine.dispatcher.post(window_drag_started(window_id, button))
-                        )
-                        if use_runtime_drag_motion
-                        else None,
-                        on_drag_ended=(
-                            lambda: engine.dispatcher.post(window_drag_ended(window_id))
-                        )
-                        if use_runtime_drag_motion
-                        else None,
                     )
             self.setCentralWidget(central)
             if dwell is not None:
@@ -208,8 +210,13 @@ class RuntimeWindow(QMainWindow):
             self._remove_input_blocker()
         self._default_close = values.default_close
         self._minimum_size = values.minimum_size
+        refit_now = previous is not None and values.fit_content and not previous.fit_content
+        self._fit_content = values.fit_content
+        if refit_now:
+            self.resize(self._fitted_size(self._minimum_size))
+            self._overlay.keep_on_screen()
         if previous is not None and values.minimum_size != previous.minimum_size:
-            self.apply_startup_size(minimum_size=values.minimum_size)
+            self._refit()
 
     @property
     def window_id(self) -> str:
@@ -235,6 +242,12 @@ class RuntimeWindow(QMainWindow):
         blocker.deleteLater()
         return True
 
+    @property
+    def uses_runtime_drag_motion(self) -> bool:
+        """Whether its title bar leaves movement to raw pointer motion the runtime collects."""
+
+        return bool(getattr(self._overlay, "uses_runtime_pointer_drag", False))
+
     def move_by(self, dx: int, dy: int) -> None:
         """Move this window through its selected overlay backend."""
 
@@ -246,6 +259,21 @@ class RuntimeWindow(QMainWindow):
 
         self._overlay.resize_by(dx, dy)
         self._report_state()
+
+    def move_to(self, x: int, y: int) -> None:
+        """Put the window's top-left corner at ``(x, y)``, as far as moving it by the difference may.
+
+        The move goes through ``move_by``, so it follows the same platform
+        rules, such as staying on screen.
+        """
+
+        current_x, current_y = self._overlay.position()
+        self.move_by(x - current_x, y - current_y)
+
+    def resize_to(self, width: int, height: int) -> None:
+        """Give the window this size, as far as resizing it by the difference may."""
+
+        self.resize_by(width - self.width(), height - self.height())
 
     def click_at(self, x: int, y: int, button: str) -> None:
         """Click the widget under the screen point ``(x, y)`` with the mouse ``button``."""
@@ -320,20 +348,29 @@ class RuntimeWindow(QMainWindow):
         return resolved_minimum_size
 
     def event(self, event: QEvent) -> bool:  # type: ignore[override]
-        """Refit the window when its content needs a different size, such as a panel that shows or hides.
-
-        Only a change in what the content needs resizes the window, so a size
-        the user chose stays until the content changes.
-        """
+        """Refit the window when its content needs a different size, such as a panel that shows or hides."""
 
         handled = super().event(event)
         if event.type() == QEvent.Type.LayoutRequest and self.centralWidget() is not None:
-            fitted = self._fitted_size(self._minimum_size)
-            if fitted != self.minimumSize():
-                self.setMinimumSize(fitted)
-                self.resize(fitted)
-                self._overlay.keep_on_screen()
+            self._refit()
         return handled
+
+    def _refit(self) -> None:
+        """Follow a change in the smallest size that holds the content.
+
+        The window never gets smaller than that size. With ``fit_content`` it
+        also takes that size, so a size the user chose stays only until the
+        content changes; without it the window keeps any larger size.
+        """
+
+        fitted = self._fitted_size(self._minimum_size)
+        if fitted == self.minimumSize():
+            return
+        self.setMinimumSize(fitted)
+        if self._fit_content:
+            self.resize(fitted)
+            self._overlay.keep_on_screen()
+        self._report_state()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         """Send ``window.close_requested`` instead of closing; a removed output's close is ignored."""
@@ -346,10 +383,16 @@ class RuntimeWindow(QMainWindow):
         event.ignore()
 
     def showEvent(self, event: QShowEvent) -> None:  # type: ignore[override]
-        """Let the overlay controller apply show-time platform fixes."""
+        """Fit the content on the first show, then let the overlay controller apply show-time platform fixes.
+
+        A later show keeps the size the window had, so hiding and showing it
+        never undoes a size the user chose.
+        """
 
         super().showEvent(event)
-        self.apply_startup_size(minimum_size=self._minimum_size)
+        if not self._shown_before:
+            self._shown_before = True
+            self.apply_startup_size(minimum_size=self._minimum_size)
         self._overlay.handle_show()
         if self._dwell_click is not None:
             self._dwell_click.start()
@@ -390,6 +433,8 @@ class RuntimeWindow(QMainWindow):
                 y=y,
                 width=self.width(),
                 height=self.height(),
+                content_width=self.minimumWidth(),
+                content_height=self.minimumHeight(),
             )
         )
 

@@ -566,7 +566,17 @@ class FailureNoticeTests(unittest.TestCase):
         width = callback_failed(None, "binding", "node:root", ValueError("bad width"))
         self.engine.dispatcher.dispatch(width)
         self.engine.dispatcher.dispatch(
-            window_state_changed(failures.NOTICE, visible=True, minimized=False, x=0, y=0, width=460, height=120),
+            window_state_changed(
+                failures.NOTICE,
+                visible=True,
+                minimized=False,
+                x=0,
+                y=0,
+                width=460,
+                height=120,
+                content_width=460,
+                content_height=120,
+            ),
             self._action_failed("window.hide", {"window": "pad"}),
             width,
         )
@@ -634,6 +644,13 @@ class LocatorTests(unittest.TestCase):
         backward = locator.palette(list(reversed(rects)))
 
         self.assertEqual(forward, list(reversed(backward)))
+
+    def test_opts_choose_the_hues_and_how_far_nearby_reaches(self) -> None:
+        rects = [_rect(column * 52, 0) for column in range(4)]
+
+        colors = locator.palette(rects, {"warm": [0.0, 0.0], "cool": [240.0, 0.0], "nearby_sizes": 0})
+
+        self.assertEqual(colors, ["#ff0000", "#0000ff", "#ff0000", "#0000ff"])
 
     def test_colored_buttons_glow_the_pattern_of_where_they_are(self) -> None:
         buttons = [axidev_osk.button(id=name, label=name, min_width=48, min_height=48) for name in ("a", "b", "c")]

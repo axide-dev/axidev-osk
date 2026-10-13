@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QRegion
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from axidev_osk.components.pointer_locator import PointerLocator, gaussian_opacity
@@ -128,6 +128,30 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         app.processEvents()
         locator.update_from_global_position(host.mapToGlobal(QPoint(190, 40)))
         self.assertEqual(locator.current_color.name(), "#242424")
+
+    def test_a_shaped_widget_glows_only_inside_its_shape(self) -> None:
+        app = qt_app()
+        host = QWidget()
+        host.resize(220, 80)
+        below = QPushButton("Below", host)
+        below.setProperty("locatorColor", "#ff0000")
+        below.setGeometry(10, 10, 120, 60)
+        above = QPushButton("Above", host)
+        above.setProperty("locatorColor", "#0000ff")
+        above.setGeometry(60, 10, 120, 60)
+        # Only the left half of the upper button is part of its shape.
+        above.setMask(QRegion(0, 0, 60, 60))
+        host.show()
+        app.processEvents()
+        locator = PointerLocator(_locator_config(), host)
+        self.addCleanup(host.close)
+
+        locator.update_from_global_position(host.mapToGlobal(QPoint(100, 40)))
+        self.assertEqual(locator.current_color.name(), "#0000ff")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(150, 40)))
+        self.assertEqual(locator.current_color.name(), "#242424")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(40, 40)))
+        self.assertEqual(locator.current_color.name(), "#ff0000")
 
     def test_stale_wayland_position_cannot_restore_glow_after_leave(self) -> None:
         app = qt_app()

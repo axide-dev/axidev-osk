@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.hot_corner.service import HotCornerService
 from axidev_osk.messages import MessageResult
-from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments, display_configuration_changed
+from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments
+from axidev_osk.runtime.engine_messages import display_configuration_changed
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
 from support import RecordingBackend, hot_corner_config, make_test_engine
 
@@ -145,7 +146,7 @@ class HotCornerServiceTests(unittest.TestCase):
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
             service.start(engine.dispatcher)
-            engine.dispatcher.dispatch(display_configuration_changed())
+            engine.dispatcher.dispatch(display_configuration_changed([]))
             service.stop()
 
         controller_type.assert_not_called()
@@ -159,7 +160,7 @@ class HotCornerServiceTests(unittest.TestCase):
 
         with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
             service.start(engine.dispatcher)
-            engine.dispatcher.dispatch(display_configuration_changed())
+            engine.dispatcher.dispatch(display_configuration_changed([]))
             service.stop()
 
         controller_type.assert_called_once_with(
@@ -182,7 +183,7 @@ class HotCornerServiceTests(unittest.TestCase):
             service.configure(hot_corner_config(dwell_ms=150), frozenset({"top_left"}))
             service.configure(hot_corner_config(dwell_ms=300), frozenset({"top_left"}))
             service.stop()
-            engine.dispatcher.dispatch(display_configuration_changed())
+            engine.dispatcher.dispatch(display_configuration_changed([]))
 
         self.assertEqual([call.kwargs["config"].dwell_ms for call in controller_type.call_args_list], [150, 300])
         self.assertEqual(controller_type.return_value.stop.call_count, 2)

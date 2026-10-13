@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
@@ -132,14 +132,18 @@ class PointerLocator(QWidget):
         self.show()
 
     def _color_at(self, local_position: QPoint) -> str | None:
-        """The locator color of the colored widget under a point of the host, if any."""
+        """The locator color of the widget under a point of the host, or of its nearest colored parent.
 
-        for widget in self._host.findChildren(QWidget):
+        Qt finds that widget as it finds the one a click reaches, so a shaped
+        button counts only inside its shape.
+        """
+
+        widget = self._host.childAt(local_position)
+        while widget is not None and widget is not self._host:
             color = widget.property(LOCATOR_COLOR)
-            if not color or not widget.isVisibleTo(self._host):
-                continue
-            if QRect(widget.mapTo(self._host, QPoint()), widget.size()).contains(local_position):
+            if color:
                 return str(color)
+            widget = widget.parentWidget()
         return None
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]

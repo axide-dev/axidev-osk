@@ -254,8 +254,8 @@ class ApplicationRuntime:
     def _start_switched_profile(self, arguments: EmptyArguments) -> MessageResult:
         """Start the profile a switch is moving to.
 
-        Each window it shows on start is built at the position a window with
-        the same ID last reported. If it fails to build, the previous profile
+        Each window it shows on start with ``keep_position`` is built at the
+        position a window with the same ID last reported. If it fails to build, the previous profile
         starts again, with its own variables back at their defaults, and the
         failure is reported as ``action.failed``; if that fails too, the
         report is ``ProfileRollbackFailed``.
@@ -288,7 +288,8 @@ class ApplicationRuntime:
             raise ValueError(f"Profile {target.id!r} has no secure_input_panel attachment for the prepared lock-screen panel")
 
     def _show_start_windows(self) -> None:
-        """Show the running profile's start windows where windows with their IDs last were, and a prepared panel."""
+        """Show the running profile's start windows, each with ``keep_position`` where a window with its ID last was,
+        and a prepared panel."""
 
         state = self.engine.profile.state
         for window_config in self._profile.windows:
@@ -296,7 +297,7 @@ class ApplicationRuntime:
                 continue
             window = self._window_manager.get_or_create(window_config.id)
             position = state.get(("windows", window_config.id, "position"))
-            if position is not None:
+            if window_config.keep_position and position is not None:
                 window.restore_position(position["x"], position["y"])  # type: ignore[index]
             self._window_manager.show(window_config.id)
         if self._panel_prepared:

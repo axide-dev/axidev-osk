@@ -29,7 +29,7 @@ A feature starts in a profile. One that most profiles need is promoted to the st
 
 - A profile is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values Lua tables and functions produce. A key set to `None` counts as absent, as a Lua table has no key set to `nil`.
 - The `axidev_osk` helpers only build those maps. The engine decodes them in `config/profile.py`, rejects unknown keys with the full config path, and checks every profile of the root config, not only the active one.
-- A binding is `fn(state) -> value`, accepted in place of any value field. Fixed fields (IDs, kinds, references, children, placement such as grid cells, `show_on_start`, `overlay`, `chrome`) stay plain values and reject a function.
+- A binding is `fn(state) -> value`, accepted in place of any value field. Fixed fields (IDs, kinds, references, children, placement such as grid cells, `show_on_start`, `keep_position`, `overlay`, `chrome`) stay plain values and reject a function.
 - A callback is `fn(ctx, event) -> [actions]`. It reads `ctx.state`, receives the event as plain data, and returns actions as plain maps. It never touches widgets, services, or backends.
 - Functions live in the function registry; messages carry only their IDs.
 - Everything that crosses a subsystem boundary goes through the one queue in `runtime/dispatcher.py`. Events report what happened; actions request an effect. Both carry a lowercase dot-separated name and native data only, never Qt objects, backend objects, callables, or dataclass instances.

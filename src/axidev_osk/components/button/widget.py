@@ -28,23 +28,27 @@ _SAMPLE_SIZE = 32
 
 from ..mouse_buttons import MOUSE_BUTTONS, mouse_button_name
 
-_PRESSING = tuple(button for button in MOUSE_BUTTONS if button != Qt.MouseButton.LeftButton)
-"""Every other named mouse button presses the widget as the left button does; ``pressed_with`` still names it."""
+_LEFT = Qt.MouseButton.LeftButton
+_NOT_LEFT = ~Qt.MouseButton.LeftButton
+"""Every mouse button but the left one; each presses the widget as the left one does, and ``pressed_with`` still names it."""
 
 
 class Button(QPushButton):
-    """Application button that every named mouse button presses: left, right, middle, back, and forward.
+    """Application button that every mouse button presses.
 
     It decides nothing about what each mouse button means: ``pressed_with``
-    names the one behind the current press, the node reports it with
+    names the one behind the current press, or ``other`` for a mouse button
+    with no name, the node reports it with
     ``button.pressed`` and ``button.released``, and the profile decides. The
     widget keeps no other interaction state than that and whether the pointer
     is over it, so ``entered`` and ``left`` always alternate. Profiles render
     any lasting look, such as a latched key, through style properties.
 
-    Its label is never cut: the font its style gives it is the largest size
+    Its label shrinks to fit: the font its style gives it is the largest size
     used, and a label that does not fit its content area, or its shape, is
-    drawn smaller, at the largest size that fits. A single label is drawn by
+    drawn smaller, at the largest size that fits, but never smaller than its
+    smallest size (``set_label_min_px``, 1 pixel unless set), where it may be
+    cut instead. A single label is drawn by
     the style itself, scaled down when it must shrink, so every stylesheet
     text rule still applies to it. A label given as several parts is spread
     over the shape in rows, each row holding as many parts as the widest
@@ -72,6 +76,7 @@ class Button(QPushButton):
         self._border_colors: dict[int, QColor] = {}
         self._hovered = False
         self._pressed_with = "left"
+        self._label_min_px = 1
 
     @property
     def pressed_with(self) -> str:
@@ -91,6 +96,12 @@ class Button(QPushButton):
         self._parts = parts
         if parts is not None:
             self.setText(" ".join(parts).replace("&", "&&"))
+        self.update()
+
+    def set_label_min_px(self, pixels: int) -> None:
+        """Never draw the label smaller than ``pixels``, even when it must be cut."""
+
+        self._label_min_px = pixels
         self.update()
 
     def set_shape(self, outline: QPainterPath) -> None:
@@ -235,9 +246,10 @@ class Button(QPushButton):
         return font, placed
 
     def _largest_fitting(self, fits: Callable[[int], bool]) -> int:
-        """The largest pixel size up to the style's that ``fits``, by bisection; 1 when none does."""
+        """The largest pixel size up to the style's that ``fits``, by bisection; the smallest size when none does."""
 
-        low, high = 1, max(1, QFontInfo(self.font()).pixelSize())
+        high = max(1, QFontInfo(self.font()).pixelSize())
+        low = min(self._label_min_px, high)
         while low < high:
             middle = (low + high + 1) // 2
             if fits(middle):
@@ -278,14 +290,14 @@ class Button(QPushButton):
             self.left.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Press with any of the pressing buttons, remembering which one."""
+        """Press with any mouse button, remembering which one."""
 
         if not self.isDown():
             self._pressed_with = mouse_button_name(event.button())
         self._forward_mouse_event(event, super().mousePressEvent)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Preserve left-button drag semantics while another pressing button is held."""
+        """Preserve left-button drag semantics while another mouse button is held."""
 
         self._forward_mouse_event(event, super().mouseMoveEvent)
 
@@ -308,13 +320,10 @@ class Button(QPushButton):
 
     @staticmethod
     def _left_mouse_event(event: QMouseEvent) -> QMouseEvent:
-        button = event.button()
+        button = _LEFT if event.button() & _NOT_LEFT else event.button()
         buttons = event.buttons()
-        if button in _PRESSING:
-            button = Qt.MouseButton.LeftButton
-        for pressing in _PRESSING:
-            if buttons & pressing:
-                buttons = (buttons & ~pressing) | Qt.MouseButton.LeftButton
+        if buttons & _NOT_LEFT:
+            buttons = (buttons & _LEFT) | _LEFT
         return QMouseEvent(
             event.type(),
             event.position(),
@@ -329,7 +338,7 @@ class Button(QPushButton):
         event: QMouseEvent,
         handler: Callable[[QMouseEvent], None],
     ) -> None:
-        if event.button() not in _PRESSING and not any(event.buttons() & pressing for pressing in _PRESSING):
+        if not event.button() & _NOT_LEFT and not event.buttons() & _NOT_LEFT:
             handler(event)
             return
         left_event = self._left_mouse_event(event)

@@ -5,7 +5,10 @@ These widgets are shared by frameless overlay surfaces. They emit
 specific window class so multiple surface implementations can install
 the same chrome via ``install_overlay_chrome``. Any mouse button drags, and
 each delta names it. The window posts those deltas as ``window.dragged`` and
-``window.resize_dragged``, and its close button's press as
+``window.resize_dragged``, the start and end of each drag as
+``window.drag_started``/``window.drag_ended`` and
+``window.resize_drag_started``/``window.resize_drag_ended``, and its close
+button's press as
 ``window.close_requested`` with that button too, and moves, resizes, or closes
 only when a profile asks.
 
@@ -19,8 +22,9 @@ every platform, so a profile can turn this chrome off with
 ``chrome.enabled`` but not replace it. A profile's stylesheet styles and
 sizes each part by its object name (``layerShellTitleBar``,
 ``layerShellTitleLabel``, ``layerShellCloseButton``,
-``layerShellResizeHandle``), and the window's ``close_label`` value sets the
-close button's text.
+``layerShellResizeHandle``) and spaces the title bar with its ``padding`` and
+``qproperty-spacing``, which both default to none, and the window's
+``close_label`` value sets the close button's text.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtCore import Property, QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -118,8 +122,8 @@ class OverlayTitleBar(QFrame):
 
         layout = QHBoxLayout(self)
         self._layout = layout
-        layout.setContentsMargins(10, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         title_label = QLabel(title, self)
         self._title_label = title_label
@@ -135,6 +139,15 @@ class OverlayTitleBar(QFrame):
         close_button.setFixedSize(28, 24)
         close_button.clicked.connect(lambda: self.closePressed.emit(close_button.pressed_with))
         layout.addWidget(close_button)
+
+    def _spacing(self) -> int:
+        return self._layout.spacing()
+
+    def _set_spacing(self, spacing: int) -> None:
+        self._layout.setSpacing(spacing)
+
+    spacing = Property(int, _spacing, _set_spacing)
+    """The gap between the title, the controls, and the close button; a stylesheet sets it with ``qproperty-spacing``."""
 
     def add_control(self, widget: QWidget) -> None:
         """Insert a control before the close button."""
@@ -211,6 +224,8 @@ class OverlayResizeHandle(QFrame):
     """Frameless resize grip that emits resize deltas."""
 
     resizeDelta = Signal(int, int, str)
+    resizeStarted = Signal(str)
+    resizeEnded = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -224,13 +239,16 @@ class OverlayResizeHandle(QFrame):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Begin a resize drag with whichever mouse button pressed."""
 
-        self._drag.press(event)
+        if self._drag.press(event):
+            self.resizeStarted.emit(self._drag.button)
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Emit resize deltas while the dragging button is held."""
 
         if not self._drag.holds(event):
+            if self._drag.active:
+                self.cancel_drag()
             super().mouseMoveEvent(event)
             return
 
@@ -243,10 +261,25 @@ class OverlayResizeHandle(QFrame):
         """End the drag when its own button is released."""
 
         if self._drag.releases(event):
-            self._drag.end()
+            self.cancel_drag()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def event(self, event: QEvent) -> bool:
+        """Cancel an active resize when Qt withdraws the mouse grab or hides the grip."""
+
+        if event.type() in {QEvent.Type.UngrabMouse, QEvent.Type.Hide}:
+            self.cancel_drag()
+        return super().event(event)
+
+    def cancel_drag(self) -> None:
+        """End the resize once if its normal release event was interrupted."""
+
+        if not self._drag.active:
+            return
+        self._drag.end()
+        self.resizeEnded.emit()
 
 
 def install_overlay_chrome(
@@ -257,9 +290,11 @@ def install_overlay_chrome(
     on_move: MoveResizeHandler,
     on_resize: MoveResizeHandler,
     on_close: Callable[[str], None],
+    on_drag_started: Callable[[str], None],
+    on_drag_ended: Callable[[], None],
+    on_resize_started: Callable[[str], None],
+    on_resize_ended: Callable[[], None],
     use_runtime_drag_motion: bool = False,
-    on_drag_started: Callable[[str], None] | None = None,
-    on_drag_ended: Callable[[], None] | None = None,
 ) -> OverlayChromeWidgets:
     """Install title bar + resize handle into a vertical layout.
 
@@ -273,6 +308,12 @@ def install_overlay_chrome(
         on_move: Receives each ``(dx, dy, button)`` of a title-bar drag.
         on_resize: Receives each ``(dx, dy, button)`` of a resize-grip drag.
         on_close: Receives the mouse button that pressed the close button.
+        on_drag_started: Receives the mouse button that starts a title-bar drag.
+        on_drag_ended: Called once when a title-bar drag ends.
+        on_resize_started: Receives the mouse button that starts a grip drag.
+        on_resize_ended: Called once when a grip drag ends.
+        use_runtime_drag_motion: The title bar leaves movement to raw pointer
+            motion the runtime collects, and emits no ``dragDelta``.
 
     Returns:
         ``OverlayChromeWidgets`` bundle exposing the constructed
@@ -286,21 +327,17 @@ def install_overlay_chrome(
     title_bar = OverlayTitleBar(title, parent, use_runtime_drag_motion=use_runtime_drag_motion)
     title_bar.dragDelta.connect(on_move)
     title_bar.closePressed.connect(on_close)
-    if on_drag_started is not None:
-        title_bar.dragStarted.connect(on_drag_started)
-    if on_drag_ended is not None:
-        title_bar.dragEnded.connect(on_drag_ended)
+    title_bar.dragStarted.connect(on_drag_started)
+    title_bar.dragEnded.connect(on_drag_ended)
     layout.insertWidget(0, title_bar)
 
     resize_handle = OverlayResizeHandle(title_bar)
     resize_handle.resizeDelta.connect(on_resize)
+    resize_handle.resizeStarted.connect(on_resize_started)
+    resize_handle.resizeEnded.connect(on_resize_ended)
     title_bar.add_control(resize_handle)
 
     return OverlayChromeWidgets(
         title_bar=title_bar,
         resize_handle=resize_handle,
     )
-
-
-LayerShellTitleBar = OverlayTitleBar
-LayerShellResizeHandle = OverlayResizeHandle

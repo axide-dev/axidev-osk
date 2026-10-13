@@ -89,6 +89,8 @@ class ButtonOptions:
     size: SizeOptions = SizeOptions()
     locator_color: str | None = None
     """The color a ``pointer_locator`` glows over the button; without one it glows the gap color."""
+    label_min_px: int = 1
+    """The smallest pixel size the label shrinks to when it does not fit; below it the label is cut."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +115,19 @@ class LayoutOptions:
     spacing: int = 0
     margins: tuple[int, int, int, int] = (0, 0, 0, 0)
     visible: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class GridOptions(LayoutOptions):
+    """Values of a grid: its layout values and how its rows and columns share spare space.
+
+    ``row_stretch`` and ``column_stretch`` give each row or column its share
+    by index. A row or column past the end of its list takes a share of 1
+    when a child sits in it and none when it is empty.
+    """
+
+    row_stretch: tuple[int, ...] = ()
+    column_stretch: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,8 +194,8 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
         NodeKind(
             name="grid",
             build=_build_grid,
-            apply=_apply_layout,
-            decode_options=_decode_layout,
+            apply=_apply_grid,
+            decode_options=_decode_grid,
             has_children=True,
             decode_child_placement=_decode_grid_cell,
         )
@@ -245,6 +260,7 @@ def _decode_button(reader: ConfigReader) -> ButtonOptions:
         visible=_visible(reader),
         size=_decode_size(reader),
         locator_color=reader.optional_color("locator_color"),
+        label_min_px=reader.integer("label_min_px", 1, minimum=1),
     )
 
 
@@ -268,6 +284,18 @@ def _decode_layout(reader: ConfigReader) -> LayoutOptions:
         spacing=reader.integer("spacing", 0, minimum=0),
         margins=(left, top, right, bottom),
         visible=_visible(reader),
+    )
+
+
+def _decode_grid(reader: ConfigReader) -> GridOptions:
+    layout = _decode_layout(reader)
+    shape = "a list of non-negative integers, one per index"
+    return GridOptions(
+        spacing=layout.spacing,
+        margins=layout.margins,
+        visible=layout.visible,
+        row_stretch=reader.integer_list("row_stretch", (), shape=shape, any_length=True),
+        column_stretch=reader.integer_list("column_stretch", (), shape=shape, any_length=True),
     )
 
 
@@ -368,6 +396,8 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
             widget.set_parts(None)
             # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
             widget.setText(options.label.replace("&", "&&"))
+    if old is None or options.label_min_px != old.label_min_px:
+        widget.set_label_min_px(options.label_min_px)
     if old is None or options.enabled != old.enabled:
         widget.setEnabled(options.enabled)
     if old is None or options.visible != old.visible:
@@ -422,20 +452,34 @@ def _apply_spacer(widget: QWidget, options: object, previous: object | None) -> 
 def _build_grid(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     container = QWidget()
     layout = QGridLayout(container)
-    rows: set[int] = set()
-    columns: set[int] = set()
     for child in node.children:
         cell = child.placement
         assert isinstance(cell, GridCell)
         widget = builder.build(child)
         layout.addWidget(widget, cell.row, cell.column, cell.row_span, cell.column_span)
-        rows.update(range(cell.row, cell.row + cell.row_span))
-        columns.update(range(cell.column, cell.column + cell.column_span))
-    for row in rows:
-        layout.setRowStretch(row, 1)
-    for column in columns:
-        layout.setColumnStretch(column, 1)
     return container
+
+
+def _apply_grid(widget: QWidget, options: object, previous: object | None) -> None:
+    assert isinstance(options, GridOptions)
+    _apply_layout(widget, options, previous)
+    old = previous if isinstance(previous, GridOptions) else None
+    layout = widget.layout()
+    assert isinstance(layout, QGridLayout)
+    if old is None or options.row_stretch != old.row_stretch:
+        for row in range(layout.rowCount()):
+            used = any(layout.itemAtPosition(row, column) is not None for column in range(layout.columnCount()))
+            layout.setRowStretch(row, _stretch(options.row_stretch, row, used))
+    if old is None or options.column_stretch != old.column_stretch:
+        for column in range(layout.columnCount()):
+            used = any(layout.itemAtPosition(row, column) is not None for row in range(layout.rowCount()))
+            layout.setColumnStretch(column, _stretch(options.column_stretch, column, used))
+
+
+def _stretch(stretches: tuple[int, ...], index: int, used: bool) -> int:
+    if index < len(stretches):
+        return stretches[index]
+    return 1 if used else 0
 
 
 def _build_box(node: NodeConfig, builder: NodeBuilder) -> QWidget:

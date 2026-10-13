@@ -10,6 +10,8 @@ from ..runtime.app_messages import (
     WindowArguments,
     WindowClickArguments,
     WindowDeltaArguments,
+    WindowPointArguments,
+    WindowSizeArguments,
 )
 from ..runtime.engine_messages import KeyboardDownArguments, KeyboardKeyArguments, KeyboardTapArguments
 from ..services.keyboard.names import KeyNameError, KeyNames
@@ -57,7 +59,9 @@ class ActionRules:
                 self._names.check_key(decoded.key)
         except KeyNameError as exc:
             return [f"Action {action.action!r}: {exc}"]
-        if isinstance(decoded, (WindowArguments, WindowDeltaArguments, WindowClickArguments)) and decoded.window_id not in self._windows:
+        if isinstance(decoded, (
+            WindowArguments, WindowDeltaArguments, WindowPointArguments, WindowSizeArguments, WindowClickArguments
+        )) and decoded.window_id not in self._windows:
             return [f"Action {action.action!r} names window {decoded.window_id!r}, which the profile does not define"]
         if isinstance(decoded, ProfileSwitchArguments) and decoded.profile not in self._profiles:
             return [f"Action {action.action!r} names profile {decoded.profile!r}, which the config does not have"]

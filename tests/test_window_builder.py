@@ -22,6 +22,8 @@ from axidev_osk.runtime.app_messages import (
     WINDOW_DRAG_ENDED,
     WINDOW_DRAG_STARTED,
     WINDOW_DRAGGED,
+    WINDOW_RESIZE_DRAG_ENDED,
+    WINDOW_RESIZE_DRAG_STARTED,
     WINDOW_RESIZE_DRAGGED,
     WindowArguments,
     WindowButtonArguments,
@@ -150,7 +152,14 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         engine = make_test_engine(RecordingBackend())
         overlay = Mock()
         values = WindowValues(
-            title="Pad", opacity=1.0, minimum_size=(0, 0), default_close=True, input_blocked=False, style=StyleConfig(), close_label="x"
+            title="Pad",
+            opacity=1.0,
+            minimum_size=(0, 0),
+            default_close=True,
+            input_blocked=False,
+            style=StyleConfig(),
+            close_label="x",
+            fit_content=True,
         )
 
         with (
@@ -223,6 +232,22 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         overlay.move_by.assert_not_called()
         overlay.resize_by.assert_not_called()
 
+    def test_move_to_and_resize_to_reach_the_point_and_size_asked_for(self) -> None:
+        harness = WindowHarness()
+        overlay = Mock(wraps=FakeOverlay(uses_custom_chrome=True))
+        overlay.uses_custom_chrome = True
+        overlay.uses_runtime_pointer_drag = False
+        overlay.position.return_value = (100, 50)
+        window = harness.build(overlay=overlay)
+        self.addCleanup(window.deleteLater)
+        window.resize(400, 300)
+
+        window.move_to(300, 80)
+        window.resize_to(500, 250)
+
+        overlay.move_by.assert_called_once_with(200, 30)
+        overlay.resize_by.assert_called_once_with(100, -50)
+
     def test_a_click_presses_the_button_under_the_point_with_the_mouse_button_asked_for(self) -> None:
         harness = WindowHarness()
         window = harness.build()
@@ -237,41 +262,36 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         self.assertEqual(presses, [{"node": "pad:a", "button": "right"}])
 
-    def test_runtime_pointer_drag_reports_drag_events_for_the_window(self) -> None:
+    def test_title_bar_and_grip_report_where_each_drag_starts_and_ends(self) -> None:
         harness = WindowHarness()
-        window = harness.build(overlay=FakeOverlay(uses_custom_chrome=True, uses_runtime_pointer_drag=True))
+        window = harness.build()
         self.addCleanup(window.deleteLater)
         events: list[tuple[str, object]] = []
-        for name in (WINDOW_DRAG_STARTED, WINDOW_DRAG_ENDED):
+        for name in (WINDOW_DRAG_STARTED, WINDOW_DRAG_ENDED, WINDOW_RESIZE_DRAG_STARTED, WINDOW_RESIZE_DRAG_ENDED):
             harness.engine.dispatcher.add_event_handler(
                 name,
                 lambda event, name=name: events.append((name, event)) or [],
             )
 
         title_bar = window.findChild(OverlayTitleBar)
-        assert title_bar is not None
+        grip = window.findChild(OverlayResizeHandle)
+        assert title_bar is not None and grip is not None
         title_bar.dragStarted.emit("middle")
         title_bar.dragEnded.emit()
+        grip.resizeStarted.emit("right")
+        grip.resizeEnded.emit()
         self.assertEqual(events, [])
         harness.engine.dispatcher.process_pending()
 
         self.assertEqual(
             events,
-            [(WINDOW_DRAG_STARTED, WindowButtonArguments("pad", "middle")), (WINDOW_DRAG_ENDED, WindowArguments("pad"))],
+            [
+                (WINDOW_DRAG_STARTED, WindowButtonArguments("pad", "middle")),
+                (WINDOW_DRAG_ENDED, WindowArguments("pad")),
+                (WINDOW_RESIZE_DRAG_STARTED, WindowButtonArguments("pad", "right")),
+                (WINDOW_RESIZE_DRAG_ENDED, WindowArguments("pad")),
+            ],
         )
-
-    def test_qt_pointer_drag_does_not_report_drag_events(self) -> None:
-        harness = WindowHarness()
-        window = harness.build()
-        self.addCleanup(window.deleteLater)
-        events: list[object] = []
-        harness.engine.dispatcher.add_raw_event_handler(WINDOW_DRAG_STARTED, lambda event: events.append(event) or [])
-
-        title_bar = window.findChild(OverlayTitleBar)
-        assert title_bar is not None
-        title_bar.dragStarted.emit("left")
-
-        self.assertEqual(events, [])
 
     def test_runtime_title_bar_drag_suppresses_qt_motion_deltas(self) -> None:
         qt_app()
@@ -323,6 +343,9 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         drags: list[tuple[int, int, str]] = []
         title_bar.dragDelta.connect(lambda dx, dy, button: drags.append((dx, dy, button)))
         grip.resizeDelta.connect(lambda dx, dy, button: drags.append((dx, dy, button)))
+        resizes: list[str] = []
+        grip.resizeStarted.connect(lambda button: resizes.append(f"started {button}"))
+        grip.resizeEnded.connect(lambda: resizes.append("ended"))
 
         def drag(widget: Any, button: Qt.MouseButton) -> None:
             widget.mousePressEvent(
@@ -355,6 +378,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         drag(grip, Qt.MouseButton.MiddleButton)
 
         self.assertEqual(drags, [(2, 3, "right"), (2, 3, "middle")])
+        self.assertEqual(resizes, ["started middle", "ended"])
 
     def test_close_button_reports_its_mouse_button_through_the_window(self) -> None:
         harness = WindowHarness()
@@ -449,6 +473,41 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         window.show()
 
         self.assertGreaterEqual(window.minimumWidth(), 640)
+
+    def test_hiding_and_showing_a_window_keeps_the_size_it_was_given(self) -> None:
+        window = WindowHarness().build()
+        self.addCleanup(window.deleteLater)
+        window.show()
+        window.resize(window.minimumWidth() + 200, window.minimumHeight() + 100)
+        chosen = window.size()
+
+        window.hide()
+        window.show()
+
+        self.assertEqual(window.size(), chosen)
+
+    def test_a_smaller_minimum_size_shrinks_an_enlarged_window_only_with_fit_content(self) -> None:
+        for fit_content in (True, False):
+            with self.subTest(fit_content=fit_content):
+                harness = WindowHarness(
+                    state={"width": axidev_osk.var("integer", 400)},
+                    minimum_size=lambda s: [s.width, 50],
+                    fit_content=fit_content,
+                )
+                window = harness.build()
+                self.addCleanup(window.deleteLater)
+                window.show()
+                window.resize(700, 300)
+
+                harness.engine.dispatcher.dispatch(state_set("width", 300))
+                harness.engine.dispatcher.process_pending()
+
+                self.assertEqual(window.minimumWidth(), 300)
+                self.assertEqual(window.width(), 300 if fit_content else 700)
+                self.assertEqual(
+                    harness.engine.profile.state.get(("windows", "pad", "content_size")),
+                    {"width": window.minimumWidth(), "height": window.minimumHeight()},
+                )
 
     def test_startup_size_honors_configured_minimum_size(self) -> None:
         window = WindowHarness(minimum_size=[640, 320]).build()

@@ -35,6 +35,20 @@ class ButtonTests(unittest.TestCase):
         clipped = button.fitted_font("Back", area)
         self.assertLessEqual(QFontMetrics(clipped).horizontalAdvance("Back"), 20)
 
+    def test_a_label_never_shrinks_below_its_smallest_size(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 18px; padding: 0px; border: none; }")
+        button.resize(60, 40)
+        button.show()
+        text = "Backspace Backspace Backspace"
+
+        self.assertLess(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+        button.set_label_min_px(12)
+
+        self.assertEqual(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+
     def test_state_text_colors_apply_even_to_a_label_that_shrinks(self) -> None:
         qt_app()
         button = Button("Backspace")
@@ -189,6 +203,19 @@ class ButtonTests(unittest.TestCase):
 
         self.assertEqual(left_events, ["pressed", "released", ("clicked", False)])
         self.assertEqual(events, left_events)
+
+    def test_a_mouse_button_with_no_name_presses_and_is_reported_as_other(self) -> None:
+        qt_app()
+        button = Button("Test")
+        self.addCleanup(button.close)
+        button.show()
+        events: list[object] = []
+        button.pressed.connect(lambda: events.append(("pressed", button.pressed_with)))
+        button.clicked.connect(lambda checked: events.append("clicked"))
+
+        QTest.mouseClick(button, Qt.MouseButton.ExtraButton5)
+
+        self.assertEqual(events, [("pressed", "other"), "clicked"])
 
     def test_context_menu_event_is_suppressed(self) -> None:
         qt_app()
