@@ -28,7 +28,13 @@ from PySide6.QtWidgets import QWidget
 # so config files (and a future Lua config) can build it without importing
 # Qt-bound modules. It is re-exported here for the overlay's callers.
 from ...config.models import AlwaysOnTopWindowConfig
-from ...platform.overlay import OVERLAY_BACKEND_ENV, OVERLAY_DEBUG_ENV, OverlayBackend, read_selected_overlay_backend
+from ...platform.overlay import (
+    OVERLAY_BACKEND_ENV,
+    OVERLAY_DEBUG_ENV,
+    OverlayBackend,
+    qt_platform_name,
+    read_selected_overlay_backend,
+)
 
 from ...platform.layer_shell import (
     ANCHOR_BOTTOM,
@@ -734,7 +740,13 @@ class AlwaysOnTopWindowController:
 
 
 class PlainWindowController:
-    """No-op controller for ordinary non-overlay windows."""
+    """Controller for ordinary windows, which the window manager frames and the person moves.
+
+    A profile may still move and resize one. Wayland lets an ordinary window
+    ask for a size but gives it no way to choose its position, so a move
+    there raises instead of being silently dropped, and the profile receives
+    ``action.failed``.
+    """
 
     def __init__(self, window: QWidget) -> None:
         self._window = window
@@ -779,15 +791,17 @@ class PlainWindowController:
         position = self._window.pos()
         return (position.x(), position.y())
 
-    def move_by(self, _dx: int, _dy: int) -> None:
-        """Ignore overlay move requests for plain windows."""
+    def move_by(self, dx: int, dy: int) -> None:
+        """Move the window, or raise on Wayland, where an ordinary window cannot place itself."""
 
-        return
+        if qt_platform_name().startswith("wayland"):
+            raise RuntimeError("Wayland does not let an ordinary window move itself; only overlays can be moved")
+        self._window.move(self._window.x() + dx, self._window.y() + dy)
 
-    def resize_by(self, _dx: int, _dy: int) -> None:
-        """Ignore overlay resize requests for plain windows."""
+    def resize_by(self, dx: int, dy: int) -> None:
+        """Resize the window; it never gets smaller than its minimum size."""
 
-        return
+        self._window.resize(self._window.width() + dx, self._window.height() + dy)
 
 def _configure_x11_bridge_environment() -> bool:
     if not os.environ.get("DISPLAY"):

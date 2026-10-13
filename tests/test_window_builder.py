@@ -566,6 +566,24 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         configure_overlay.assert_not_called()
         configure_plain.assert_called_once_with(window)
 
+    def test_a_plain_window_moves_and_resizes_when_asked_except_moving_on_wayland(self) -> None:
+        harness = WindowHarness(overlay={"always_on_top": False})
+        window = build_profile_window(harness.profile.window("pad"), harness.engine)
+        self.addCleanup(window.deleteLater)
+        window.show()
+        window.move(100, 50)
+        window.resize(400, 300)
+        start = window.pos()
+
+        window.move_to(start.x() + 30, start.y() + 20)
+        window.resize_to(450, 320)
+
+        self.assertEqual((window.x() - start.x(), window.y() - start.y()), (30, 20))
+        self.assertEqual((window.width(), window.height()), (450, 320))
+        with patch("axidev_osk.windows.overlay.always_on_top.qt_platform_name", return_value="wayland"):
+            with self.assertRaisesRegex(RuntimeError, "Wayland does not let an ordinary window move itself"):
+                window.move_by(5, 5)
+
     def test_window_uses_configured_opacity(self) -> None:
         window = WindowHarness(opacity=0.85).build()
         self.addCleanup(window.deleteLater)
