@@ -1,23 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
-from PySide6.QtCore import QPoint, QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
-from axidev_osk.config.defaults import build_default_app_config
 from axidev_osk.config.models import DwellClickConfig
-from axidev_osk.windows.dwell_click import DwellClickController
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+from axidev_osk.windows.dwell_click import DwellClickController, click_at
+from axidev_osk.python_defaults import axidev_osk
+from support import RecordingBackend, make_test_engine, qt_app, wait_until
 
 
 class _MouseEventRecorder(QWidget):
@@ -41,21 +36,6 @@ class _MouseEventRecorder(QWidget):
 
 
 class DwellClickConfigTests(unittest.TestCase):
-    def test_default_keyboard_starts_with_dwell_click_disabled(self) -> None:
-        config = build_default_app_config().windows[0].dwell_click
-
-        self.assertFalse(config.enabled)
-        self.assertEqual(config.delay_ms, 200)
-        self.assertEqual(config.dead_zone_px, 10)
-        self.assertEqual(config.full_speed_px_s, 20)
-        self.assertEqual(config.stop_speed_px_s, 240)
-        self.assertEqual(config.maximum_progress_rate, 1.75)
-        self.assertEqual(config.indicator_start_progress, 0.25)
-        self.assertEqual(config.direction_reversal_progress_factor, 0.5)
-        self.assertEqual(config.movement_penalty_px, 15)
-        self.assertEqual(config.distance_curve_full_px, 200)
-        self.assertEqual(config.velocity_release_ms, 100)
-
     def test_config_rejects_invalid_delay_and_dead_zone(self) -> None:
         for delay in (0, float("nan"), float("inf")):
             with self.subTest(delay=delay):
@@ -100,18 +80,29 @@ class DwellClickConfigTests(unittest.TestCase):
                     "at least 1 millisecond",
                 ):
                     DwellClickConfig(velocity_release_ms=release)
+        for sizes in (
+            {"indicator_size_px": 0, "indicator_min_dot_px": 0, "indicator_max_dot_px": 0},
+            {"indicator_max_dot_px": 31},
+            {"indicator_min_dot_px": 25},
+            {"indicator_min_dot_px": -1},
+        ):
+            with self.subTest(**sizes):
+                with self.assertRaisesRegex(ValueError, "Dwell click indicator"):
+                    DwellClickConfig(**sizes)
+        with self.assertRaisesRegex(ValueError, "indicator fade"):
+            DwellClickConfig(indicator_fade_ms=-1)
 
 
 class DwellClickControllerTests(unittest.TestCase):
     def setUp(self) -> None:
-        _app()
+        qt_app()
         self.window = QWidget()
         self.window.setGeometry(100, 100, 240, 100)
         self.key = QPushButton("A", self.window)
-        self.key.setProperty("componentType", "key")
+        self.key.setProperty("componentType", "button")
         self.key.setGeometry(10, 10, 80, 80)
         self.other_key = QPushButton("B", self.window)
-        self.other_key.setProperty("componentType", "key")
+        self.other_key.setProperty("componentType", "button")
         self.other_key.setGeometry(110, 10, 80, 80)
         self.window.show()
         QApplication.processEvents()
@@ -131,8 +122,30 @@ class DwellClickControllerTests(unittest.TestCase):
                 distance_curve_full_px=200,
                 velocity_release_ms=100,
             ),
+            # The app posts dwell.completed, and the default config clicks there with window.click.
+            lambda point: click_at(self.window, point),
         )
         self.addCleanup(self.window.close)
+
+    def test_the_indicator_takes_its_size_from_the_profile_options(self) -> None:
+        engine = make_test_engine(RecordingBackend())
+        dwell = axidev_osk.dwell(
+            id="d", window="pad", indicator_size_px=60, indicator_min_dot_px=10, indicator_max_dot_px=50
+        )
+        window = {"id": "pad", "title": "Pad", "content": {"kind": "label", "id": "text"}}
+        root = {"active_profile": "p", "profiles": {"p": {"windows": [window], "attachments": [dwell]}}}
+        config = engine.decoder().decode_root(root).attachments[0].values.initial
+        assert isinstance(config, DwellClickConfig)
+
+        self.controller.set_config(config)
+        indicator = self.controller.indicator
+        indicator.show_progress(self.window.mapToGlobal(QPoint(120, 50)), 1.0)
+
+        sizes = {widget.size().toTuple() for widget in (indicator, indicator.cancel_feedback, indicator.complete_feedback)}
+        self.assertEqual(sizes, {(60, 60)})
+        image = indicator.grab().toImage()
+        painted = [x for x in range(image.width()) if image.pixelColor(x, image.height() // 2).alpha() > 0]
+        self.assertAlmostEqual(len(painted), 50, delta=2)
 
     def test_activates_exact_key_under_current_pointer(self) -> None:
         clicks: list[str] = []
@@ -159,7 +172,7 @@ class DwellClickControllerTests(unittest.TestCase):
             )
 
         self.assertTrue(self.other_key.isDown())
-        QTest.qWait(150)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, ["B"])
         self.assertFalse(self.other_key.isDown())
         self.assertFalse(self.other_key.isChecked())
@@ -362,7 +375,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
 
-        QTest.qWait(150)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, [True])
 
     def test_movement_on_same_target_does_not_restart_progress(self) -> None:
@@ -394,7 +407,7 @@ class DwellClickControllerTests(unittest.TestCase):
                 now=1.32,
             )
 
-        QTest.qWait(150)
+        wait_until(lambda: clicks)
         self.assertEqual(len(clicks), 1)
 
     def test_entering_another_target_restarts_progress(self) -> None:
@@ -413,7 +426,7 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertFalse(self.controller.indicator.isVisible())
         feedback = self.controller.indicator.cancel_feedback
         self.assertTrue(feedback.isVisible())
-        QTest.qWait(300)
+        wait_until(lambda: not feedback.isVisible())
         self.assertFalse(feedback.isVisible())
 
     def test_completion_feedback_fades_in_accent_color(self) -> None:
@@ -432,7 +445,7 @@ class DwellClickControllerTests(unittest.TestCase):
         )
         self.assertTrue(feedback.isVisible())
         self.assertEqual(feedback.feedback_color.name(), expected_color.name())
-        QTest.qWait(300)
+        wait_until(lambda: not feedback.isVisible())
         self.assertFalse(feedback.isVisible())
 
     def test_requires_dead_zone_exit_before_another_click(self) -> None:
@@ -446,7 +459,7 @@ class DwellClickControllerTests(unittest.TestCase):
         ):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
-            QTest.qWait(150)
+            wait_until(lambda: len(clicks) == 1)
             self.controller.update_from_global_position(position, now=2.0)
             moved_position = position + QPoint(11, 0)
             self.controller.update_from_global_position(
@@ -458,13 +471,12 @@ class DwellClickControllerTests(unittest.TestCase):
                 now=2.31,
             )
 
-        QTest.qWait(150)
+        wait_until(lambda: len(clicks) == 2)
         self.assertEqual(len(clicks), 2)
         self.assertFalse(self.controller.indicator.isVisible())
 
-    def test_activates_non_key_controls_in_the_same_window(self) -> None:
-        button = QPushButton("Not a key", self.window)
-        button.setProperty("componentType", "button")
+    def test_activates_controls_that_are_not_profile_nodes(self) -> None:
+        button = QPushButton("Plain", self.window)
         clicks: list[bool] = []
         button.clicked.connect(lambda: clicks.append(True))
         position = button.mapToGlobal(QPoint(1, 1))
@@ -476,7 +488,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
 
-        QTest.qWait(150)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, [True])
 
     def test_sends_mouse_click_to_plain_window_content(self) -> None:
@@ -554,10 +566,28 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertIs(self.controller._target, self.key)
         self.assertEqual(self.controller._progress, 0)
 
+    def test_a_held_mouse_button_keeps_the_dwell_without_pause_while_pressed(self) -> None:
+        self.controller.set_config(replace(self.controller._config, pause_while_pressed=False))
+        position = self.key.mapToGlobal(QPoint(20, 20))
+
+        with (
+            patch("axidev_osk.windows.dwell_click.QApplication.mouseButtons", return_value=Qt.MouseButton.LeftButton),
+            patch("axidev_osk.windows.dwell_click.QApplication.widgetAt", return_value=self.key),
+            patch("axidev_osk.windows.dwell_click.QCursor.pos", return_value=position),
+            patch("axidev_osk.windows.dwell_click.monotonic", return_value=1.0),
+        ):
+            self.controller._progress = 0.5
+            self.controller._target = self.key
+            self.controller._last_sample_time = 1.0
+            self.controller._poll_cursor()
+
+        self.assertIs(self.controller._target, self.key)
+        self.assertEqual(self.controller._progress, 0.5)
+
     def test_does_not_activate_a_key_from_another_window(self) -> None:
         other_window = QWidget()
         other_key = QPushButton("Other", other_window)
-        other_key.setProperty("componentType", "key")
+        other_key.setProperty("componentType", "button")
         clicks: list[bool] = []
         other_key.clicked.connect(lambda: clicks.append(True))
         self.addCleanup(other_window.close)

@@ -84,6 +84,8 @@ def _runtime_details() -> dict[str, str | list[str]]:
     from axidev_osk.platform.layer_shell import (
         _find_layer_shell_plugin_root,
         _layer_shell_plugin_is_compatible,
+        layer_shell_interface_has_window_get,
+        layer_shell_interface_path,
     )
 
     layer_shell_root = _find_layer_shell_plugin_root()
@@ -92,6 +94,13 @@ def _runtime_details() -> dict[str, str | list[str]]:
     if not _layer_shell_plugin_is_compatible(layer_shell_root):
         raise SystemExit(
             "axidev-osk: LayerShellQt is incompatible with the installed Qt runtime"
+        )
+    layer_shell_interface = layer_shell_interface_path(layer_shell_root)
+    if layer_shell_interface is None or not layer_shell_interface_has_window_get(
+        layer_shell_interface
+    ):
+        raise SystemExit(
+            "axidev-osk: LayerShellQt lacks the per-window layer-shell API"
         )
 
     return {

@@ -13,9 +13,6 @@ from .keyboard import KeyboardService
 from .displays import DisplayService
 from .single_instance import WindowsSingleInstanceService
 
-if sys.platform.startswith("linux"):
-    from .wayland_relative_pointer import WaylandRelativePointerService
-
 
 def register_services(
     registry: ServiceRegistry,
@@ -42,6 +39,8 @@ def register_services(
     if include is None or "single_instance" in include:
         registry.register("single_instance", WindowsSingleInstanceService(parent=parent))
     if sys.platform.startswith("linux") and (include is None or "wayland_relative_pointer" in include):
+        from .wayland_relative_pointer import WaylandRelativePointerService
+
         registry.register("wayland_relative_pointer", WaylandRelativePointerService(parent=parent))
     if include is None or "keyboard" in include:
         registry.register("keyboard", keyboard or KeyboardService())
@@ -49,4 +48,6 @@ def register_services(
         registry.register("hot_corner", HotCornerService(parent=parent))
     if include is None or "displays" in include:
         registry.register("displays", DisplayService(parent=parent))
+
+
 __all__ = ["KeyboardService", "WindowsSingleInstanceService", "register_services"]

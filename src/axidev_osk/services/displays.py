@@ -1,12 +1,15 @@
-"""Observe Qt display changes and report them through the runtime dispatcher."""
+"""Observe Qt display changes and report the connected screens through the runtime dispatcher."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QTimer
+from typing import cast
+
+from PySide6.QtCore import QObject, QRect, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 
-from ..runtime.context import Context
-from ..runtime.events import DisplayConfigurationChanged
+from ..messages import DataMap
+from ..runtime.dispatcher import Dispatcher
+from ..runtime.engine_messages import display_configuration_changed
 
 
 class DisplayService(QObject):
@@ -14,19 +17,19 @@ class DisplayService(QObject):
 
     def __init__(self, *, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._context: Context | None = None
+        self._dispatcher: Dispatcher | None = None
         self._screens: list[QScreen] = []
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._notify)
 
-    def start(self, context: Context) -> None:
+    def start(self, dispatcher: Dispatcher) -> None:
         """Subscribe to connected outputs and application output-list changes."""
 
-        if self._context is not None:
+        if self._dispatcher is not None:
             return
-        self._context = context
-        app = QGuiApplication.instance()
+        self._dispatcher = dispatcher
+        app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.connect(self._screen_added)
         app.screenRemoved.connect(self._screen_removed)
         app.primaryScreenChanged.connect(self._schedule)
@@ -36,16 +39,16 @@ class DisplayService(QObject):
     def stop(self) -> None:
         """Disconnect observers and cancel any pending notification."""
 
-        if self._context is None:
+        if self._dispatcher is None:
             return
-        app = QGuiApplication.instance()
+        app = cast(QGuiApplication, QGuiApplication.instance())
         app.screenAdded.disconnect(self._screen_added)
         app.screenRemoved.disconnect(self._screen_removed)
         app.primaryScreenChanged.disconnect(self._schedule)
         for screen in tuple(self._screens):
             self._screen_removed(screen)
         self._timer.stop()
-        self._context = None
+        self._dispatcher = None
 
     def _screen_added(self, screen: QScreen) -> None:
         if screen not in self._screens:
@@ -65,5 +68,24 @@ class DisplayService(QObject):
         self._timer.start(0)
 
     def _notify(self) -> None:
-        if self._context is not None:
-            self._context.dispatcher.dispatch_event(DisplayConfigurationChanged())
+        if self._dispatcher is None:
+            return
+        app = cast(QGuiApplication, QGuiApplication.instance())
+        primary = app.primaryScreen()
+        screens = [_describe(screen, primary=screen is primary) for screen in app.screens()]
+        self._dispatcher.dispatch(display_configuration_changed(screens))
+
+
+def _area(rect: QRect) -> DataMap:
+    return {"x": rect.x(), "y": rect.y(), "width": rect.width(), "height": rect.height()}
+
+
+def _describe(screen: QScreen, *, primary: bool) -> DataMap:
+    """One screen as ``display.configuration_changed`` reports it."""
+
+    return {
+        "name": screen.name(),
+        "primary": primary,
+        **_area(screen.geometry()),
+        "available": _area(screen.availableGeometry()),
+    }

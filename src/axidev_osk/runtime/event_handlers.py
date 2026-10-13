@@ -1,231 +1,216 @@
-"""Default runtime event and command handler registration."""
+"""Runtime-owned handlers for window actions, display recovery, and pointer drags.
+
+These adapt queue messages into calls on objects the runtime owns: the window
+manager and services. They contain no profile policy; profiles decide when to
+send these actions.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from .commands import (
-    AppQuit,
-    KeyboardKeyDown,
-    KeyboardRegisterKeySpec,
-    KeyboardKeyUp,
-    KeyboardSyncLatchedKey,
-    SecureInputPanelPrepare,
-    SecureInputPanelRelease,
-    StateSet,
-    WindowClose,
-    WindowHide,
-    WindowMoveBy,
-    WindowSetDwellEnabled,
-    WindowShow,
-    WindowToggleOpacity,
+from ..messages import MessageResult
+from .app_messages import (
+    POINTER_MOTION_OBSERVED,
+    WINDOW_CLICK,
+    WINDOW_CLOSE,
+    WINDOW_DRAG_ENDED,
+    WINDOW_DRAG_STARTED,
+    WINDOW_HIDE,
+    WINDOW_MOVE_BY,
+    WINDOW_MOVE_TO,
+    WINDOW_RESIZE_BY,
+    WINDOW_RESIZE_TO,
+    WINDOW_SHOW,
+    PointerMotionObservedArguments,
+    WindowArguments,
+    WindowButtonArguments,
+    WindowClickArguments,
+    WindowDeltaArguments,
+    WindowPointArguments,
+    WindowSizeArguments,
+    decode_window,
+    decode_window_click,
+    decode_window_delta,
+    decode_window_point,
+    decode_window_size,
+    window_dragged,
 )
-from .events import ComponentPressed, ComponentStateChanged, DisplayConfigurationChanged, HotCornerTriggered, PointerMotionObserved, WindowDragEnded, WindowDragStarted
-from .registries import EventHandlerRegistry
+from .engine_messages import DISPLAY_CONFIGURATION_CHANGED, DisplayConfigurationArguments
+from .dispatcher import ACTION_FAILED, ActionFailedArguments
+
+if TYPE_CHECKING:
+    from .dispatcher import Dispatcher
+    from .window_manager import WindowManager
 
 
-class _WindowVisibilityManager(Protocol):
-    """Minimal window-manager surface needed by hot-corner routing."""
+def register_window_actions(
+    dispatcher: "Dispatcher",
+    windows: "WindowManager",
+    relative_pointer: "RelativePointer | None",
+) -> None:
+    """Register the window actions profiles send, routed to the window manager.
 
-    def is_visible(self, window_id: str) -> bool:
-        """Return whether the managed window is currently visible."""
+    A moved layer-shell surface is committed through the relative-pointer
+    service in the same step, so a move is visible at once.
+    """
 
-    def is_minimized(self, window_id: str) -> bool:
-        """Return whether the managed window is currently minimized."""
+    def show(arguments: WindowArguments) -> MessageResult:
+        windows.show(arguments.window_id)
+        return []
 
-    def is_opacity_reduced(self, window_id: str) -> bool:
-        """Return whether the managed window is in low-opacity mode."""
+    def hide(arguments: WindowArguments) -> MessageResult:
+        windows.hide(arguments.window_id)
+        return []
 
+    def close(arguments: WindowArguments) -> MessageResult:
+        windows.close(arguments.window_id)
+        return []
 
-def register_context_command_handlers(registry: EventHandlerRegistry) -> None:
-    """Register context-level command handlers in deterministic order."""
+    def move_by(arguments: WindowDeltaArguments) -> MessageResult:
+        window = windows.get(arguments.window_id)
+        if window is None:
+            return []
+        windows.move_by(arguments.window_id, arguments.dx, arguments.dy)
+        if relative_pointer is not None:
+            relative_pointer.commit_surface(int(window.winId()))
+        return []
 
-    registry.register_command_handler(
-        KeyboardRegisterKeySpec,
-        lambda context: lambda command: context.keyboard.register_key_spec(
-            command.layout_id,
-            command.key_spec,
-            component_id=command.component_id,
-        ),
-    )
-    registry.register_command_handler(
-        KeyboardKeyDown,
-        lambda context: lambda command: context.keyboard.key_down(command.layout_id, command.key_spec),
-    )
-    registry.register_command_handler(
-        KeyboardKeyUp,
-        lambda context: lambda command: context.keyboard.key_up(command.layout_id, command.key_spec),
-    )
-    registry.register_command_handler(
-        KeyboardSyncLatchedKey,
-        lambda context: lambda command: context.keyboard.sync_latched_key(
-            command.layout_id,
-            command.key_spec,
-            command.latched,
-        ),
-    )
-    registry.register_command_handler(
-        StateSet,
-        lambda context: lambda command: context.state.set(command.namespace, command.key, command.value),
-    )
+    def move_to(arguments: WindowPointArguments) -> MessageResult:
+        window = windows.get(arguments.window_id)
+        if window is None:
+            return []
+        windows.move_to(arguments.window_id, arguments.x, arguments.y)
+        if relative_pointer is not None:
+            relative_pointer.commit_surface(int(window.winId()))
+        return []
 
+    def resize_to(arguments: WindowSizeArguments) -> MessageResult:
+        windows.resize_to(arguments.window_id, arguments.width, arguments.height)
+        return []
 
-def register_event_handlers(registry: EventHandlerRegistry) -> None:
-    """Register application-level runtime handlers in deterministic order."""
+    dispatcher.register_action(WINDOW_SHOW, decode_window, show)
+    dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
+    dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
+    def resize_by(arguments: WindowDeltaArguments) -> MessageResult:
+        windows.resize_by(arguments.window_id, arguments.dx, arguments.dy)
+        return []
 
-    registry.register_command_handler(
-        SecureInputPanelPrepare,
-        lambda runtime: lambda command: runtime._prepare_secure_input_panel(),
-    )
-    registry.register_command_handler(
-        SecureInputPanelRelease,
-        lambda runtime: lambda command: runtime._release_secure_input_panel(),
-    )
-    registry.register_command_handler(
-        WindowShow,
-        lambda runtime: lambda command: runtime._window_manager.show(command.window_id),
-    )
-    registry.register_command_handler(
-        WindowHide,
-        lambda runtime: lambda command: runtime._window_manager.hide(command.window_id),
-    )
-    registry.register_command_handler(
-        WindowClose,
-        lambda runtime: lambda command: runtime._window_manager.close(command.window_id),
-    )
-    registry.register_command_handler(
-        WindowMoveBy,
-        lambda runtime: lambda command: runtime._window_manager.move_by(command.window_id, command.dx, command.dy),
-    )
-    registry.register_command_handler(
-        WindowToggleOpacity,
-        lambda runtime: lambda command: runtime._window_manager.toggle_opacity(
-            command.window_id,
-            component_id=command.component_id,
-            opacity=command.opacity,
-        ),
-    )
-    registry.register_command_handler(
-        WindowSetDwellEnabled,
-        lambda runtime: lambda command: runtime._set_window_dwell_enabled(
-            command.window_id,
-            command.enabled,
-        ),
-    )
-    registry.register_command_handler(
-        AppQuit,
-        lambda runtime: lambda command: runtime._app.exit(command.exit_code),
-    )
-    registry.register_event_handler(lambda runtime: runtime._handle_window_close_requested)
-    registry.register_event_handler(lambda runtime: runtime._handle_hot_corner_triggered)
-    registry.register_event_handler(lambda runtime: runtime._handle_component_pressed)
-    registry.register_event_handler(lambda runtime: runtime._handle_component_state_changed)
-    registry.register_event_handler(lambda runtime: runtime._handle_pointer_drag_event)
-    registry.register_event_handler(lambda runtime: lambda event: route_display_configuration_changed(event, runtime))
+    def click(arguments: WindowClickArguments) -> MessageResult:
+        windows.click(arguments.window_id, arguments.x, arguments.y, arguments.button)
+        return []
+
+    dispatcher.register_action(WINDOW_MOVE_BY, decode_window_delta, move_by)
+    dispatcher.register_action(WINDOW_RESIZE_BY, decode_window_delta, resize_by)
+    dispatcher.register_action(WINDOW_MOVE_TO, decode_window_point, move_to)
+    dispatcher.register_action(WINDOW_RESIZE_TO, decode_window_size, resize_to)
+    dispatcher.register_action(WINDOW_CLICK, decode_window_click, click)
 
 
-def route_display_configuration_changed(event: object, runtime: object) -> None:
-    """Coordinate display recovery through the main runtime boundary."""
+def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
+    """Recover windows after connected outputs change; services follow the same event themselves."""
 
-    if not isinstance(event, DisplayConfigurationChanged):
-        return
-    runtime._window_manager.refresh_screen_configuration()  # noqa: SLF001
-    for service in runtime._services.services():  # noqa: SLF001
-        refresh = getattr(service, "refresh_screen_configuration", None)
-        if refresh is not None:
-            refresh()
+    def recover(event: DisplayConfigurationArguments) -> MessageResult:
+        del event
+        windows.refresh_screen_configuration()
+        return []
+
+    dispatcher.add_event_handler(DISPLAY_CONFIGURATION_CHANGED, recover)
 
 
-def route_hot_corner_triggered(event: object, runtime: object) -> None:
-    """Map hot-corner events to managed window visibility commands."""
+class RelativePointer(Protocol):
+    """The service that collects compositor pointer motion while a layer-shell window is dragged."""
 
-    if not isinstance(event, HotCornerTriggered):
-        return
-    config = runtime._config  # noqa: SLF001
-    dispatcher = runtime._dispatcher  # noqa: SLF001
-    window_manager: _WindowVisibilityManager = runtime._window_manager  # noqa: SLF001
-    for window_id in config.hot_corner.bindings.get(event.corner, []):
-        if window_manager.is_minimized(window_id):
-            dispatcher.dispatch_command(WindowShow(window_id))
-        elif window_manager.is_opacity_reduced(window_id):
-            dispatcher.dispatch_command(WindowShow(window_id))
-        elif window_manager.is_visible(window_id):
-            dispatcher.dispatch_command(WindowHide(window_id))
+    def begin_drag(self) -> None: ...
+
+    def end_drag(self) -> None: ...
+
+    def commit_surface(self, surface: int) -> None: ...
+
+
+class PointerDragRouter:
+    """Own one layer-shell title-bar drag and report raw pointer motion as ``window.dragged``.
+
+    Only a window whose title bar leaves movement to raw pointer motion
+    starts collection; every other window reports its own deltas. The
+    profile decides what a drag does; the standard library moves the window
+    with ``window.move_by``. A failing move of the dragged window ends the
+    drag.
+    """
+
+    def __init__(self, windows: "WindowManager", relative_pointer: RelativePointer | None) -> None:
+        self._windows = windows
+        self._relative_pointer = relative_pointer
+        self._window_id: str | None = None
+        self._button = ""
+        self._remainder = (0.0, 0.0)
+
+    @property
+    def window_id(self) -> str | None:
+        """The window being dragged, if any."""
+
+        return self._window_id
+
+    def register(self, dispatcher: "Dispatcher") -> None:
+        dispatcher.add_event_handler(WINDOW_DRAG_STARTED, self._drag_started)
+        dispatcher.add_event_handler(WINDOW_DRAG_ENDED, self._drag_ended)
+        dispatcher.add_event_handler(POINTER_MOTION_OBSERVED, self._motion_observed)
+        dispatcher.add_event_handler(ACTION_FAILED, self._action_failed)
+
+    def _drag_started(self, event: WindowButtonArguments) -> MessageResult:
+        window = self._windows.get(event.window_id)
+        if window is None or not window.uses_runtime_drag_motion:
+            return []
+        if self._window_id is not None:
+            self._set_dragging(False)
+        self._window_id = event.window_id
+        self._button = event.button
+        self._remainder = (0.0, 0.0)
+        self._set_dragging(True)
+        return []
+
+    def _drag_ended(self, event: WindowArguments) -> MessageResult:
+        if self._window_id == event.window_id:
+            self._stop()
+        return []
+
+    def _motion_observed(self, event: PointerMotionObservedArguments) -> MessageResult:
+        """Turn accumulated raw pointer motion into whole-pixel window moves."""
+
+        window_id = self._window_id
+        if window_id is None:
+            return []
+        window = self._windows.get(window_id)
+        if window is None or not window.isVisible():
+            self._stop()
+            return []
+        total_x = self._remainder[0] + event.dx
+        total_y = self._remainder[1] + event.dy
+        dx = int(total_x)
+        dy = int(total_y)
+        self._remainder = (total_x - dx, total_y - dy)
+        if not dx and not dy:
+            return []
+        return [window_dragged(window_id, dx, dy, self._button)]
+
+    def _action_failed(self, event: ActionFailedArguments) -> MessageResult:
+        """Stop the drag when moving the dragged window fails."""
+
+        if event.action == WINDOW_MOVE_BY and event.arguments.get("window") == self._window_id:
+            self._stop()
+        return []
+
+    def _stop(self) -> None:
+        self._set_dragging(False)
+        self._window_id = None
+        self._remainder = (0.0, 0.0)
+
+    def _set_dragging(self, enabled: bool) -> None:
+        """Start or stop relative-pointer collection."""
+
+        if self._relative_pointer is None:
+            return
+        if enabled:
+            self._relative_pointer.begin_drag()
         else:
-            dispatcher.dispatch_command(WindowShow(window_id))
-
-
-def route_component_pressed(event: object, runtime: object) -> None:
-    """Map configured key actions to managed-window commands."""
-
-    if not isinstance(event, ComponentPressed) or event.key_spec is None:
-        return
-    action = event.key_spec.action
-    if action is None:
-        return
-    if action.kind == "toggle-opacity":
-        runtime._dispatcher.dispatch_command(  # noqa: SLF001
-            WindowToggleOpacity(
-                window_id=action.target_window_id,
-                component_id=event.component_id,
-                opacity=action.opacity,
-            )
-        )
-
-
-def route_component_state_changed(event: object, runtime: object) -> None:
-    """Map latchable component actions to explicit window-state commands."""
-
-    if not isinstance(event, ComponentStateChanged) or event.key_spec is None:
-        return
-    action = event.key_spec.action
-    if action is None or action.kind != "set-dwell-enabled":
-        return
-    runtime._dispatcher.dispatch_command(  # noqa: SLF001
-        WindowSetDwellEnabled(
-            window_id=action.target_window_id,
-            enabled=event.latched,
-        )
-    )
-
-
-def route_pointer_drag_event(event: object, runtime: object) -> None:
-    """Route raw pointer motion to the active layer-shell window drag."""
-
-    if isinstance(event, WindowDragStarted):
-        if runtime._active_pointer_drag_window_id is not None:  # noqa: SLF001
-            runtime._set_pointer_drag_active(False)  # noqa: SLF001
-        runtime._active_pointer_drag_window_id = event.window_id  # noqa: SLF001
-        runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
-        runtime._set_pointer_drag_active(True)  # noqa: SLF001
-        return
-    if isinstance(event, WindowDragEnded):
-        if runtime._active_pointer_drag_window_id == event.window_id:  # noqa: SLF001
-            runtime._set_pointer_drag_active(False)  # noqa: SLF001
-            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
-            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
-        return
-    if not isinstance(event, PointerMotionObserved):
-        return
-
-    window_id = runtime._active_pointer_drag_window_id  # noqa: SLF001
-    if window_id is None:
-        return
-    remainder_x, remainder_y = runtime._pointer_drag_remainder  # noqa: SLF001
-    total_x = remainder_x + event.dx
-    total_y = remainder_y + event.dy
-    dx = int(total_x)
-    dy = int(total_y)
-    runtime._pointer_drag_remainder = (total_x - dx, total_y - dy)  # noqa: SLF001
-    if dx or dy:
-        try:
-            moved = runtime._move_pointer_drag_window(window_id, dx, dy)  # noqa: SLF001
-        except Exception:
-            runtime._set_pointer_drag_active(False)  # noqa: SLF001
-            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
-            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
-            raise
-        if not moved:
-            runtime._set_pointer_drag_active(False)  # noqa: SLF001
-            runtime._active_pointer_drag_window_id = None  # noqa: SLF001
-            runtime._pointer_drag_remainder = (0.0, 0.0)  # noqa: SLF001
+            self._relative_pointer.end_drag()

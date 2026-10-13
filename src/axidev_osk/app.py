@@ -12,6 +12,7 @@ from importlib.resources import files
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from .python_defaults.default_profile import build_default_config
 from .runtime.application import ApplicationRuntime
 from .runtime.registries import ServiceRegistry
 from .services.keyboard import KeyboardService
@@ -111,6 +112,7 @@ def main(*, mode: ApplicationMode = ApplicationMode.DESKTOP) -> int:
     app.setQuitOnLastWindowClosed(False)
     runtime = ApplicationRuntime(
         app,
+        root_config=build_default_config(),
         services=_input_panel_services(app, overlay_backend, mode=mode),
         confirm_quit=overlay_backend != OverlayBackend.WAYLAND_INPUT_PANEL,
         show_startup_windows=not lock_lifecycle,

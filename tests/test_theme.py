@@ -1,12 +1,92 @@
+import re
 import unittest
 
-from axidev_osk.styles.theme import build_stylesheet
+from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtWidgets import QWidget
+
+from axidev_osk.attachments.runtime import AttachmentRuntime
+from axidev_osk.config.reader import ConfigError
+from axidev_osk.python_defaults import axidev_osk
+from axidev_osk.python_defaults.default_profile import build_default_config
+from axidev_osk.python_defaults.theme import DEFAULT_FONT, DEFAULT_QSS
+from axidev_osk.styles.theme import apply_theme
+from support import FakeOverlay, RecordingBackend, build_window, make_test_engine, qt_app, start_test_profile
 
 
-class PointerLocatorThemeTests(unittest.TestCase):
-    def test_pointer_locator_surface_uses_translucent_button_backgrounds(self) -> None:
-        stylesheet = build_stylesheet()
+def _decode(theme: axidev_osk.Map) -> object:
+    root = axidev_osk.config(
+        active_profile="p",
+        profiles={"p": axidev_osk.profile(theme=theme, windows=[axidev_osk.window(id="w", title="w", content=axidev_osk.box(id="r"))])},
+    )
+    return make_test_engine(RecordingBackend()).decoder().decode_root(root)
 
-        self.assertIn('QWidget[pointerLocatorEnabled="true"] QPushButton', stylesheet)
-        self.assertIn("rgba(18, 18, 26, 153)", stylesheet)
-        self.assertIn("rgba(16, 16, 24, 153)", stylesheet)
+
+class ThemeTests(unittest.TestCase):
+    def test_default_profile_theme_sets_palette_font_and_stylesheet(self) -> None:
+        app = qt_app()
+        previous = (app.styleSheet(), app.palette(), app.font())
+        self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
+        profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
+
+        apply_theme(app, profile.theme.initial, base_palette=previous[1], base_font=previous[2])
+
+        self.assertEqual(app.styleSheet(), DEFAULT_QSS)
+        self.assertEqual(app.palette().color(QPalette.ColorRole.Window), QColor("#0B0B10"))
+        self.assertEqual(app.palette().color(QPalette.ColorRole.Highlight), QColor("#E61E8C"))
+        self.assertEqual(app.font().families(), DEFAULT_FONT["families"])
+        self.assertEqual((app.font().pixelSize(), app.font().weight()), (14, QFont.Weight.Medium))
+
+    def test_a_theme_without_a_color_or_font_goes_back_to_the_base_ones(self) -> None:
+        app = qt_app()
+        previous = (app.styleSheet(), app.palette(), app.font())
+        self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
+        base = {"base_palette": QPalette(previous[1]), "base_font": QFont(previous[2])}
+        themed = _decode({"palette": {"window": "#FF0000"}, "font": {"families": ["Inter"], "pixel_size": 31}})
+        plain = _decode({})
+
+        apply_theme(app, themed.theme.initial, **base)  # type: ignore[attr-defined]
+        apply_theme(app, plain.theme.initial, **base)  # type: ignore[attr-defined]
+
+        self.assertEqual(app.palette().color(QPalette.ColorRole.Window), previous[1].color(QPalette.ColorRole.Window))
+        self.assertEqual(app.font().pixelSize(), previous[2].pixelSize())
+
+    def test_a_palette_role_bound_to_none_is_absent_like_a_written_none(self) -> None:
+        profile = _decode(
+            {"palette": {"window": "#FF0000", "highlight": lambda s: None, "base": None}}
+        )
+
+        self.assertEqual(dict(profile.theme.initial.palette), {"window": "#FF0000"})  # type: ignore[attr-defined]
+
+    def test_theme_rejects_unknown_palette_roles_and_malformed_colors(self) -> None:
+        cases = {
+            "unknown keys: glow": {"palette": {"glow": "#FFFFFF"}},
+            "must be a color": {"palette": {"window": "black"}},
+            "must be one of": {"font": {"families": ["Inter"], "pixel_size": 14, "weight": "heavy"}},
+        }
+        for message, theme in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
+                _decode(theme)
+
+    def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        attachments = AttachmentRuntime(engine.bindings, engine.attachments, window_lookup=lambda _id: None)
+        profile = start_test_profile(engine, build_default_config())
+        attachments.start(profile)
+        window = build_window(
+            self,
+            profile.window("keyboard"),
+            engine,
+            attachments=attachments.for_window("keyboard"),
+            overlay=FakeOverlay(uses_custom_chrome=True),
+        )
+        widgets = [window, *window.findChildren(QWidget)]
+        object_names = {widget.objectName() for widget in widgets}
+        properties = {bytes(name.data()).decode() for widget in widgets for name in widget.dynamicPropertyNames()}
+        selectors = "".join(re.findall(r"([^{}]+)\{", DEFAULT_QSS))
+
+        self.assertEqual(set(re.findall(r"#([A-Za-z_][\w-]*)", selectors)) - object_names, set())
+        self.assertEqual(set(re.findall(r"\[([A-Za-z_]\w*)", selectors)) - properties, set())
+
+if __name__ == "__main__":
+    unittest.main()

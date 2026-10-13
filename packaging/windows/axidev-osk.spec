@@ -1,7 +1,5 @@
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
-
 
 repo_root = Path(SPECPATH).parents[1]
 entrypoint = repo_root / "src" / "axidev_osk" / "__main__.py"
@@ -23,7 +21,7 @@ analysis = Analysis(
         (str(icon_ico), "axidev_osk/assets"),
         (str(resources_dll), "."),
     ],
-    hiddenimports=collect_submodules("axidev_osk.components"),
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

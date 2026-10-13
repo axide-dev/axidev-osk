@@ -4,24 +4,12 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+from PySide6.QtGui import QImage, QRegion
+from PySide6.QtWidgets import QPushButton, QWidget
 
-from axidev_osk.components.pointer_locator import (
-    PointerLocator,
-    _build_proximity_graph,
-    build_component_palette,
-    gaussian_opacity,
-)
-from axidev_osk.config.defaults import build_default_app_config
+from axidev_osk.components.pointer_locator import PointerLocator, gaussian_opacity
 from axidev_osk.config.models import PointerLocatorConfig
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+from support import qt_app
 
 
 def _locator_config(**overrides: object) -> PointerLocatorConfig:
@@ -30,22 +18,13 @@ def _locator_config(**overrides: object) -> PointerLocatorConfig:
         "radius_percent": 30,
         "maximum_opacity_percent": 60,
         "radius_standard_deviations": 3,
+        "gap_color": "#242424",
     }
     values.update(overrides)
     return PointerLocatorConfig(**values)
 
 
 class PointerLocatorPaletteTests(unittest.TestCase):
-    def test_default_keyboard_uses_component_aware_locator(self) -> None:
-        background_components = build_default_app_config().windows[0].surface.background_components
-
-        self.assertEqual(len(background_components), 1)
-        config = background_components[0]
-        self.assertIsInstance(config, PointerLocatorConfig)
-        self.assertEqual(config.radius_percent, 30)
-        self.assertEqual(config.maximum_opacity_percent, 60)
-        self.assertEqual(config.radius_standard_deviations, 3)
-
     def test_config_rejects_radius_outside_percentage_bounds(self) -> None:
         for radius_percent in (0, -1, 100.1, float("nan")):
             with self.subTest(radius_percent=radius_percent):
@@ -91,52 +70,10 @@ class PointerLocatorPaletteTests(unittest.TestCase):
         self.assertAlmostEqual(halfway, 0.19, delta=0.01)
         self.assertEqual(edge, 0)
 
-    def test_component_palette_is_deterministic_distinct_and_vivid(self) -> None:
-        rectangles = tuple(QRect(column * 52, row * 52, 48, 48) for row in range(3) for column in range(4))
-
-        first = build_component_palette(rectangles)
-        second = build_component_palette(rectangles)
-        graph = _build_proximity_graph(rectangles)
-
-        self.assertEqual(first, second)
-        for color in first:
-            self.assertAlmostEqual(color.hsvSaturationF(), 1.0)
-            self.assertGreaterEqual(color.valueF(), 0.69)
-        for index, neighbors in enumerate(graph):
-            for neighbor in neighbors:
-                self.assertNotEqual(first[index], first[neighbor])
-
-        for row in range(3):
-            for column in range(4):
-                hue = first[row * 4 + column].hsvHueF() * 360
-                if (row + column) % 2 == 0:
-                    self.assertTrue(hue >= 329.9 or hue <= 60.1)
-                else:
-                    self.assertTrue(149.9 <= hue <= 270.1)
-
-    def test_nearby_components_receive_different_colors(self) -> None:
-        rectangles = (
-            QRect(0, 0, 48, 48),
-            QRect(52, 0, 48, 48),
-            QRect(104, 0, 48, 48),
-        )
-
-        colors = build_component_palette(rectangles)
-
-        self.assertEqual(len({color.name() for color in colors}), 3)
-
-    def test_distant_components_still_alternate_temperature(self) -> None:
-        colors = build_component_palette((QRect(0, 0, 48, 48), QRect(1000, 0, 48, 48)))
-
-        first_hue = colors[0].hsvHueF() * 360
-        second_hue = colors[1].hsvHueF() * 360
-        self.assertTrue(first_hue >= 329.9 or first_hue <= 60.1)
-        self.assertTrue(149.9 <= second_hue <= 270.1)
-
 
 class PointerLocatorWidgetTests(unittest.TestCase):
     def test_glow_tracks_pointer_inside_host_and_hides_outside(self) -> None:
-        app = _app()
+        app = qt_app()
         host = QWidget()
         host.resize(400, 200)
         host.show()
@@ -165,15 +102,15 @@ class PointerLocatorWidgetTests(unittest.TestCase):
 
         self.assertFalse(locator.isVisible())
 
-    def test_glow_uses_button_colors_and_a_muted_gap_color(self) -> None:
-        app = _app()
+    def test_glow_takes_each_widgets_locator_color_and_the_gap_color_elsewhere(self) -> None:
+        app = qt_app()
         host = QWidget()
         host.resize(220, 80)
         left = QPushButton("Left", host)
-        left.setProperty("componentType", "key")
+        left.setProperty("locatorColor", "#ff0000")
         left.setGeometry(10, 10, 90, 60)
         right = QPushButton("Right", host)
-        right.setProperty("componentType", "key")
+        right.setProperty("locatorColor", "#0000ff")
         right.setGeometry(120, 10, 90, 60)
         host.show()
         app.processEvents()
@@ -181,25 +118,43 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         self.addCleanup(host.close)
 
         locator.update_from_global_position(host.mapToGlobal(QPoint(20, 40)))
-        left_color = locator.current_color
-        locator.update_from_global_position(host.mapToGlobal(QPoint(90, 40)))
-        self.assertEqual(locator.current_color, left_color)
-
+        self.assertEqual(locator.current_color.name(), "#ff0000")
         locator.update_from_global_position(host.mapToGlobal(QPoint(190, 40)))
-        self.assertNotEqual(locator.current_color, left_color)
+        self.assertEqual(locator.current_color.name(), "#0000ff")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(105, 40)))
+        self.assertEqual(locator.current_color.name(), "#242424")
 
         right.hide()
         app.processEvents()
         locator.update_from_global_position(host.mapToGlobal(QPoint(190, 40)))
-        self.assertLess(locator.current_color.hsvSaturationF(), 0.1)
+        self.assertEqual(locator.current_color.name(), "#242424")
 
-        locator.update_from_global_position(host.mapToGlobal(QPoint(105, 40)))
-        self.assertNotEqual(locator.current_color, left_color)
-        self.assertLess(locator.current_color.hsvSaturationF(), 0.1)
-        self.assertLess(locator.current_color.valueF(), 0.2)
+    def test_a_shaped_widget_glows_only_inside_its_shape(self) -> None:
+        app = qt_app()
+        host = QWidget()
+        host.resize(220, 80)
+        below = QPushButton("Below", host)
+        below.setProperty("locatorColor", "#ff0000")
+        below.setGeometry(10, 10, 120, 60)
+        above = QPushButton("Above", host)
+        above.setProperty("locatorColor", "#0000ff")
+        above.setGeometry(60, 10, 120, 60)
+        # Only the left half of the upper button is part of its shape.
+        above.setMask(QRegion(0, 0, 60, 60))
+        host.show()
+        app.processEvents()
+        locator = PointerLocator(_locator_config(), host)
+        self.addCleanup(host.close)
+
+        locator.update_from_global_position(host.mapToGlobal(QPoint(100, 40)))
+        self.assertEqual(locator.current_color.name(), "#0000ff")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(150, 40)))
+        self.assertEqual(locator.current_color.name(), "#242424")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(40, 40)))
+        self.assertEqual(locator.current_color.name(), "#ff0000")
 
     def test_stale_wayland_position_cannot_restore_glow_after_leave(self) -> None:
-        app = _app()
+        app = qt_app()
         host = QWidget()
         host.resize(400, 200)
         host.show()

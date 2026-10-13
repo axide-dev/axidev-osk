@@ -1,39 +1,23 @@
-"""Declarative configuration models and bundled defaults."""
+"""Profile config decoding and the typed settings records engine parts use."""
 
 from .models import (
-    AppConfig,
-    ButtonConfig,
+    ANCHORS,
+    AlwaysOnTopWindowConfig,
+    Anchor,
     ChromeConfig,
-    ComponentConfig,
     DwellClickConfig,
-    GridConfig,
-    KeyboardGridConfig,
-    KeyboardStatusConfig,
-    KeyConfig,
-    LayoutConfig,
+    HotCornerConfig,
     OverlayConfig,
     PointerLocatorConfig,
-    PromptConfig,
-    SpacerConfig,
-    SurfaceConfig,
-    WindowConfig,
 )
 
 __all__ = [
-    "AppConfig",
-    "ButtonConfig",
+    "ANCHORS",
+    "AlwaysOnTopWindowConfig",
+    "Anchor",
     "ChromeConfig",
-    "ComponentConfig",
     "DwellClickConfig",
-    "GridConfig",
-    "KeyboardGridConfig",
-    "KeyboardStatusConfig",
-    "KeyConfig",
-    "LayoutConfig",
+    "HotCornerConfig",
     "OverlayConfig",
     "PointerLocatorConfig",
-    "PromptConfig",
-    "SpacerConfig",
-    "SurfaceConfig",
-    "WindowConfig",
 ]

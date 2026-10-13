@@ -1,8 +1,13 @@
-"""Pointer dwell activation for configured windows."""
+"""Pointer dwell for configured windows: finding where the pointer comes to rest.
+
+A finished dwell is reported, never acted on here; ``click_at`` is the click a
+profile asks for with ``window.click``.
+"""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from time import monotonic
 
 from PySide6.QtCore import (
@@ -25,21 +30,22 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
 
+from ..components.button import Button
+from ..components.mouse_buttons import BUTTONS_BY_NAME
 from ..config.models import DwellClickConfig
-
-_POLL_INTERVAL_MS = 16
-_INDICATOR_SIZE_PX = 30
-_MINIMUM_DOT_SIZE_PX = 4
-_MAXIMUM_DOT_SIZE_PX = 24
-_CANCEL_FADE_DURATION_MS = 250
-_DIRECTION_REVERSAL_COSINE = -0.5
+from ..widget_properties import COMPONENT_TYPE
 
 
-def _paint_dot(widget: QWidget, progress: float, color: QColor) -> None:
+
+def _alpha(opacity: float) -> int:
+    return round(255 * opacity)
+
+
+def _paint_dot(widget: QWidget, progress: float, color: QColor, config: DwellClickConfig) -> None:
     painter = QPainter(widget)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    diameter = _MINIMUM_DOT_SIZE_PX + (
-        (_MAXIMUM_DOT_SIZE_PX - _MINIMUM_DOT_SIZE_PX) * progress
+    diameter = config.indicator_min_dot_px + (
+        (config.indicator_max_dot_px - config.indicator_min_dot_px) * progress
     )
     inset = (widget.width() - diameter) / 2
     bounds = QRectF(widget.rect()).adjusted(inset, inset, -inset, -inset)
@@ -58,31 +64,40 @@ class _DwellFadeFeedback(QWidget):
         object_name: str,
         component_type: str,
         color_role: QPalette.ColorRole,
+        config: DwellClickConfig,
     ) -> None:
         super().__init__(parent)
         self._progress = 0.0
+        self._config = config
         self._opacity = 0.0
         self._color_role = color_role
         self.setObjectName(object_name)
-        self.setProperty("componentType", component_type)
+        self.setProperty(COMPONENT_TYPE, component_type)
         self.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(_INDICATOR_SIZE_PX, _INDICATOR_SIZE_PX)
         self._fade = QVariantAnimation(self)
-        self._fade.setDuration(_CANCEL_FADE_DURATION_MS)
         self._fade.setStartValue(1.0)
         self._fade.setEndValue(0.0)
         self._fade.valueChanged.connect(self._set_opacity)
         self._fade.finished.connect(self.clear)
+        self.set_config(config)
         self.hide()
+
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Take the dot's size and fade time from ``config``."""
+
+        self._config = config
+        self.resize(config.indicator_size_px, config.indicator_size_px)
+        self._fade.setDuration(config.indicator_fade_ms)
+        self.update()
 
     @property
     def feedback_color(self) -> QColor:
         color = self.palette().color(self._color_role)
-        color.setAlpha(round(240 * self._opacity))
+        color.setAlpha(round(_alpha(self._config.indicator_opacity) * self._opacity))
         return color
 
     def show_feedback(self, position: QPoint, progress: float) -> None:
@@ -101,43 +116,54 @@ class _DwellFadeFeedback(QWidget):
         self._opacity = 0.0
         self.hide()
 
-    def _set_opacity(self, value: object) -> None:
+    def _set_opacity(self, value: float) -> None:
         self._opacity = float(value)
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
         del event
-        _paint_dot(self, self._progress, self.feedback_color)
+        _paint_dot(self, self._progress, self.feedback_color, self._config)
 
 
 class DwellClickIndicator(QWidget):
     """Paint growing dwell progress without intercepting pointer input."""
 
-    def __init__(self, parent: QWidget, *, visible_from_progress: float) -> None:
+    def __init__(self, parent: QWidget, config: DwellClickConfig) -> None:
         super().__init__(parent)
         self._progress = 0.0
-        self._visible_from_progress = visible_from_progress
+        self._config = config
         self.setObjectName("dwellClickIndicator")
-        self.setProperty("componentType", "dwell-click-indicator")
+        self.setProperty(COMPONENT_TYPE, "dwell-click-indicator")
         self.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(_INDICATOR_SIZE_PX, _INDICATOR_SIZE_PX)
         self.cancel_feedback = _DwellFadeFeedback(
             parent,
             object_name="dwellClickCancelFeedback",
             component_type="dwell-click-cancel-feedback",
             color_role=QPalette.ColorRole.Mid,
+            config=config,
         )
         self.complete_feedback = _DwellFadeFeedback(
             parent,
             object_name="dwellClickCompleteFeedback",
             component_type="dwell-click-complete-feedback",
             color_role=QPalette.ColorRole.Highlight,
+            config=config,
         )
+        self.set_config(config)
         self.hide()
+
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Take when the dot appears, its size, and its fade time from ``config``."""
+
+        self._config = config
+        self.resize(config.indicator_size_px, config.indicator_size_px)
+        self.cancel_feedback.set_config(config)
+        self.complete_feedback.set_config(config)
+        self.update()
 
     @property
     def progress(self) -> float:
@@ -150,7 +176,7 @@ class DwellClickIndicator(QWidget):
         """Return the theme gray used while dwell progress accumulates."""
 
         color = self.palette().color(QPalette.ColorRole.Mid)
-        color.setAlpha(240)
+        color.setAlpha(_alpha(self._config.indicator_opacity))
         return color
 
     @property
@@ -158,13 +184,13 @@ class DwellClickIndicator(QWidget):
         """Return the translucent gray marking full progress."""
 
         color = self.palette().color(QPalette.ColorRole.Mid)
-        color.setAlpha(130)
+        color.setAlpha(_alpha(self._config.indicator_track_opacity))
         return color
 
     def show_progress(self, global_position: QPoint, progress: float) -> None:
         """Place the dot behind a screen point and display its progress."""
 
-        if progress < self._visible_from_progress:
+        if progress < self._config.indicator_start_progress:
             self.clear()
             return
         parent = self.parentWidget()
@@ -215,27 +241,31 @@ class DwellClickIndicator(QWidget):
         """Paint a gray dot that grows with dwell progress."""
 
         del event
-        _paint_dot(self, 1.0, self.track_color)
-        _paint_dot(self, self._progress, self.progress_color)
+        _paint_dot(self, 1.0, self.track_color, self._config)
+        _paint_dot(self, self._progress, self.progress_color, self._config)
 
 
 class DwellClickController(QObject):
-    """Activate the key exactly under a pointer that has come to rest."""
+    """Report where a pointer came to rest on a widget of its window.
+
+    It calls ``on_complete`` with the screen point and clicks nothing itself:
+    the window posts ``dwell.completed``, and the profile decides what a dwell
+    does, for example a ``window.click`` there.
+    """
 
     def __init__(
         self,
         window: QWidget,
         surface: QWidget,
         config: DwellClickConfig,
+        on_complete: Callable[[QPoint], None],
     ) -> None:
         super().__init__(window)
+        self._on_complete = on_complete
         self._window = window
         self._config = config
         self._enabled = config.enabled
-        self.indicator = DwellClickIndicator(
-            surface,
-            visible_from_progress=config.indicator_start_progress,
-        )
+        self.indicator = DwellClickIndicator(surface, config)
         self._clicked_position: QPoint | None = None
         self._target: QWidget | None = None
         self._last_position: QPoint | None = None
@@ -249,7 +279,7 @@ class DwellClickController(QObject):
         self._travel_distance_since_click: float | None = None
         self._progress = 0.0
         self._timer = QTimer(self)
-        self._timer.setInterval(_POLL_INTERVAL_MS)
+        self._timer.setInterval(config.poll_interval_ms)
         self._timer.timeout.connect(self._poll_cursor)
 
     def start(self) -> None:
@@ -266,6 +296,14 @@ class DwellClickController(QObject):
         """Return whether dwell activation is currently enabled."""
 
         return self._enabled
+
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Use new dwell settings from the next sample on, enabling or disabling dwell as they say."""
+
+        self._config = config
+        self._timer.setInterval(config.poll_interval_ms)
+        self.indicator.set_config(config)
+        self.set_enabled(config.enabled)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable dwell activation at runtime."""
@@ -307,7 +345,7 @@ class DwellClickController(QObject):
         if not self._window.isVisible():
             self.stop()
             return
-        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+        if self._config.pause_while_pressed and QApplication.mouseButtons() != Qt.MouseButton.NoButton:
             self._reset()
             return
         self.update_from_global_position(QCursor.pos(), now=monotonic())
@@ -375,7 +413,7 @@ class DwellClickController(QObject):
         ):
             return
         self._progress = 1.0
-        self._click_at(position, target)
+        self._on_complete(position)
         self._clicked_position = position
         self._target = None
         self._travel_distance_since_click = 0.0
@@ -480,7 +518,8 @@ class DwellClickController(QObject):
             self._distance_squared(previous_direction, QPoint())
             * self._distance_squared(current_direction, QPoint())
         )
-        if dot_product > _DIRECTION_REVERSAL_COSINE * magnitude_product:
+        reversal_cosine = math.cos(math.radians(self._config.direction_reversal_angle_deg))
+        if dot_product > reversal_cosine * magnitude_product:
             return
         factor = self._config.direction_reversal_progress_factor
         self._progress *= factor
@@ -507,14 +546,15 @@ class DwellClickController(QObject):
             base_rate = (
                 self._config.stop_speed_px_s - speed
             ) / speed_range
-        score_exponent = 0.5
+        near = self._config.acceleration_exponent_near
+        score_exponent = self._config.acceleration_exponent_far
         if self._travel_distance_since_click is not None:
             distance_ratio = min(
                 1.0,
                 self._travel_distance_since_click
                 / self._config.distance_curve_full_px,
             )
-            score_exponent = 0.25 + 0.25 * distance_ratio
+            score_exponent = near + (score_exponent - near) * distance_ratio
         acceleration = 1 + (
             (self._config.maximum_progress_rate - 1)
             * self._deceleration_score**score_exponent
@@ -532,31 +572,33 @@ class DwellClickController(QObject):
             return None
         return target
 
-    def _click_at(self, position: QPoint, target: QWidget) -> None:
-        if isinstance(target, QAbstractButton):
-            target.animateClick()
-            return
 
-        local_position = QPointF(target.mapFromGlobal(position))
-        window_position = QPointF(self._window.mapFromGlobal(position))
-        global_position = QPointF(position)
-        press = QMouseEvent(
-            QEvent.Type.MouseButtonPress,
-            local_position,
-            window_position,
-            global_position,
-            Qt.MouseButton.LeftButton,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
+def click_at(window: QWidget, position: QPoint, button: str = "left") -> None:
+    """Click the widget of ``window`` under the screen point ``position`` with the mouse ``button``.
+
+    An engine button presses as it would under the pointer, reporting
+    ``button``; another widget gets that button's press and release. A point
+    outside ``window`` does nothing.
+    """
+
+    target = QApplication.widgetAt(position)
+    if target is None or target.window() is not window:
+        return
+    if isinstance(target, Button):
+        target.press_with(button)
+        return
+    qt_button = BUTTONS_BY_NAME.get(button, Qt.MouseButton.LeftButton)
+    if isinstance(target, QAbstractButton) and qt_button == Qt.MouseButton.LeftButton:
+        target.animateClick()
+        return
+    local_position = QPointF(target.mapFromGlobal(position))
+    window_position = QPointF(window.mapFromGlobal(position))
+    global_position = QPointF(position)
+    for event_type, held in (
+        (QEvent.Type.MouseButtonPress, qt_button),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        event = QMouseEvent(
+            event_type, local_position, window_position, global_position, qt_button, held, Qt.KeyboardModifier.NoModifier
         )
-        release = QMouseEvent(
-            QEvent.Type.MouseButtonRelease,
-            local_position,
-            window_position,
-            global_position,
-            Qt.MouseButton.LeftButton,
-            Qt.MouseButton.NoButton,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        QApplication.sendEvent(target, press)
-        QApplication.sendEvent(target, release)
+        QApplication.sendEvent(target, event)
