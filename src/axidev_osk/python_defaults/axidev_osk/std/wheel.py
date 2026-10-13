@@ -115,7 +115,7 @@ def wheel(
 
     path_var = ["std", "wheels", wheel_id]
     size_var = ["nodes", wheel_id, "size"]
-    defaults = {"id": wheel_id, "report_size": True}
+    defaults = {"id": wheel_id, "report_geometry": True}
     fields = axidev_osk.merge(defaults, opts)
     slices = len(tree)
     _check_tree(tree, slices, [])

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
-from PySide6.QtGui import QEnterEvent, QKeySequence
+from PySide6.QtGui import QEnterEvent, QKeySequence, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QWidget
 
@@ -157,6 +157,87 @@ class NodeTests(unittest.TestCase):
         self.assertEqual((reports[2][2], reports[2][3]), (in_grid[1].x(), in_grid[1].y()))
         self.assertEqual(buttons, ["right", None, "right"])
 
+    def test_nodes_that_opt_in_report_hovering_leaving_and_wheel_turns(self) -> None:
+        reports: list[DataMap] = []
+
+        def record(name: str) -> object:
+            return lambda ctx, event: reports.append({"name": name, **event}) or []
+
+        window = {
+            "id": "pad",
+            "title": "Pad",
+            "content": {
+                "kind": "box",
+                "id": "row",
+                "reports_hover": True,
+                "reports_wheel": True,
+                "children": [_button("a"), _button("quiet")],
+            },
+        }
+        names = ("node.pointer_hovered", "node.pointer_left", "node.wheel")
+        profile = start_test_profile(
+            self.engine,
+            {"active_profile": "p", "profiles": {"p": {"windows": [window], "on": {n: record(n) for n in names}}}},
+        )
+        shown = self._window(profile)
+        shown.resize(200, 60)
+        QTest.qWait(10)
+        row, a = self._find(shown, "row"), self._find(shown, "a")
+        point = a.rect().center()
+
+        QTest.mouseMove(a, point)
+        turns = ((0, 240, 1), (-120, 0, 2))
+        for dx, dy, timestamp in turns:
+            local = QPointF(point)
+            turn = QWheelEvent(
+                local, QPointF(a.mapToGlobal(point)), QPoint(), QPoint(dx, dy),
+                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+            )
+            turn.setTimestamp(timestamp)
+            QApplication.sendEvent(a, turn)
+        QApplication.sendEvent(row, QEvent(QEvent.Type.Leave))
+        QTest.qWait(10)
+
+        in_row = a.mapTo(row, point)
+        on_screen = a.mapToGlobal(point)
+        self.assertEqual(
+            [report for report in reports if report["name"] == "node.pointer_hovered"][-1],
+            {
+                "name": "node.pointer_hovered", "node": "row", "x": in_row.x(), "y": in_row.y(),
+                "screen_x": on_screen.x(), "screen_y": on_screen.y(),
+            },
+        )
+        self.assertEqual(
+            [report for report in reports if report["name"] != "node.pointer_hovered"],
+            [
+                {"name": "node.wheel", "node": "row", "dx": 0, "dy": 2},
+                {"name": "node.wheel", "node": "row", "dx": -1, "dy": 0},
+                {"name": "node.pointer_left", "node": "row"},
+            ],
+        )
+
+    def test_a_node_reporting_its_geometry_records_its_place_in_state(self) -> None:
+        profile = self._profile(
+            {
+                "kind": "box",
+                "id": "row",
+                "direction": "horizontal",
+                "children": [_button("a"), _button("b", report_geometry=True)],
+            }
+        )
+        shown = self._window(profile)
+        shown.resize(240, 60)
+        QTest.qWait(10)
+        self.engine.dispatcher.process_pending()
+        b = self._find(shown, "b")
+        content = shown.centralWidget()  # type: ignore[attr-defined]
+        corner = b.mapTo(content, QPoint(0, 0))
+
+        state = self.engine.profile.state
+        self.assertEqual(state.get(("nodes", "b", "position")), {"x": corner.x(), "y": corner.y()})
+        self.assertEqual(state.get(("nodes", "b", "size")), {"width": b.width(), "height": b.height()})
+        self.assertIsNone(state.get(("nodes", "a", "position")))
+
     def test_button_labels_show_ampersands_as_written(self) -> None:
         profile = self._profile(
             {"kind": "box", "id": "row", "children": [_button("and", label="&"), _button("save", label="S&ave")]}
@@ -252,11 +333,16 @@ class NodeTests(unittest.TestCase):
 
         QTest.mouseClick(cow, Qt.MouseButton.LeftButton)
         QTest.mouseClick(cow, Qt.MouseButton.RightButton)
+        QTest.mouseClick(cow, Qt.MouseButton.BackButton)
+        QTest.mouseClick(cow, Qt.MouseButton.ForwardButton)
         QTest.mouseClick(self._find(window, "quiet"), Qt.MouseButton.LeftButton)
         self.engine.dispatcher.process_pending()
 
-        self.assertEqual(self.pressed, [{"node": "cow", "button": "left"}, {"node": "cow", "button": "right"}])
-        self.assertEqual(cow.text(), "Moo 2")  # type: ignore[attr-defined]
+        self.assertEqual(
+            self.pressed,
+            [{"node": "cow", "button": name} for name in ("left", "right", "back", "forward")],
+        )
+        self.assertEqual(cow.text(), "Moo 4")  # type: ignore[attr-defined]
 
     def test_labels_stacks_and_style_hooks(self) -> None:
         profile = self._profile(
@@ -458,8 +544,8 @@ class NodeTests(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 self._profile(content)
 
-    def test_a_node_that_reports_its_size_writes_it_to_state(self) -> None:
-        profile = self._profile({"kind": "canvas", "id": "board", "report_size": True, "children": []})
+    def test_a_node_reporting_its_geometry_follows_a_resize(self) -> None:
+        profile = self._profile({"kind": "canvas", "id": "board", "report_geometry": True, "children": []})
         window = self._window(profile)
         window.resize(320, 240)
         qt_app().processEvents()

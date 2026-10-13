@@ -23,7 +23,16 @@ from axidev_osk.python_defaults.axidev_osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
 from axidev_osk.runtime.profile_runtime import state_set
-from support import RecordingBackend, build_window, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
+from support import (
+    RecordingBackend,
+    build_window,
+    make_test_engine,
+    nodes_by_id,
+    qt_app,
+    record_app_actions,
+    start_test_profile,
+    wait_until,
+)
 
 _MODIFIERS = {"LFSH", "RTSH", "LCTL", "RCTL", "LWIN", "RWIN", "LALT", "RALT"}
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
@@ -87,6 +96,16 @@ class LayoutParityTests(unittest.TestCase):
         self.assertEqual(sorted(measured), EXPECTED_GRID)
         self.assertEqual(sum(1 for column in range(layout.columnCount()) if layout.columnStretch(column)), 72)
         self.assertEqual(sum(1 for row in range(layout.rowCount()) if layout.rowStretch(row)), 6)
+
+    def test_every_key_glows_the_original_locator_color(self) -> None:
+        harness = DefaultProfileHarness(self)
+        harness.window.show()
+        buttons = [harness.nodes[node_id] for node_id in EXPECTED_LOCATOR_COLORS]
+
+        wait_until(lambda: all(button.property("locatorColor") for button in buttons))
+
+        colors = {str(button.property("componentId")): button.property("locatorColor") for button in buttons}
+        self.assertEqual(colors, EXPECTED_LOCATOR_COLORS)
 
     def test_every_key_sends_the_original_output(self) -> None:
         harness = DefaultProfileHarness(self)
@@ -437,6 +456,100 @@ EXPECTED_GRID = [
 ]
 
 EXPECTED_OUTPUTS = ['Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'PrintScreen', 'ScrollLock', 'Pause', '`', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace', 'Insert', 'Home', 'PageUp', 'Tab', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']', 'Delete', 'End', 'PageDown', 'CapsLock', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'", 'Enter', 'ShiftLeft', '\\', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', 'ShiftRight', 'Up', 'CtrlLeft', 'SuperLeft', 'AltLeft', 'Space', 'AltRight', 'SuperRight', 'Menu', 'CtrlRight', 'Left', 'Down', 'Right']
+
+
+EXPECTED_LOCATOR_COLORS = {
+    'key:ESC': '#b32d00',
+    'key:FK01': '#0059b3',
+    'key:FK02': '#ff0000',
+    'key:FK03': '#00d4ff',
+    'key:FK04': '#b32d00',
+    'key:FK05': '#0059b3',
+    'key:FK06': '#ff0000',
+    'key:FK07': '#002bff',
+    'key:FK08': '#ff8000',
+    'key:FK09': '#1e00b3',
+    'key:FK10': '#b38600',
+    'key:FK11': '#002bff',
+    'key:FK12': '#ff8000',
+    'dwell': '#00d4ff',
+    'key:PRSC': '#ff0080',
+    'key:SCLK': '#0059b3',
+    'key:PAUS': '#b32d00',
+    'key:TLDE': '#00ff80',
+    'key:AE01': '#ff8000',
+    'key:AE02': '#1e00b3',
+    'key:AE03': '#b38600',
+    'key:AE04': '#002bff',
+    'key:AE05': '#ff8000',
+    'key:AE06': '#00d4ff',
+    'key:AE07': '#b38600',
+    'key:AE08': '#0059b3',
+    'key:AE09': '#b32d00',
+    'key:AE10': '#00d4ff',
+    'key:AE11': '#ff0000',
+    'key:AE12': '#0059b3',
+    'key:BKSP': '#b32d00',
+    'key:INS': '#00ff80',
+    'key:HOME': '#ff0000',
+    'key:PGUP': '#00b395',
+    'key:TAB': '#ff0080',
+    'key:AD01': '#00b395',
+    'key:AD02': '#b3002d',
+    'key:AD03': '#00ff80',
+    'key:AD04': '#ff0080',
+    'key:AD05': '#00b395',
+    'key:AD06': '#b3002d',
+    'key:AD07': '#00ff80',
+    'key:AD08': '#ff0080',
+    'key:AD09': '#00b395',
+    'key:AD10': '#b3002d',
+    'key:AD11': '#00ff80',
+    'key:AD12': '#ff0080',
+    'ghost': '#00b395',
+    'key:DELE': '#b3002d',
+    'key:END': '#00d4ff',
+    'key:PGDN': '#ff8000',
+    'key:CAPS': '#0059b3',
+    'key:AC01': '#b32d00',
+    'key:AC02': '#00d4ff',
+    'key:AC03': '#ff0000',
+    'key:AC04': '#0059b3',
+    'key:AC05': '#b32d00',
+    'key:AC06': '#002bff',
+    'key:AC07': '#ff0000',
+    'key:AC08': '#1e00b3',
+    'key:AC09': '#b38600',
+    'key:AC10': '#002bff',
+    "key:AC11": '#ff8000',
+    'key:RTRN': '#1e00b3',
+    'key:LFSH': '#ff0000',
+    'key:LSGT': '#1e00b3',
+    'key:AB01': '#b38600',
+    'key:AB02': '#002bff',
+    'key:AB03': '#ff8000',
+    'key:AB04': '#1e00b3',
+    'key:AB05': '#b38600',
+    'key:AB06': '#00d4ff',
+    'key:AB07': '#ff8000',
+    'key:AB08': '#0059b3',
+    'key:AB09': '#b32d00',
+    'key:AB10': '#00d4ff',
+    'key:RTSH': '#ff0000',
+    'key:UP': '#00ff80',
+    'key:LCTL': '#00b395',
+    'key:LWIN': '#b3002d',
+    'key:LALT': '#00ff80',
+    'key:SPCE': '#ff0080',
+    'key:RALT': '#00ff80',
+    'key:RWIN': '#b3002d',
+    'key:MENU': '#00b395',
+    'key:RCTL': '#ff0080',
+    'key:LEFT': '#00d4ff',
+    'key:DOWN': '#b3002d',
+    'key:RGHT': '#00b395',
+}
+"""Each button's glow color, measured from the original keyboard's engine-computed pattern."""
 
 
 if __name__ == "__main__":

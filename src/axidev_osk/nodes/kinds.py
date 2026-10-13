@@ -32,7 +32,7 @@ from ..config.reader import ConfigError, ConfigReader
 from ..messages import DataMap
 from ..runtime.decoding import non_empty_string_value, require_keys
 from ..runtime.event_fields import profile_node, samples
-from ..widget_properties import COMPONENT_ID
+from ..widget_properties import COMPONENT_ID, LOCATOR_COLOR
 from .registry import NodeBuilder, NodeKind, NodeKindRegistry
 
 BUTTON_PRESSED = "button.pressed"
@@ -87,6 +87,8 @@ class ButtonOptions:
     enabled: bool = True
     visible: bool = True
     size: SizeOptions = SizeOptions()
+    locator_color: str | None = None
+    """The color a ``pointer_locator`` glows over the button; without one it glows the gap color."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +244,7 @@ def _decode_button(reader: ConfigReader) -> ButtonOptions:
         enabled=reader.boolean("enabled", True),
         visible=_visible(reader),
         size=_decode_size(reader),
+        locator_color=reader.optional_color("locator_color"),
     )
 
 
@@ -369,6 +372,8 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
         widget.setEnabled(options.enabled)
     if old is None or options.visible != old.visible:
         _apply_visible(widget, options.visible)
+    if old is None or options.locator_color != old.locator_color:
+        widget.setProperty(LOCATOR_COLOR, options.locator_color)
 
 
 def _build_label(node: NodeConfig, builder: NodeBuilder) -> QWidget:

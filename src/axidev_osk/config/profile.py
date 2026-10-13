@@ -18,7 +18,7 @@ The root config is plain data plus functions:
 Node kinds and attachment kinds register how their options decode, and a
 node kind with children also decodes the placement fields its children carry,
 such as a grid ``cell``. The decoder here owns everything common to every
-kind: IDs, style, bindings, callbacks, children, and ``report_size``. A kind
+kind: IDs, style, bindings, callbacks, children, and the report opt-ins. A kind
 whose children's placement may follow state, as a canvas child's shape does,
 decodes that placement with each child's values.
 """
@@ -32,7 +32,7 @@ from typing import Generic, Protocol, TypeVar
 from ..function_registry import FunctionRef, FunctionRegistry
 from ..messages import DataMap
 from ..widget_properties import ENGINE_WIDGET_PROPERTIES
-from .models import AlwaysOnTopWindowConfig, ChromeConfig, OverlayConfig, OverlayPlacement
+from .models import ANCHORS, AlwaysOnTopWindowConfig, Anchor, ChromeConfig, OverlayConfig
 from .reader import ConfigError, ConfigReader, Resolver
 from .variables import StatePath, Variable, VariableError, decode_state
 
@@ -123,8 +123,10 @@ class NodeConfig:
     kind's fixed fields. ``placement`` holds what the parent kind decoded for
     this child, such as a grid cell; it is ``None`` for a window's content.
     ``passes_input_block`` lets the node take clicks while its window blocks input.
-    ``report_size`` makes the engine write the node's size to ``nodes.<id>.size``.
-    ``reports_pointer`` makes it post pointer events (``nodes/pointer.py``).
+    ``reports_pointer``, ``reports_hover``, and ``reports_wheel`` make it post
+    pointer, hover, and wheel events (``nodes/pointer.py``), and
+    ``report_geometry`` makes the engine write its place in its window to
+    ``nodes.<id>.position`` and ``nodes.<id>.size``.
     ``path`` is the node's config path, such as ``config.profiles.default.windows[0].content``.
     """
 
@@ -136,8 +138,10 @@ class NodeConfig:
     structure: object = None
     placement: object = None
     passes_input_block: bool = False
-    report_size: bool = False
     reports_pointer: bool = False
+    reports_hover: bool = False
+    reports_wheel: bool = False
+    report_geometry: bool = False
     path: str = ""
 
     def walk(self) -> "list[NodeConfig]":
@@ -434,8 +438,10 @@ class ConfigDecoder:
             structure=structure,
             placement=child_placement,
             passes_input_block=reader.boolean("passes_input_block", False),
-            report_size=reader.boolean("report_size", False),
             reports_pointer=reader.boolean("reports_pointer", False),
+            reports_hover=reader.boolean("reports_hover", False),
+            reports_wheel=reader.boolean("reports_wheel", False),
+            report_geometry=reader.boolean("report_geometry", False),
             path=reader.path,
         )
 
@@ -522,18 +528,29 @@ def _decode_style(reader: ConfigReader) -> StyleConfig:
 
 def _decode_overlay(reader: ConfigReader) -> OverlayConfig:
     defaults = OverlayConfig()
-    placement = reader.choice(
-        "placement",
-        frozenset(item.value for item in OverlayPlacement),
-        defaults.config.placement.value,
-    )
     return OverlayConfig(
         always_on_top=reader.boolean("always_on_top", defaults.always_on_top),
         config=AlwaysOnTopWindowConfig(
-            placement=OverlayPlacement(placement),
+            placement=_decode_anchor(reader, defaults.config.placement),
             screen_margin=reader.integer("screen_margin", defaults.config.screen_margin, minimum=0),
             manage_position=reader.boolean("manage_position", defaults.config.manage_position),
+            keep_on_screen=reader.boolean("keep_on_screen", defaults.config.keep_on_screen),
         ),
+    )
+
+
+def _decode_anchor(reader: ConfigReader, default: Anchor) -> Anchor:
+    """Read ``placement``: the name of one of the engine's anchors, or a map with ``x`` and ``y`` from 0 to 1."""
+
+    if reader.raw("placement", None) is None:
+        return default
+    if isinstance(reader.raw("placement"), str):
+        return ANCHORS[reader.choice("placement", frozenset(ANCHORS))]
+    return reader.child("placement").decode(
+        lambda anchor: Anchor(
+            x=anchor.number("x", minimum=0.0, maximum=1.0),
+            y=anchor.number("y", minimum=0.0, maximum=1.0),
+        )
     )
 
 

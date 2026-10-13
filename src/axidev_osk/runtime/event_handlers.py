@@ -24,6 +24,7 @@ from .app_messages import (
     WINDOW_SHOW,
     PointerMotionObservedArguments,
     WindowArguments,
+    WindowButtonArguments,
     WindowClickArguments,
     WindowDeltaArguments,
     window_dragged,
@@ -117,6 +118,7 @@ class PointerDragRouter:
         self._windows = windows
         self._relative_pointer = relative_pointer
         self._window_id: str | None = None
+        self._button = ""
         self._remainder = (0.0, 0.0)
 
     @property
@@ -131,10 +133,11 @@ class PointerDragRouter:
         dispatcher.add_event_handler(POINTER_MOTION_OBSERVED, self._motion_observed)
         dispatcher.add_event_handler(ACTION_FAILED, self._action_failed)
 
-    def _drag_started(self, event: WindowArguments) -> MessageResult:
+    def _drag_started(self, event: WindowButtonArguments) -> MessageResult:
         if self._window_id is not None:
             self._set_dragging(False)
         self._window_id = event.window_id
+        self._button = event.button
         self._remainder = (0.0, 0.0)
         self._set_dragging(True)
         return []
@@ -161,7 +164,7 @@ class PointerDragRouter:
         self._remainder = (total_x - dx, total_y - dy)
         if not dx and not dy:
             return []
-        return [window_dragged(window_id, dx, dy)]
+        return [window_dragged(window_id, dx, dy, self._button)]
 
     def _action_failed(self, event: ActionFailedArguments) -> MessageResult:
         """Stop the drag when moving the dragged window fails."""

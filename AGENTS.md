@@ -23,6 +23,8 @@ The keyboard you see when you start it is not built into the engine: it is the d
 
 When you add something, ask whether a profile author should be able to change it. If yes, it belongs in a profile or in the standard library, not in the engine. Add to the engine only what a profile cannot build from the existing events, actions, and options, and add it in its most general form: an event that reports, an action that causes one effect, or an option with a default.
 
+A feature starts in a profile. One that most profiles need is promoted to the standard library, which may be opinionated. One that needs speed, native access, or a platform detail only the engine can hide is promoted to an engine built-in, such as dwell, hot corners, or window anchors. A promotion only adds: every built-in can be turned off, and the engine still reports the raw interactions it is built from, so a profile can replace it with its own. A built-in states in its code the platform or performance reason that keeps it in the engine.
+
 ## Rules
 
 - A profile is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values Lua tables and functions produce. A key set to `None` counts as absent, as a Lua table has no key set to `nil`.
@@ -40,7 +42,7 @@ When you add something, ask whether a profile author should be able to change it
 - Buttons never take keyboard focus: an on-screen keyboard must not steal typing from the target app.
 - The engine promises profiles only what it can keep on every platform. Where a platform cannot honor a building block, the block says so instead of behaving differently: an attachment whose service is missing raises `AttachmentUnavailable`, and the engine draws window chrome only where the window is frameless, because on Windows the system frame stays.
 - Only the code that assembles the engine (`runtime/engine.py`, `runtime/application.py`, and the action handlers they register) calls services directly, to start, stop, and reset them and to carry out actions.
-- An observation that fires often, such as pointer movement, is reported only for nodes that opt in through a fixed field (`reports_pointer`, `report_size`).
+- An observation that fires often is reported only for nodes that opt in through a fixed field: pointer presses and drags (`reports_pointer`), hovering (`reports_hover`), wheel turns (`reports_wheel`), and where the node sits in its window (`report_geometry`).
 - A widget property the engine sets is listed in `widget_properties.py`, which both sets and reserves it; a profile style cannot set it.
 - Profile switching, quit sequencing, the lock-screen panel, and display recovery stay in the engine's lifecycle code; profiles only request them through actions.
 
