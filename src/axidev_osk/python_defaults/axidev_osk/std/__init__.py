@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from . import board, controls, keys, layouts, prompts, wheel, windows
+from . import board, controls, failures, keys, layouts, prompts, wheel, windows
 
-__all__ = ["board", "controls", "keys", "layouts", "prompts", "wheel", "windows", "with_handlers", "with_state"]
+__all__ = ["board", "controls", "failures", "keys", "layouts", "prompts", "wheel", "windows", "with_handlers", "with_state"]
 
 
 def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -16,18 +16,23 @@ def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:
     merged: dict[str, Any] = dict(state or {})
     if "std" in merged:
         raise ValueError("Profile state cannot declare std; the library declares it")
-    merged["std"] = {**keys.STATE, **windows.STATE, **controls.STATE, **wheel.STATE}
+    merged["std"] = {**keys.STATE, **windows.STATE, **controls.STATE, **wheel.STATE, **failures.STATE}
     return merged
 
 
-def with_handlers(on: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def with_handlers(on: Mapping[str, Any] | None = None, *, failure_notice: bool = False) -> dict[str, Any]:
     """Return a profile ``on`` table with the event handlers the library needs added.
 
-    The library clears its latches on ``keyboard.reset``. A profile handler for
-    the same event runs after the library's.
+    The library clears its latches on ``keyboard.reset``. With
+    ``failure_notice`` it also shows ``failures.notice_window`` on
+    ``callback.failed`` and ``action.failed``; the profile must then have that
+    window. A profile handler for the same event runs after the library's.
     """
 
-    library = {"keyboard.reset": keys.on_reset}
+    library: dict[str, Any] = {"keyboard.reset": keys.on_reset}
+    if failure_notice:
+        library["callback.failed"] = failures.on_callback_failed
+        library["action.failed"] = failures.on_action_failed
     merged: dict[str, Any] = dict(on or {})
     for event, handler in library.items():
         existing = merged.get(event)

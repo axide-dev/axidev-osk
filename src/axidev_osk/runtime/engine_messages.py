@@ -27,6 +27,7 @@ from .decoding import (
     validated_event,
 )
 from .dispatcher import Dispatcher
+from .event_fields import one_of, profile_node, profile_window, stand_in
 from .profile_runtime import ProfileRuntime
 
 _profile_logger = logging.getLogger("axidev_osk.profile")
@@ -102,43 +103,43 @@ each built window, and each node built with ``report_size``."""
 
 @dataclass(frozen=True, slots=True)
 class InputKeyArguments:
-    key: str
-    text: str | None
-    modifiers: tuple[str, ...]
-    pressed: bool
+    key: str = stand_in("A")
+    text: str | None = stand_in("a")
+    modifiers: tuple[str, ...] = stand_in([])
+    pressed: bool = one_of(False, True)
 
 
 @dataclass(frozen=True, slots=True)
 class KeyboardStatusArguments:
-    ready: bool
-    status: str
-    needs_permission_setup: bool
-    permission_setup_text: str
+    ready: bool = one_of(False, True)
+    status: str = stand_in("")
+    needs_permission_setup: bool = one_of(False, True)
+    permission_setup_text: str = stand_in("")
 
 
 @dataclass(frozen=True, slots=True)
 class ProcessExitedArguments:
-    tag: str
-    code: int
-    error: str | None
+    tag: str = stand_in("example")
+    code: int = stand_in(0)
+    error: str | None = stand_in("example error")
 
 
 @dataclass(frozen=True, slots=True)
 class WindowStateArguments:
-    window_id: str
-    visible: bool
-    minimized: bool
-    x: int
-    y: int
-    width: int
-    height: int
+    window_id: str = profile_window(key="window")
+    visible: bool = one_of(False, True)
+    minimized: bool = one_of(False, True)
+    x: int = stand_in(0)
+    y: int = stand_in(0)
+    width: int = stand_in(100)
+    height: int = stand_in(100)
 
 
 @dataclass(frozen=True, slots=True)
 class NodeResizedArguments:
-    node: str
-    width: int
-    height: int
+    node: str = profile_node()
+    width: int = stand_in(100)
+    height: int = stand_in(100)
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,7 @@ from axidev_osk.runtime.profile_runtime import (
     ProfileRuntime,
     StateChangedArguments,
     register_profile_events,
+    state_append,
     state_set,
 )
 from axidev_osk.runtime.state import ReadRecorder, StatePath, StateTree
@@ -431,6 +432,24 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [(failure.action, failure.exception_type) for failure in self.failed_actions],
             [("state.set", "VariableError"), ("state.set", "VariableError")],
+        )
+
+    def test_state_append_reads_the_list_when_it_runs_so_appends_queued_together_all_land(self) -> None:
+        self._start(state={"log": var({"list": "string"}), "mode": var("string", "a")})
+        self.changes.clear()
+
+        self.dispatcher.dispatch(
+            state_append("log", "first"),
+            state_append("log", "second"),
+            state_append("mode", "b"),
+            state_append("log", 3),
+        )
+
+        self.assertEqual(self.state.get(("log",)), ["first", "second"])
+        self.assertEqual(self.changes, [("log",), ("log",)])
+        self.assertEqual(
+            [(failure.action, failure.exception_type) for failure in self.failed_actions],
+            [("state.append", "VariableError"), ("state.append", "VariableError")],
         )
 
     def test_restarting_resets_profile_state_and_keeps_shared_and_observed_state(self) -> None:

@@ -28,6 +28,8 @@ from ..services.process import ProcessService
 from ..styles.theme import apply_theme
 from ..windows.builder import RuntimeWindow, build_profile_window
 from .app_messages import (
+    QuitReason,
+    APP_ACTION_DECODERS,
     APP_QUIT,
     APP_QUIT_REQUESTED,
     LINUX_OPEN_PERMISSION_SETUP,
@@ -41,15 +43,13 @@ from .app_messages import (
     WindowArguments,
     app_quit,
     app_quit_requested,
-    decode_app_quit,
-    decode_profile_switch,
     linux_permission_setup_opened,
     profile_start,
     secure_input_panel_prepared,
     secure_input_panel_released,
     window_close,
 )
-from .decoding import EmptyArguments, decode_empty
+from .decoding import EmptyArguments
 from .dispatcher import Dispatcher, Unsubscribe
 from .engine import build_engine
 from .event_handlers import PointerDragRouter, RelativePointer, register_display_recovery, register_window_actions
@@ -131,12 +131,19 @@ class ApplicationRuntime:
         register_display_recovery(self._dispatcher, self._window_manager)
         self._pointer_drag = PointerDragRouter(self._window_manager, relative_pointer)
         self._pointer_drag.register(self._dispatcher)
-        self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit, when_idle=True)
-        self._dispatcher.register_action(PROFILE_SWITCH, decode_profile_switch, self._switch_profile, when_idle=True)
-        self._dispatcher.register_action(PROFILE_START, decode_empty, self._start_switched_profile, when_idle=True)
-        self._dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel)
-        self._dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, self._release_secure_input_panel)
-        self._dispatcher.register_action(LINUX_OPEN_PERMISSION_SETUP, decode_empty, self._open_permission_setup)
+        decoders = APP_ACTION_DECODERS
+        self._dispatcher.register_action(APP_QUIT, decoders[APP_QUIT], self._quit, when_idle=True)
+        self._dispatcher.register_action(PROFILE_SWITCH, decoders[PROFILE_SWITCH], self._switch_profile, when_idle=True)
+        self._dispatcher.register_action(PROFILE_START, decoders[PROFILE_START], self._start_switched_profile, when_idle=True)
+        self._dispatcher.register_action(
+            SECURE_INPUT_PANEL_PREPARE, decoders[SECURE_INPUT_PANEL_PREPARE], self._prepare_secure_input_panel
+        )
+        self._dispatcher.register_action(
+            SECURE_INPUT_PANEL_RELEASE, decoders[SECURE_INPUT_PANEL_RELEASE], self._release_secure_input_panel
+        )
+        self._dispatcher.register_action(
+            LINUX_OPEN_PERMISSION_SETUP, decoders[LINUX_OPEN_PERMISSION_SETUP], self._open_permission_setup
+        )
         self._dispatcher.add_event_handler(WINDOW_CLOSE_REQUESTED, self._default_close)
 
     @property
@@ -295,7 +302,7 @@ class ApplicationRuntime:
         if self._panel_prepared:
             self._window_manager.show(self._secure_input_panel_window()).set_close_enabled(False)
 
-    def _ask_to_quit(self, reason: str) -> None:
+    def _ask_to_quit(self, reason: QuitReason) -> None:
         """Ask the running profile to confirm a quit, or quit when it does not handle quit requests."""
 
         if APP_QUIT_REQUESTED in self._profile.on:
@@ -322,7 +329,7 @@ class ApplicationRuntime:
         )
         if others_visible:
             return [window_close(event.window_id)]
-        self._quit_controller.request_quit("window_closed")
+        self._quit_controller.request_quit(QuitReason.WINDOW_CLOSED)
         return []
 
     def _quit(self, arguments: AppQuitArguments) -> MessageResult:

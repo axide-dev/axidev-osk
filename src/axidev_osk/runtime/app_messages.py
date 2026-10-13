@@ -10,8 +10,10 @@ observed state) live in ``engine_messages``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from ..messages import DataMap, RuntimeAction, RuntimeEvent
 from .decoding import (
@@ -25,6 +27,7 @@ from .decoding import (
     validated_action,
     validated_event,
 )
+from .event_fields import one_of, profile_window, stand_in
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -52,21 +55,43 @@ WINDOW_HIDE = "window.hide"
 WINDOW_MOVE_BY = "window.move_by"
 WINDOW_SHOW = "window.show"
 
+class ScreenCorner(str, Enum):
+    """The screen corners a ``hot_corners`` attachment watches and ``hot_corner.triggered`` names."""
+
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
+
+
+HOT_CORNERS = tuple(corner.value for corner in ScreenCorner)
+
+
+class QuitReason(str, Enum):
+    """Why the application asks a profile before quitting, as ``app.quit_requested`` reports it."""
+
+    SIGNAL = "signal"
+    STDIN_CLOSED = "stdin_closed"
+    WINDOW_CLOSED = "window_closed"
+
+
+QUIT_REASONS = tuple(reason.value for reason in QuitReason)
+
 
 @dataclass(frozen=True, slots=True)
 class HotCornerTriggeredArguments:
-    corner: str
+    corner: str = one_of(*HOT_CORNERS)
 
 
 @dataclass(frozen=True, slots=True)
 class PointerMotionObservedArguments:
-    dx: float
-    dy: float
+    dx: float = stand_in(0.0)
+    dy: float = stand_in(0.0)
 
 
 @dataclass(frozen=True, slots=True)
 class QuitRequestedArguments:
-    reason: str
+    reason: str = one_of(*QUIT_REASONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +111,7 @@ class ProfileSwitchArguments:
 
 @dataclass(frozen=True, slots=True)
 class WindowArguments:
-    window_id: str
+    window_id: str = profile_window(key="window")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,8 +125,8 @@ def app_activated() -> RuntimeEvent:
     return validated_event(APP_ACTIVATED, {}, decode_empty)
 
 
-def app_quit_requested(reason: str) -> RuntimeEvent:
-    return validated_event(APP_QUIT_REQUESTED, {"reason": reason}, decode_quit_requested)
+def app_quit_requested(reason: QuitReason) -> RuntimeEvent:
+    return validated_event(APP_QUIT_REQUESTED, {"reason": reason.value}, decode_quit_requested)
 
 
 def display_configuration_changed() -> RuntimeEvent:
@@ -220,6 +245,25 @@ def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:
         dx=int_value(arguments, "dx"),
         dy=int_value(arguments, "dy"),
     )
+
+
+APP_ACTION_DECODERS: dict[str, Callable[[DataMap], Any]] = {
+    APP_QUIT: decode_app_quit,
+    LINUX_OPEN_PERMISSION_SETUP: decode_empty,
+    PROFILE_START: decode_empty,
+    PROFILE_SWITCH: decode_profile_switch,
+    SECURE_INPUT_PANEL_PREPARE: decode_empty,
+    SECURE_INPUT_PANEL_RELEASE: decode_empty,
+    WINDOW_CLOSE: decode_window,
+    WINDOW_HIDE: decode_window,
+    WINDOW_MOVE_BY: decode_window_move_by,
+    WINDOW_SHOW: decode_window,
+}
+"""Every action the application runtime registers, with its decoder.
+
+The application registers each of these with its handler, and the config
+check decodes them without the application.
+"""
 
 
 def register_app_events(dispatcher: "Dispatcher") -> None:

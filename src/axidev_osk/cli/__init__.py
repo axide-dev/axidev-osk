@@ -6,15 +6,22 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from . import linux
+from . import check, linux
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the Axidev OSK command parser without importing the GUI runtime."""
 
     parser = argparse.ArgumentParser(prog="axidev-osk")
-    platforms = parser.add_subparsers(dest="platform", required=True, metavar="{linux}")
+    platforms = parser.add_subparsers(dest="platform", required=True, metavar="{linux,check}")
     linux.register_commands(platforms.add_parser("linux", help="manage Linux integration"))
+    check.register_command(
+        platforms.add_parser(
+            "check",
+            help="find configuration problems in the bundled config",
+            description="Explore the states the bundled config's callbacks reach and report every problem found.",
+        )
+    )
     return parser
 
 

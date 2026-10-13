@@ -26,6 +26,7 @@ from ..messages import DataMap, RuntimeEvent, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
 from ..runtime.engine_messages import node_resized
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
+from ..runtime.event_fields import profile_node
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher, Unsubscribe
@@ -41,7 +42,7 @@ PlaceChild = Callable[[QWidget, QWidget, object], None]
 
 @dataclass(frozen=True, slots=True)
 class NodeEventArguments:
-    node: str
+    node: str = profile_node()
 
 
 def node_event(name: str, node_id: str) -> RuntimeEvent:

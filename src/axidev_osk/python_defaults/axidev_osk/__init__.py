@@ -107,6 +107,7 @@ class _Profile:
         attachments: list[Map] | None = None,
         on: Mapping[str, Any] | None = None,
         theme: Map | None = None,
+        check_depth: int | None = None,
     ) -> Map:
         result: Map = {"windows": windows}
         if state is not None:
@@ -117,6 +118,8 @@ class _Profile:
             result["on"] = dict(on)
         if theme is not None:
             result["theme"] = theme
+        if check_depth is not None:
+            result["check_depth"] = check_depth
         return result
 
     @staticmethod
@@ -209,6 +212,12 @@ class state:  # noqa: N801 - mirrors the Lua ``axidev_osk.state`` table
         """Set a declared state path (``"a.b"`` or ``["a", "b"]``); ``None`` resets it to its default or removes a map entry."""
 
         return {"action": "state.set", "arguments": {"path": path if isinstance(path, str) else list(path), "value": value}}
+
+    @staticmethod
+    def append(path: str | list[str], value: Any) -> Map:
+        """Add ``value`` to the end of a declared list; appends queued together all land, in order."""
+
+        return {"action": "state.append", "arguments": {"path": path if isinstance(path, str) else list(path), "value": value}}
 
 
 class keyboard:  # noqa: N801

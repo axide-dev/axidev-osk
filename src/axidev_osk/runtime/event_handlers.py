@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..messages import MessageResult
 from .app_messages import (
+    APP_ACTION_DECODERS,
     DISPLAY_CONFIGURATION_CHANGED,
     POINTER_MOTION_OBSERVED,
     WINDOW_CLOSE,
@@ -22,8 +23,6 @@ from .app_messages import (
     PointerMotionObservedArguments,
     WindowArguments,
     WindowMoveByArguments,
-    decode_window,
-    decode_window_move_by,
     window_move_by,
 )
 from .decoding import EmptyArguments
@@ -66,10 +65,10 @@ def register_window_actions(
             relative_pointer.commit_surface(int(window.winId()))
         return []
 
-    dispatcher.register_action(WINDOW_SHOW, decode_window, show)
-    dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
-    dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
-    dispatcher.register_action(WINDOW_MOVE_BY, decode_window_move_by, move_by)
+    dispatcher.register_action(WINDOW_SHOW, APP_ACTION_DECODERS[WINDOW_SHOW], show)
+    dispatcher.register_action(WINDOW_HIDE, APP_ACTION_DECODERS[WINDOW_HIDE], hide)
+    dispatcher.register_action(WINDOW_CLOSE, APP_ACTION_DECODERS[WINDOW_CLOSE], close)
+    dispatcher.register_action(WINDOW_MOVE_BY, APP_ACTION_DECODERS[WINDOW_MOVE_BY], move_by)
 
 
 def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:

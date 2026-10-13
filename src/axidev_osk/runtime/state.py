@@ -13,6 +13,7 @@ from collections.abc import Iterator, Mapping
 from copy import deepcopy
 
 from ..config.variables import (
+    ListOf,
     MapOf,
     Record,
     Slot,
@@ -71,6 +72,7 @@ class StateTree:
         self._root: DataMap = {}
         self._variables: dict[StatePath, Variable] = {}
         self._owners: dict[StatePath, str] = {}
+        self._branches: frozenset[StatePath] = frozenset()
 
     def declare(self, variables: Mapping[StatePath, Variable], owner: str) -> None:
         """Add variables with their default values; a path overlapping a declared one is rejected."""
@@ -88,6 +90,7 @@ class StateTree:
                 assert isinstance(child, dict)
                 branch = child
             branch[path[-1]] = copy_data_value(variable.default)
+        self._index_branches()
 
     def undeclare(self, owner: str) -> None:
         """Remove every variable ``owner`` declared, with its value."""
@@ -96,6 +99,7 @@ class StateTree:
             del self._variables[path]
             del self._owners[path]
             self._prune(path)
+        self._index_branches()
 
     def declarations(self, owner: str) -> dict[StatePath, Variable]:
         return {path: variable for path, variable in self._variables.items() if self._owners[path] == owner}
@@ -117,7 +121,12 @@ class StateTree:
     def is_branch(self, path: StatePath) -> bool:
         """Whether ``path`` only groups declared variables, such as the root or ``std``."""
 
-        return any(len(declared) > len(path) and declared[: len(path)] == path for declared in self._variables)
+        return path in self._branches
+
+    def _index_branches(self) -> None:
+        """Record every path that groups declared variables, which ``is_branch`` reads on every state read."""
+
+        self._branches = frozenset(declared[:size] for declared in self._variables for size in range(len(declared)))
 
     def get(self, path: StatePath) -> DataValue:
         """Return a copy of the value at ``path``; an absent map entry reads as ``None``."""
@@ -140,6 +149,16 @@ class StateTree:
             return self._remove(path, slot)
         stored = copy_data_value(slot.default) if value is None else check(slot.type, value, path_text(path))
         return self._write(path, slot, stored)
+
+    def append(self, path: StatePath, value: DataValue) -> bool:
+        """Add ``value`` to the end of the list at ``path``, checked against its item type."""
+
+        slot = self.slot(path)
+        if not isinstance(slot.type, ListOf):
+            raise VariableError(f"{path_text(path)} is not a list")
+        current = self.get(path)
+        assert isinstance(current, list)
+        return self.set(path, [*current, value])
 
     def view(self, recorder: "ReadRecorder | None" = None) -> "StateView":
         """Return a read-only view, optionally recording which paths are read."""
