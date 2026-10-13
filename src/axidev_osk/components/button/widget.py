@@ -11,7 +11,9 @@ from PySide6.QtWidgets import QPushButton, QWidget
 from ..mouse_buttons import MOUSE_BUTTONS, mouse_button_name
 
 _LEFT = Qt.MouseButton.LeftButton
-_NOT_LEFT = ~Qt.MouseButton.LeftButton
+# Built from AllButtons rather than ``~LeftButton``: on Windows that complement,
+# 0xfffffffe, matched no mouse button, likely because it overflows a 32-bit signed flag.
+_NOT_LEFT = Qt.MouseButton(Qt.MouseButton.AllButtons.value ^ Qt.MouseButton.LeftButton.value)
 """Every mouse button but the left one; each presses the widget as the left one does, and ``pressed_with`` still names it."""
 
 
