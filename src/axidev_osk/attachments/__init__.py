@@ -135,6 +135,10 @@ def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
             movement_penalty_px=reader.number("movement_penalty_px", defaults["movement_penalty_px"]),
             distance_curve_full_px=reader.number("distance_curve_full_px", defaults["distance_curve_full_px"]),
             velocity_release_ms=reader.integer("velocity_release_ms", defaults["velocity_release_ms"]),
+            indicator_size_px=reader.integer("indicator_size_px", defaults["indicator_size_px"]),
+            indicator_min_dot_px=reader.integer("indicator_min_dot_px", defaults["indicator_min_dot_px"]),
+            indicator_max_dot_px=reader.integer("indicator_max_dot_px", defaults["indicator_max_dot_px"]),
+            indicator_fade_ms=reader.integer("indicator_fade_ms", defaults["indicator_fade_ms"]),
         ),
     )
 

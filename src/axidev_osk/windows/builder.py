@@ -175,6 +175,8 @@ class RuntimeWindow(QMainWindow):
             self.setWindowTitle(values.title)
             if self._chrome_widgets is not None:
                 self._chrome_widgets.title_bar.set_title(values.title)
+        if self._chrome_widgets is not None and (previous is None or values.close_label != previous.close_label):
+            self._chrome_widgets.title_bar.set_close_label(values.close_label)
         apply_style(self, values.style, previous.style if previous is not None else None)
         if previous is None or values.opacity != previous.opacity:
             self._opacity.set_opacity(values.opacity)
