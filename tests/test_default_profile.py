@@ -17,7 +17,7 @@ from axidev_osk.config.models import DwellClickConfig, PointerLocatorConfig
 from axidev_osk.messages import RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_default_config
-from axidev_osk.python_defaults.osk.std.windows import GHOST_OPACITY
+from axidev_osk.python_defaults.axidev_osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
 from axidev_osk.runtime.testing import make_test_engine, start_test_profile

@@ -1,4 +1,4 @@
-"""Keyboard key builders built only from ``osk`` primitives.
+"""Keyboard key builders built only from ``axidev_osk`` primitives.
 
 Library state lives under ``std``:
 
@@ -25,16 +25,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ... import osk
+from ... import axidev_osk
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
 _SIDES = ("Left", "Right")
 
 STATE = {
-    "latched": osk.var(osk.map_of("string")),
-    "one_shot": osk.var(osk.map_of("string")),
-    "held": osk.var(osk.map_of(osk.map_of("string"))),
+    "latched": axidev_osk.var(axidev_osk.map_of("string")),
+    "one_shot": axidev_osk.var(axidev_osk.map_of("string")),
+    "held": axidev_osk.var(axidev_osk.map_of(axidev_osk.map_of("string"))),
 }
 """The library's key variables, merged under ``std`` by ``std.with_state``."""
 
@@ -50,15 +50,15 @@ def shift_active(state: Any) -> bool:
 def key_down(state: Any, name: str) -> bool:
     """Whether a key is observed down; ``name`` may contain dots, such as ``.``."""
 
-    return bool(osk.read(state, ["input", "keys", name]))
+    return bool(axidev_osk.read(state, ["input", "keys", name]))
 
 
 def caps_active(state: Any) -> bool:
-    return bool(osk.read(state, "input.locks.capslock"))
+    return bool(axidev_osk.read(state, "input.locks.capslock"))
 
 
 def _one_shot(state: Any) -> dict[str, str]:
-    pending = osk.read(state, "std.one_shot")
+    pending = axidev_osk.read(state, "std.one_shot")
     return {latch: pending[latch] for latch in pending} if pending is not None else {}
 
 
@@ -68,28 +68,28 @@ def one_shot_keys(state: Any) -> list[str]:
     return sorted(_one_shot(state).values())
 
 
-def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A momentary key: press sends ``output`` down, release sends it up."""
 
     repeat = _flag(opts, "repeat", True)
 
-    def on_press(ctx: Any, event: Any) -> list[osk.Map]:
+    def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         held = _one_shot(ctx.state)
-        actions = [osk.keyboard.down(name, repeat=False) for _latch, name in sorted(held.items())]
-        actions.append(osk.keyboard.down(output, repeat=repeat))
+        actions = [axidev_osk.keyboard.down(name, repeat=False) for _latch, name in sorted(held.items())]
+        actions.append(axidev_osk.keyboard.down(output, repeat=repeat))
         if held:
-            actions.append(osk.state.set(["std", "held", event["node"]], held))
+            actions.append(axidev_osk.state.set(["std", "held", event["node"]], held))
         return actions
 
-    def on_release(ctx: Any, event: Any) -> list[osk.Map]:
-        actions = [osk.keyboard.up(output)]
-        held = osk.read(ctx.state, ["std", "held", event["node"]])
+    def on_release(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+        actions = [axidev_osk.keyboard.up(output)]
+        held = axidev_osk.read(ctx.state, ["std", "held", event["node"]])
         if held is None:
             return actions
         for latch in sorted(held):
-            actions.append(osk.keyboard.up(held[latch]))
-            actions.append(osk.state.set(["std", "one_shot", latch], None))
-        actions.append(osk.state.set(["std", "held", event["node"]], None))
+            actions.append(axidev_osk.keyboard.up(held[latch]))
+            actions.append(axidev_osk.state.set(["std", "one_shot", latch], None))
+        actions.append(axidev_osk.state.set(["std", "held", event["node"]], None))
         return actions
 
     defaults = {
@@ -99,10 +99,10 @@ def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> osk.M
         "on_press": on_press,
         "on_release": on_release,
     }
-    return osk.button(**osk.merge(defaults, _without(opts, "repeat")))
+    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, "repeat")))
 
 
-def letter(char: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A letter key whose legend follows Shift and Caps Lock."""
 
     lower, upper = char.lower(), char.upper()
@@ -113,13 +113,13 @@ def letter(char: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
     )
 
 
-def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A symbol key whose legend switches with Shift only."""
 
     return key(lambda state: shifted_label if shift_active(state) else label, output, opts)
 
 
-def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A latching modifier.
 
     ``mode = "held"`` (default) holds the real key down from the first tap
@@ -137,13 +137,13 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
     latch_path = ["std", "one_shot" if mode == "one_shot" else "latched", latch]
 
     def latched(state: Any) -> bool:
-        return osk.read(state, latch_path) is not None
+        return axidev_osk.read(state, latch_path) is not None
 
     if mode == "one_shot":
 
-        def toggle_one_shot(ctx: Any, event: Any) -> list[osk.Map]:
+        def toggle_one_shot(ctx: Any, event: Any) -> list[axidev_osk.Map]:
             del event
-            return [osk.state.set(latch_path, None if latched(ctx.state) else output)]
+            return [axidev_osk.state.set(latch_path, None if latched(ctx.state) else output)]
 
         defaults: dict[str, Any] = {
             "id": f"key:{output}",
@@ -151,20 +151,20 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
             "latched": latched,
             "on_release": toggle_one_shot,
         }
-        return osk.button(**osk.merge(defaults, options))
+        return axidev_osk.button(**axidev_osk.merge(defaults, options))
 
-    def on_press(ctx: Any, event: Any) -> list[osk.Map]:
+    def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
         if latched(ctx.state):
             return []
-        return [osk.keyboard.down(output, repeat=repeat)]
+        return [axidev_osk.keyboard.down(output, repeat=repeat)]
 
-    def on_release(ctx: Any, event: Any) -> list[osk.Map]:
+    def on_release(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
-        held = osk.read(ctx.state, latch_path)
+        held = axidev_osk.read(ctx.state, latch_path)
         if held is not None:
-            return [osk.state.set(latch_path, None), osk.keyboard.up(held)]
-        return [osk.state.set(latch_path, output)]
+            return [axidev_osk.state.set(latch_path, None), axidev_osk.keyboard.up(held)]
+        return [axidev_osk.state.set(latch_path, output)]
 
     defaults = {
         "id": f"key:{output}",
@@ -174,10 +174,10 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
         "on_press": on_press,
         "on_release": on_release,
     }
-    return osk.button(**osk.merge(defaults, options))
+    return axidev_osk.button(**axidev_osk.merge(defaults, options))
 
 
-def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> osk.Map:
+def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A lock key such as Caps Lock, lit from the system's observed lock state."""
 
     lock_name = _LOCK_NAMES.get(output)
@@ -186,21 +186,21 @@ def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> osk.
     return key(
         label,
         output,
-        osk.merge(
-            {"repeat": False, "latched": lambda state: bool(osk.read(state, ["input", "locks", lock_name]))},
+        axidev_osk.merge(
+            {"repeat": False, "latched": lambda state: bool(axidev_osk.read(state, ["input", "locks", lock_name]))},
             opts,
         ),
     )
 
 
-def on_reset(ctx: Any, event: Any) -> list[osk.Map]:
+def on_reset(ctx: Any, event: Any) -> list[axidev_osk.Map]:
     """Clear library latches after the engine released every held key."""
 
     del ctx, event
     return [
-        osk.state.set("std.latched", None),
-        osk.state.set("std.one_shot", None),
-        osk.state.set("std.held", None),
+        axidev_osk.state.set("std.latched", None),
+        axidev_osk.state.set("std.one_shot", None),
+        axidev_osk.state.set("std.held", None),
     ]
 
 

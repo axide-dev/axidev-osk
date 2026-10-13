@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import osk
-from .osk import std
-from .osk.std import keys, prompts, windows
+from . import axidev_osk
+from .axidev_osk import std
+from .axidev_osk.std import keys, prompts, windows
 from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR, POINTER_LOCATOR
 
 KEYBOARD = "keyboard"
@@ -112,7 +112,7 @@ def _cells() -> list[dict[str, int]]:
     return cells
 
 
-def _key_node(entry: tuple[Any, ...], cell: dict[str, int]) -> osk.Map:
+def _key_node(entry: tuple[Any, ...], cell: dict[str, int]) -> axidev_osk.Map:
     _row, _column, width, kind, *arguments = entry
     placement = {
         "cell": cell,
@@ -156,28 +156,28 @@ DWELL_SETTINGS: dict[str, tuple[str, Any]] = {
 }
 SHARED_STATE = {
     "settings": {
-        "opacity": osk.var("number", KEYBOARD_OPACITY),
-        "dwell": {name: osk.var(var_type, default) for name, (var_type, default) in DWELL_SETTINGS.items()},
+        "opacity": axidev_osk.var("number", KEYBOARD_OPACITY),
+        "dwell": {name: axidev_osk.var(var_type, default) for name, (var_type, default) in DWELL_SETTINGS.items()},
     }
 }
 
 
-def _setting(*path: str) -> osk.Binding:
-    return lambda state: osk.read(state, ["settings", *path])
+def _setting(*path: str) -> axidev_osk.Binding:
+    return lambda state: axidev_osk.read(state, ["settings", *path])
 
 
-def _dwell_button(placement: osk.Map) -> osk.Map:
+def _dwell_button(placement: axidev_osk.Map) -> axidev_osk.Map:
     enabled = _setting("dwell", "enabled")
 
-    def toggle(ctx: Any, event: Any) -> list[osk.Map]:
+    def toggle(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
-        return [osk.state.set("settings.dwell.enabled", not enabled(ctx.state))]
+        return [axidev_osk.state.set("settings.dwell.enabled", not enabled(ctx.state))]
 
-    return osk.button(id="dwell", label="Dwell", latched=enabled, on_release=toggle, **placement)
+    return axidev_osk.button(id="dwell", label="Dwell", latched=enabled, on_release=toggle, **placement)
 
 
-def keyboard_window() -> osk.Map:
-    return osk.window(
+def keyboard_window() -> axidev_osk.Map:
+    return axidev_osk.window(
         id=KEYBOARD,
         title="axidev OSK",
         opacity=windows.ghost_opacity(KEYBOARD, _setting("opacity")),
@@ -186,21 +186,21 @@ def keyboard_window() -> osk.Map:
         default_close=False,
         overlay=OVERLAY,
         chrome={"enabled": True},
-        content=osk.box(
+        content=axidev_osk.box(
             id="keyboard-surface",
             margins=[10, 10, 10, 10],
             spacing=8,
             children=[
-                osk.grid(
+                axidev_osk.grid(
                     id="keyboard-grid",
                     spacing=GRID_GAP_PX,
                     style={"object_name": "keyboard"},
                     children=[_key_node(entry, cell) for entry, cell in zip(LAYOUT, _cells(), strict=True)],
                 ),
-                osk.label(
+                axidev_osk.label(
                     id="keyboard-status",
-                    text=lambda state: osk.read(state, "keyboard.status") or "",
-                    visible=lambda state: not osk.read(state, "keyboard.ready"),
+                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
+                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
                     word_wrap=True,
                     style={"object_name": "statusLabel"},
                 ),
@@ -209,11 +209,11 @@ def keyboard_window() -> osk.Map:
     )
 
 
-def _hide(window: str) -> osk.Callback:
-    return lambda ctx, event: [osk.window.hide(window)]
+def _hide(window: str) -> axidev_osk.Callback:
+    return lambda ctx, event: [axidev_osk.window.hide(window)]
 
 
-def _notice(window: str, title: str, message: str | osk.Binding) -> osk.Map:
+def _notice(window: str, title: str, message: str | axidev_osk.Binding) -> axidev_osk.Map:
     return prompts.prompt_window(
         window,
         title=title,
@@ -224,7 +224,7 @@ def _notice(window: str, title: str, message: str | osk.Binding) -> osk.Map:
     )
 
 
-def prompt_windows() -> list[osk.Map]:
+def prompt_windows() -> list[axidev_osk.Map]:
     return [
         prompts.prompt_window(
             QUIT_PROMPT,
@@ -238,7 +238,7 @@ def prompt_windows() -> list[osk.Map]:
             ),
             opts=PROMPT_OPTS,
             buttons=[
-                prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [osk.app.quit()], accept=True),
+                prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [axidev_osk.app.quit()], accept=True),
                 prompts.prompt_button(f"{QUIT_PROMPT}:no", "No", _hide(QUIT_PROMPT), accept=False),
             ],
         ),
@@ -253,23 +253,23 @@ def prompt_windows() -> list[osk.Map]:
             ),
             opts={**PROMPT_OPTS, "minimum_size": [560, 150]},
             buttons=[
-                osk.button(
+                axidev_osk.button(
                     id=f"{PERMISSION_PROMPT}:open_terminal",
                     label="Open In Terminal",
                     on_release=lambda ctx, event: [
-                        osk.window.hide(PERMISSION_PROMPT),
-                        osk.linux.open_permission_setup(),
+                        axidev_osk.window.hide(PERMISSION_PROMPT),
+                        axidev_osk.linux.open_permission_setup(),
                     ],
                 ),
-                osk.button(
+                axidev_osk.button(
                     id=f"{PERMISSION_PROMPT}:already_configured",
                     label="Already Configured",
                     on_release=lambda ctx, event: [
-                        osk.window.hide(PERMISSION_PROMPT),
-                        osk.window.show(LOGOUT_NOTICE),
+                        axidev_osk.window.hide(PERMISSION_PROMPT),
+                        axidev_osk.window.show(LOGOUT_NOTICE),
                     ],
                 ),
-                osk.button(
+                axidev_osk.button(
                     id=f"{PERMISSION_PROMPT}:cancel",
                     label="Cancel",
                     on_release=_hide(PERMISSION_PROMPT),
@@ -293,41 +293,41 @@ def prompt_windows() -> list[osk.Map]:
         _notice(
             NO_TERMINAL_NOTICE,
             "No Terminal Launcher Found",
-            lambda state: osk.read(state, "keyboard.permission_setup_text") or "",
+            lambda state: axidev_osk.read(state, "keyboard.permission_setup_text") or "",
         ),
     ]
 
 
-def _on_close_requested(ctx: Any, event: Any) -> list[osk.Map]:
+def _on_close_requested(ctx: Any, event: Any) -> list[axidev_osk.Map]:
     """Closing the keyboard asks first; closing a prompt or notice hides it, like its cancel button."""
 
     if event["window"] == KEYBOARD:
-        return [osk.window.show(QUIT_PROMPT)]
-    return [osk.window.hide(event["window"])]
+        return [axidev_osk.window.show(QUIT_PROMPT)]
+    return [axidev_osk.window.hide(event["window"])]
 
 
-def _on_permission_setup_opened(ctx: Any, event: Any) -> list[osk.Map]:
-    return [osk.window.show(TERMINAL_NOTICE if event["opened"] else NO_TERMINAL_NOTICE)]
+def _on_permission_setup_opened(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+    return [axidev_osk.window.show(TERMINAL_NOTICE if event["opened"] else NO_TERMINAL_NOTICE)]
 
 
-def build_default_config() -> osk.Map:
+def build_default_config() -> axidev_osk.Map:
     """Return the root config of the bundled keyboard, the profile the app runs."""
 
-    return osk.config(
+    return axidev_osk.config(
         active_profile="default",
         state=SHARED_STATE,
         profiles={
-            "default": osk.profile(
+            "default": axidev_osk.profile(
                 state=std.with_state(),
                 theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
                 windows=[keyboard_window(), *prompt_windows()],
                 attachments=[
-                    osk.dwell(
+                    axidev_osk.dwell(
                         id=DWELL,
                         window=KEYBOARD,
                         **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
                     ),
-                    osk.pointer_locator(
+                    axidev_osk.pointer_locator(
                         id="keyboard-locator",
                         window=KEYBOARD,
                         radius_percent=30,
@@ -335,20 +335,20 @@ def build_default_config() -> osk.Map:
                         radius_standard_deviations=3,
                         **POINTER_LOCATOR,
                     ),
-                    osk.hot_corners(
+                    axidev_osk.hot_corners(
                         id="hot-corners",
                         corners=["top_left", "top_right", "bottom_left", "bottom_right"],
                         **HOT_CORNER_INDICATOR,
                     ),
-                    osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
+                    axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
                 ],
                 on=std.with_handlers(
                     {
                         "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
                         "window.close_requested": _on_close_requested,
-                        "app.quit_requested": lambda ctx, event: [osk.window.show(QUIT_PROMPT)],
+                        "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
                         "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
-                        "keyboard.permission_required": lambda ctx, event: [osk.window.show(PERMISSION_PROMPT)],
+                        "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
                         "linux.permission_setup_opened": _on_permission_setup_opened,
                     }
                 ),

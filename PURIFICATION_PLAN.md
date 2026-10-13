@@ -10,7 +10,7 @@ Python ships an engine, not a keyboard. The engine exposes building blocks: node
 
 A profile is described only by plain data (maps, lists, strings, numbers, booleans, null) plus functions. That shape matches Lua tables and Lua functions exactly. Until the Lua layer exists, profiles and the standard library are written in Python inside `src/axidev_osk/python_defaults/`. Switching to Lua later means installing lupa, loading `.lua` files that produce the same values, and deleting `python_defaults/`. The engine does not change.
 
-The only things that ship are the engine, the standard library (`osk.std`), and a default profile that rebuilds today's US ISO keyboard.
+The only things that ship are the engine, the standard library (`axidev_osk.std`), and a default profile that rebuilds today's US ISO keyboard.
 
 ## Settled Decisions
 
@@ -59,7 +59,7 @@ Each decision below was made by the project owner. Do not reopen one without a n
 - The root config's `state` declares variables shared by every profile. A profile holds `state` (its own variable declarations), `windows`, `attachments`, and `on` (callbacks for any registered event).
 - Every node is a map with `kind`, `id`, options, `style` (object name, classes, properties, QSS), function bindings, and callbacks.
 - Each node kind and attachment kind registers a decoder that validates its map into a typed record. Bundled defaults and future Lua configs use the same decoders.
-- `osk.*` helpers only build maps. `osk.merge(defaults, opts)` lets a caller override any single field.
+- `axidev_osk.*` helpers only build maps. `axidev_osk.merge(defaults, opts)` lets a caller override any single field.
 
 ### Functions
 
@@ -70,7 +70,7 @@ Each decision below was made by the project owner. Do not reopen one without a n
 
 ### State Registry
 
-- A variable is declared in place inside a nested `state` map with `osk.var(type, default)`, which builds `{"var": type, "default": value}`.
+- A variable is declared in place inside a nested `state` map with `axidev_osk.var(type, default)`, which builds `{"var": type, "default": value}`.
 - Types: `boolean`, `integer`, `number`, `string`, list of X, map of X, and record (named, typed fields). Integer and number stay distinct, as in Lua 5.3 and later.
 - The engine declares the values it observes as typed, read-only variables, replacing bare `declare_root`. Profiles cannot set them.
 - The standard library declares its own variables under `std`, for example `std.latched` as a map of strings and `std.ghosted` as a map of booleans. A profile adds them with `std.with_state`.
@@ -134,7 +134,7 @@ Lifecycle that stays in Python:
 - The owner-thread queue drain.
 - A background lane where spawned programs report `process.exited` through the queue.
 
-### Standard Library (`osk.std`)
+### Standard Library (`axidev_osk.std`)
 
 - `keys`: `letter`, `shifted`, `modifier` (latching, one-shot or held), lock-lit keys such as Caps. The left and right keys of one modifier share a latch when nothing else about them differs; the `latch` option overrides that. Library state lives under `std.*`.
 - `windows`: `toggle`, `reveal`, `corner_toggle`, `ghost_button`.
@@ -144,7 +144,7 @@ Lifecycle that stays in Python:
 
 ### Default Profile
 
-- US ISO layout, cell metrics, and theme QSS written with `osk.std`.
+- US ISO layout, cell metrics, and theme QSS written with `axidev_osk.std`.
 - Ghost, Dwell, hot corners, and prompts wired through the profile `on` table and callbacks.
 - Parity tests cover keys, output, latching, legends, Caps, Ghost, Dwell, corners, and prompts.
 
@@ -160,7 +160,7 @@ Lifecycle that stays in Python:
 
 ## Directory Rule
 
-`src/axidev_osk/python_defaults/` contains everything that the Lua layer will replace: the `osk` helper surface used by profiles, the `osk.std` library, and the default profile. Code outside that directory must not contain keyboard layouts, key behavior, or profile policy. When adding something, ask whether a profile author should be able to change it. If yes, it belongs in `python_defaults/` or in a profile, not in the engine.
+`src/axidev_osk/python_defaults/` contains everything that the Lua layer will replace: the `axidev_osk` helper surface used by profiles, the `axidev_osk.std` library, and the default profile. Code outside that directory must not contain keyboard layouts, key behavior, or profile policy. When adding something, ask whether a profile author should be able to change it. If yes, it belongs in `python_defaults/` or in a profile, not in the engine.
 
 ## Steps
 
@@ -170,14 +170,14 @@ Each step keeps the full test suite, flake8, and pyright passing.
 - [x] 1. Config maps, decoders, function registry, bindings with read tracking, profile `on` table.
 - [x] 2. Observed state, `input.key`, keyboard actions, `process.spawn` with its background lane, log actions.
 - [x] 3. Generic nodes and profile windows, built alongside the old keyboard grid. The app switches to them in step 7, which also deletes the old grid and key components.
-- [x] 4. `osk.std` library in `python_defaults/` with its own tests.
-- [x] 5. Default profile on `osk.std` with parity tests. The app does not load it yet.
+- [x] 4. `axidev_osk.std` library in `python_defaults/` with its own tests.
+- [x] 5. Default profile on `axidev_osk.std` with parity tests. The app does not load it yet.
 - [x] 6. Attachments (dwell, pointer locator, hot corners, secure input panel) take references and options, each tested on its own.
 - [x] 7. Switch the app to the default profile in one step: quit flow, prompts, permission flow, and lock-screen panel. Delete dead engine code. Rewrite `AGENTS.md` to explain the architecture with practical guides for adding node kinds, attachments, actions, events, library helpers, and profiles.
-- [x] 8. State registry: typed declarations with `osk.var`, root and profile lifetimes, strict writes and reads, `None` as reset, engine-observed variables, bindings for every value option, removal of the setter actions and redundant observations, and the default profile's settings as root variables. Update `AGENTS.md` and the parity data in `tests/test_default_profile.py` in the same step.
+- [x] 8. State registry: typed declarations with `axidev_osk.var`, root and profile lifetimes, strict writes and reads, `None` as reset, engine-observed variables, bindings for every value option, removal of the setter actions and redundant observations, and the default profile's settings as root variables. Update `AGENTS.md` and the parity data in `tests/test_default_profile.py` in the same step.
 
 ## After This PR
 
 - Update GitHub issue #8 to match these decisions. Show the exact text to the project owner before editing.
 - Update the PR #36 description.
-- Build the Lua layer: load `.lua` profiles through the same decoders, port `osk.std` and the default profile to Lua, then delete `python_defaults/` and this file.
+- Build the Lua layer: load `.lua` profiles through the same decoders, port `axidev_osk.std` and the default profile to Lua, then delete `python_defaults/` and this file.

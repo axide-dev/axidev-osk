@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QWidget
 
 from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.config.reader import ConfigError
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.python_defaults.theme import DEFAULT_FONT, DEFAULT_QSS
 from axidev_osk.runtime.testing import make_test_engine, start_test_profile
@@ -14,10 +14,10 @@ from axidev_osk.styles.theme import apply_theme
 from support import FakeOverlay, RecordingBackend, build_window, qt_app
 
 
-def _decode(theme: osk.Map) -> object:
-    root = osk.config(
+def _decode(theme: axidev_osk.Map) -> object:
+    root = axidev_osk.config(
         active_profile="p",
-        profiles={"p": osk.profile(theme=theme, windows=[osk.window(id="w", title="w", content=osk.box(id="r"))])},
+        profiles={"p": axidev_osk.profile(theme=theme, windows=[axidev_osk.window(id="w", title="w", content=axidev_osk.box(id="r"))])},
     )
     return make_test_engine(RecordingBackend()).decoder().decode_root(root)
 

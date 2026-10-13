@@ -8,7 +8,7 @@ from PySide6.QtCore import QEvent
 
 from axidev_osk.app import _set_application_icon
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.runtime.app_messages import (
     APP_QUIT_REQUESTED,
@@ -38,7 +38,7 @@ _KEYBOARD_WINDOW = "keyboard"
 
 
 def _runtime_without_platform_services(
-    root_config: osk.Map | None = None,
+    root_config: axidev_osk.Map | None = None,
     **options: Any,
 ) -> ApplicationRuntime:
     services = ServiceRegistry()
@@ -68,12 +68,12 @@ def _start(test: unittest.TestCase, runtime: ApplicationRuntime) -> None:
         runtime.start()
 
 
-def _bare_root(on: dict[str, Any] | None = None) -> osk.Map:
-    return osk.config(
+def _bare_root(on: dict[str, Any] | None = None) -> axidev_osk.Map:
+    return axidev_osk.config(
         active_profile="p",
         profiles={
-            "p": osk.profile(
-                windows=[osk.window(id="pad", title="pad", content=osk.box(id="pad:root"))],
+            "p": axidev_osk.profile(
+                windows=[axidev_osk.window(id="pad", title="pad", content=axidev_osk.box(id="pad:root"))],
                 on=on,
             )
         },
@@ -227,7 +227,7 @@ class ApplicationRuntimeProfileTests(unittest.TestCase):
     def test_app_activated_reaches_profile_callbacks(self) -> None:
         seen: list[DataMap] = []
 
-        def on_activated(ctx: Any, event: DataMap) -> list[osk.Map]:
+        def on_activated(ctx: Any, event: DataMap) -> list[axidev_osk.Map]:
             del ctx
             seen.append(event)
             return []
@@ -314,13 +314,13 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         exit_app.assert_not_called()
 
     def test_the_theme_follows_the_state_it_reads(self) -> None:
-        root = osk.config(
+        root = axidev_osk.config(
             active_profile="p",
             profiles={
-                "p": osk.profile(
-                    state={"dark": osk.var("boolean", False)},
+                "p": axidev_osk.profile(
+                    state={"dark": axidev_osk.var("boolean", False)},
                     theme={"qss": lambda s: "QWidget { color: white; }" if s.dark else "QWidget { color: black; }"},
-                    windows=[osk.window(id="pad", title="pad", content=osk.box(id="pad:root"))],
+                    windows=[axidev_osk.window(id="pad", title="pad", content=axidev_osk.box(id="pad:root"))],
                 )
             },
         )
@@ -392,10 +392,10 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
     def test_quitting_waits_for_queued_work_and_nothing_runs_after_shutdown(self) -> None:
         reopened: list[DataMap] = []
 
-        def reopen(ctx: Any, event: DataMap) -> list[osk.Map]:
+        def reopen(ctx: Any, event: DataMap) -> list[axidev_osk.Map]:
             del ctx
             reopened.append(event)
-            return [osk.window.show("pad")]
+            return [axidev_osk.window.show("pad")]
 
         runtime = _runtime_without_platform_services(_bare_root({"window.close_requested": reopen}))
         _start(self, runtime)
@@ -413,13 +413,13 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         self.assertFalse(dispatcher.has_pending())
 
     def test_profile_without_close_handler_closes_only_that_window_while_another_is_visible(self) -> None:
-        root = osk.config(
+        root = axidev_osk.config(
             active_profile="p",
             profiles={
-                "p": osk.profile(
+                "p": axidev_osk.profile(
                     windows=[
-                        osk.window(id="pad", title="pad", content=osk.box(id="pad:root")),
-                        osk.window(id="tool", title="tool", content=osk.box(id="tool:root")),
+                        axidev_osk.window(id="pad", title="pad", content=axidev_osk.box(id="pad:root")),
+                        axidev_osk.window(id="tool", title="tool", content=axidev_osk.box(id="tool:root")),
                     ]
                 )
             },
@@ -462,9 +462,9 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         _start(self, runtime)
         failures = _record_failures(runtime)
         actions = [
-            osk.window.show("typo"),
-            osk.window.hide("typo"),
-            osk.window.close("typo"),
+            axidev_osk.window.show("typo"),
+            axidev_osk.window.hide("typo"),
+            axidev_osk.window.close("typo"),
         ]
 
         for action in actions:
@@ -480,7 +480,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         _start(self, runtime)
         failures = _record_failures(runtime)
 
-        for action in (osk.window.hide("pad"), osk.window.close("pad")):
+        for action in (axidev_osk.window.hide("pad"), axidev_osk.window.close("pad")):
             runtime.engine.dispatcher.dispatch(RuntimeAction(action["action"], action["arguments"]))
 
         self.assertEqual(failures, [])
@@ -488,7 +488,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
 
 class SecureInputPanelLifecycleTests(unittest.TestCase):
-    def _runtime(self, root_config: osk.Map | None = None) -> tuple[ApplicationRuntime, RecordingBackend, KeyboardService]:
+    def _runtime(self, root_config: axidev_osk.Map | None = None) -> tuple[ApplicationRuntime, RecordingBackend, KeyboardService]:
         backend = RecordingBackend()
         keyboard = KeyboardService(backend)
         services = ServiceRegistry()

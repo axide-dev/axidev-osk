@@ -1,7 +1,7 @@
-"""Prompt windows built only from ``osk`` primitives.
+"""Prompt windows built only from ``axidev_osk`` primitives.
 
 A prompt is an ordinary window that starts hidden. Profiles show it with
-``osk.window.show`` and give each button its own ``on_release`` callback.
+``axidev_osk.window.show`` and give each button its own ``on_release`` callback.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ... import osk
+from ... import axidev_osk
 
 ACCEPT_QSS = """
 QPushButton#confirmAcceptButton {
@@ -58,11 +58,11 @@ _HINT_QSS = (
 def prompt_button(
     id: str,  # noqa: A002
     label: str,
-    on_release: osk.Callback,
+    on_release: axidev_osk.Callback,
     *,
     accept: bool,
     opts: Mapping[str, Any] | None = None,
-) -> osk.Map:
+) -> axidev_osk.Map:
     """A prompt action button styled as accepting or rejecting."""
 
     glyph = "✔" if accept else "✖"
@@ -75,20 +75,20 @@ def prompt_button(
             "qss": ACCEPT_QSS if accept else REJECT_QSS,
         },
     }
-    return osk.button(**osk.merge(defaults, opts))
+    return axidev_osk.button(**axidev_osk.merge(defaults, opts))
 
 
 def prompt_window(
     id: str,  # noqa: A002
     *,
     title: str,
-    message: str | osk.Binding,
-    buttons: Sequence[osk.Map],
+    message: str | axidev_osk.Binding,
+    buttons: Sequence[axidev_osk.Map],
     glyph: str = "!",
-    hint: str | osk.Binding | None = None,
+    hint: str | axidev_osk.Binding | None = None,
     danger: bool = False,
     opts: Mapping[str, Any] | None = None,
-) -> osk.Map:
+) -> axidev_osk.Map:
     """A hidden, fully opaque window with a glyph, a message, an optional hint, and buttons.
 
     ``opts`` replaces any window field, such as ``overlay``, ``minimum_size``,
@@ -97,13 +97,13 @@ def prompt_window(
 
     badge_background = "#d83a3a" if danger else "#ffd866"
     badge_foreground = "#fff5f5" if danger else "#1a1a1a"
-    rows: list[osk.Map] = [
-        osk.box(
+    rows: list[axidev_osk.Map] = [
+        axidev_osk.box(
             id=f"{id}:message-row",
             direction="horizontal",
             spacing=_SPACING,
             children=[
-                osk.label(
+                axidev_osk.label(
                     id=f"{id}:glyph",
                     text=glyph,
                     align="center",
@@ -123,7 +123,7 @@ def prompt_window(
                         )
                     },
                 ),
-                osk.label(
+                axidev_osk.label(
                     id=f"{id}:message",
                     text=message,
                     word_wrap=True,
@@ -135,9 +135,9 @@ def prompt_window(
     ]
     if hint is not None:
         rows.append(
-            osk.label(id=f"{id}:hint", text=hint, word_wrap=True, align="top_left", style={"qss": _HINT_QSS})
+            axidev_osk.label(id=f"{id}:hint", text=hint, word_wrap=True, align="top_left", style={"qss": _HINT_QSS})
         )
-    rows.append(osk.box(id=f"{id}:buttons", direction="horizontal", spacing=8, children=list(buttons)))
+    rows.append(axidev_osk.box(id=f"{id}:buttons", direction="horizontal", spacing=8, children=list(buttons)))
     defaults = {
         "id": id,
         "title": title,
@@ -145,6 +145,6 @@ def prompt_window(
         "show_on_start": False,
         "chrome": {"enabled": False},
         "minimum_size": [460, 120],
-        "content": osk.box(id=f"{id}:content", margins=[18, 18, 18, 16], spacing=_SPACING, children=rows),
+        "content": axidev_osk.box(id=f"{id}:content", margins=[18, 18, 18, 16], spacing=_SPACING, children=rows),
     }
-    return osk.window(**osk.merge(defaults, opts))
+    return axidev_osk.window(**axidev_osk.merge(defaults, opts))

@@ -8,9 +8,9 @@ from PySide6.QtWidgets import QWidget
 
 from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
-from axidev_osk.python_defaults import osk
-from axidev_osk.python_defaults.osk import std
-from axidev_osk.python_defaults.osk.std import keys, prompts, windows
+from axidev_osk.python_defaults import axidev_osk
+from axidev_osk.python_defaults.axidev_osk import std
+from axidev_osk.python_defaults.axidev_osk.std import keys, prompts, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.state import StateTree
@@ -22,7 +22,7 @@ class StdHarness:
     def __init__(
         self,
         test: unittest.TestCase,
-        children: list[osk.Map],
+        children: list[axidev_osk.Map],
         *,
         on: dict[str, Any] | None = None,
         **window_fields: Any,
@@ -31,11 +31,11 @@ class StdHarness:
         self.backend = RecordingBackend()
         self.engine = make_test_engine(self.backend)
         self.window_actions = record_app_actions(self.engine.dispatcher)
-        root = osk.config(
+        root = axidev_osk.config(
             active_profile="p",
             profiles={
-                "p": osk.profile(
-                    windows=[osk.window(id="pad", title="Pad", content=osk.box(id="root", children=children), **window_fields)],
+                "p": axidev_osk.profile(
+                    windows=[axidev_osk.window(id="pad", title="Pad", content=axidev_osk.box(id="root", children=children), **window_fields)],
                     state=std.with_state(),
                     on=std.with_handlers(on),
                 )
@@ -226,12 +226,12 @@ class KeyTests(unittest.TestCase):
         harness = StdHarness(self, [keys.letter("a")])
         harness.engine.profile.set_observed(("keyboard", "status"), "plain")
 
-        self.assertIsNone(osk.read(harness.engine.profile.state.view(), "keyboard.status.inner"))
-        self.assertEqual(osk.read(harness.engine.profile.state.view(), "keyboard.status"), "plain")
+        self.assertIsNone(axidev_osk.read(harness.engine.profile.state.view(), "keyboard.status.inner"))
+        self.assertEqual(axidev_osk.read(harness.engine.profile.state.view(), "keyboard.status"), "plain")
 
     def test_any_field_can_be_overridden(self) -> None:
-        def custom(ctx: Any, event: Any) -> list[osk.Map]:
-            return [osk.keyboard.type_text("moo")]
+        def custom(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+            return [axidev_osk.keyboard.type_text("moo")]
 
         node = keys.letter("a", {"id": "cow", "on_release": custom, "cell": {"row": 0, "column": 0}})
 
@@ -310,7 +310,7 @@ class PromptTests(unittest.TestCase):
             ],
             opts={"minimum_size": [500, 200]},
         )
-        profile = start_test_profile(engine, osk.config(active_profile="p", profiles={"p": osk.profile(windows=[prompt])}))
+        profile = start_test_profile(engine, axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[prompt])}))
         window = build_window(self, profile.window("quit"), engine)
         engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
 

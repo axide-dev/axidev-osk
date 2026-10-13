@@ -10,7 +10,7 @@ from PySide6.QtCore import QCoreApplication, QDeadlineTimer
 
 from axidev_osk.config.profile import ConfigDecoder
 from axidev_osk.messages import DataMap, MessageResult, RuntimeAction
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, Dispatcher
 from axidev_osk.runtime.engine import build_engine
@@ -203,14 +203,14 @@ class KeyboardEffectTests(unittest.TestCase):
         self.assertEqual(len(resets), 2)
 
     def test_profile_log_and_spawn_actions_reach_the_log_and_the_process_lane(self) -> None:
-        def on_window_close(ctx: CallbackContext, event: DataMap) -> list[osk.Map]:
+        def on_window_close(ctx: CallbackContext, event: DataMap) -> list[axidev_osk.Map]:
             del ctx, event
             return [
-                osk.log.info("hello"),
-                osk.log.warn("careful"),
-                osk.log.error("broken"),
-                osk.process.spawn(["cowsay", "moo"], "cow"),
-                osk.process.spawn(["notify-send", "hi"], "note", detached=True),
+                axidev_osk.log.info("hello"),
+                axidev_osk.log.warn("careful"),
+                axidev_osk.log.error("broken"),
+                axidev_osk.process.spawn(["cowsay", "moo"], "cow"),
+                axidev_osk.process.spawn(["notify-send", "hi"], "note", detached=True),
             ]
 
         harness = Harness({"on": {"window.close_requested": on_window_close}})

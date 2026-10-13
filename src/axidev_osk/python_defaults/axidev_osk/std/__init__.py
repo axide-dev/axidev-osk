@@ -1,4 +1,4 @@
-"""Standard library: keyboard conventions built only from ``osk`` primitives."""
+"""Standard library: keyboard conventions built only from ``axidev_osk`` primitives."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
-"""The profile-facing ``osk`` surface, written in Python until Lua replaces it.
+"""The profile-facing ``axidev_osk`` surface, written in Python until Lua replaces it.
 
 Everything here builds plain maps. Nothing calls the engine directly. A Lua
-``osk`` module will expose the same names and return the same tables:
+``axidev_osk`` module will expose the same names and return the same tables:
 
 - Node builders: ``window``, ``grid``, ``box``, ``stack``, ``button``,
   ``label``, ``spacer``.
@@ -145,7 +145,7 @@ def spacer(**fields: Any) -> Map:
 
 
 class _Window:
-    """``osk.window(...)`` builds a window; ``osk.window.show(...)`` builds an action."""
+    """``axidev_osk.window(...)`` builds a window; ``axidev_osk.window.show(...)`` builds an action."""
 
     def __call__(self, **fields: Any) -> Map:
         return dict(fields)
@@ -186,7 +186,7 @@ def secure_input_panel(**fields: Any) -> Map:
     return {"kind": "secure_input_panel", **fields}
 
 
-class state:  # noqa: N801 - mirrors the Lua ``osk.state`` table
+class state:  # noqa: N801 - mirrors the Lua ``axidev_osk.state`` table
     @staticmethod
     def set(path: str | list[str], value: Any) -> Map:
         """Set a declared state path (``"a.b"`` or ``["a", "b"]``); ``None`` resets it to its default or removes a map entry."""

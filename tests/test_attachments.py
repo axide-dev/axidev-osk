@@ -11,7 +11,7 @@ from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, ScreenCorner
 from axidev_osk.messages import DataMap
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
 from axidev_osk.runtime.testing import make_test_engine
 from support import HOT_CORNER_COLORS, RecordingBackend, hot_corner_config, qt_app
@@ -58,13 +58,13 @@ class RecordingHotCorners:
         self.configured.append((settings, corners))
 
 
-def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",), state: osk.Map | None = None) -> osk.Map:
-    return osk.config(
+def _root(attachments: list[axidev_osk.Map], windows: tuple[str, ...] = ("pad",), state: axidev_osk.Map | None = None) -> axidev_osk.Map:
+    return axidev_osk.config(
         active_profile="p",
         profiles={
-            "p": osk.profile(
+            "p": axidev_osk.profile(
                 windows=[
-                    osk.window(id=window, title=window, content=osk.box(id=f"{window}:root", children=[osk.button(id=f"{window}:b")]))
+                    axidev_osk.window(id=window, title=window, content=axidev_osk.box(id=f"{window}:root", children=[axidev_osk.button(id=f"{window}:b")]))
                     for window in windows
                 ],
                 attachments=attachments,
@@ -77,9 +77,9 @@ def _root(attachments: list[osk.Map], windows: tuple[str, ...] = ("pad",), state
 class AttachmentHarness:
     def __init__(
         self,
-        attachments: list[osk.Map],
+        attachments: list[axidev_osk.Map],
         windows: tuple[str, ...] = ("pad",),
-        state: osk.Map | None = None,
+        state: axidev_osk.Map | None = None,
     ) -> None:
         qt_app()
         self.engine = make_test_engine(RecordingBackend())
@@ -104,12 +104,12 @@ class DecodeTests(unittest.TestCase):
         qt_app()
         engine = make_test_engine(RecordingBackend())
         cases = {
-            "unknown corners: middle": osk.hot_corners(id="hc", corners=["middle"], **HOT_CORNER_COLORS),
-            "delay": osk.dwell(id="d", window="pad", delay_ms=0),
-            "radius": osk.pointer_locator(id="l", window="pad", radius_percent=0, gap_color="#242424"),
-            "window is required": osk.secure_input_panel(id="s"),
-            "indicator_background is required": osk.hot_corners(id="hc"),
-            "gap_color is required": osk.pointer_locator(id="l", window="pad"),
+            "unknown corners: middle": axidev_osk.hot_corners(id="hc", corners=["middle"], **HOT_CORNER_COLORS),
+            "delay": axidev_osk.dwell(id="d", window="pad", delay_ms=0),
+            "radius": axidev_osk.pointer_locator(id="l", window="pad", radius_percent=0, gap_color="#242424"),
+            "window is required": axidev_osk.secure_input_panel(id="s"),
+            "indicator_background is required": axidev_osk.hot_corners(id="hc"),
+            "gap_color is required": axidev_osk.pointer_locator(id="l", window="pad"),
         }
         for message, attachment in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
@@ -120,27 +120,27 @@ class DecodeTests(unittest.TestCase):
         qt_app()
         engine = make_test_engine(RecordingBackend())
         cases = {
-            "targets unknown window 'ghost'": [osk.dwell(id="d", window="ghost")],
-            "window 'pad' can have at most one dwell": [osk.dwell(id="d1", window="pad"), osk.dwell(id="d2", window="pad")],
+            "targets unknown window 'ghost'": [axidev_osk.dwell(id="d", window="ghost")],
+            "window 'pad' can have at most one dwell": [axidev_osk.dwell(id="d1", window="pad"), axidev_osk.dwell(id="d2", window="pad")],
             "a profile can have at most one hot_corners": [
-                osk.hot_corners(id="a", **HOT_CORNER_COLORS),
-                osk.hot_corners(id="b", **HOT_CORNER_COLORS),
+                axidev_osk.hot_corners(id="a", **HOT_CORNER_COLORS),
+                axidev_osk.hot_corners(id="b", **HOT_CORNER_COLORS),
             ],
             "a profile can have at most one secure_input_panel": [
-                osk.secure_input_panel(id="a", window="pad"),
-                osk.secure_input_panel(id="b", window="pad"),
+                axidev_osk.secure_input_panel(id="a", window="pad"),
+                axidev_osk.secure_input_panel(id="b", window="pad"),
             ],
         }
         for message, attachments in cases.items():
             spare = _root(attachments)["profiles"]["p"]
-            root = osk.config(active_profile="ok", profiles={"ok": _root([])["profiles"]["p"], "spare": spare})
+            root = axidev_osk.config(active_profile="ok", profiles={"ok": _root([])["profiles"]["p"], "spare": spare})
             with self.subTest(message), self.assertRaisesRegex(ConfigError, rf"config.profiles.spare.attachments\[\d\].*{message}"):
                 engine.decoder().decode_root(root)
 
     def test_pointer_locators_have_no_limit(self) -> None:
         qt_app()
         engine = make_test_engine(RecordingBackend())
-        locators = [osk.pointer_locator(id=name, window="pad", gap_color="#242424") for name in ("a", "b")]
+        locators = [axidev_osk.pointer_locator(id=name, window="pad", gap_color="#242424") for name in ("a", "b")]
 
         self.assertEqual(len(engine.decoder().decode_root(_root(locators)).attachments), 2)
 
@@ -148,8 +148,8 @@ class DecodeTests(unittest.TestCase):
 class AttachmentRuntimeTests(unittest.TestCase):
     def test_dwell_options_follow_the_state_they_are_bound_to(self) -> None:
         harness = AttachmentHarness(
-            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on, delay_ms=lambda s: s.delay)],
-            state={"dwell_on": osk.var("boolean", True), "delay": osk.var("integer", 300)},
+            [axidev_osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on, delay_ms=lambda s: s.delay)],
+            state={"dwell_on": axidev_osk.var("boolean", True), "delay": axidev_osk.var("integer", 300)},
         )
         harness.start()
 
@@ -165,8 +165,8 @@ class AttachmentRuntimeTests(unittest.TestCase):
 
     def test_an_invalid_bound_option_is_reported_and_the_last_options_stay(self) -> None:
         harness = AttachmentHarness(
-            [osk.dwell(id="d", window="pad", delay_ms=lambda s: s.delay)],
-            state={"delay": osk.var("integer", 300)},
+            [axidev_osk.dwell(id="d", window="pad", delay_ms=lambda s: s.delay)],
+            state={"delay": axidev_osk.var("integer", 300)},
         )
         harness.start()
 
@@ -180,8 +180,8 @@ class AttachmentRuntimeTests(unittest.TestCase):
     def test_hot_corners_and_panel_are_configured(self) -> None:
         harness = AttachmentHarness(
             [
-                osk.hot_corners(id="hc", corners=["top_left", "bottom_right"], dwell_ms=150, **HOT_CORNER_COLORS),
-                osk.secure_input_panel(id="lock", window="pad"),
+                axidev_osk.hot_corners(id="hc", corners=["top_left", "bottom_right"], dwell_ms=150, **HOT_CORNER_COLORS),
+                axidev_osk.secure_input_panel(id="lock", window="pad"),
             ]
         )
         harness.start()

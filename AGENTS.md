@@ -19,7 +19,7 @@ Profiles are written in Python today, inside `src/axidev_osk/python_defaults/`. 
 
 The engine is everything under `src/axidev_osk/` except `python_defaults/`. It owns windows, widgets, the message queue, central state, platform integration, keyboard output, and process lifecycle. It knows no layout, no key behavior, and no profile policy.
 
-The standard library, `python_defaults/osk/std/`, holds keyboard conventions built only from engine building blocks: letter keys whose legend follows Shift and Caps Lock, latching modifiers, lock keys lit from the system, the Ghost button, window toggles, prompt windows. It is ordinary profile code that ships with the engine.
+The standard library, `python_defaults/axidev_osk/std/`, holds keyboard conventions built only from engine building blocks: letter keys whose legend follows Shift and Caps Lock, latching modifiers, lock keys lit from the system, the Ghost button, window toggles, prompt windows. It is ordinary profile code that ships with the engine.
 
 A profile is a root config map. The default one, `python_defaults/default_profile.py`, rebuilds the bundled keyboard with the standard library. It is also the parity target for the Lua port: `tests/test_default_profile.py` checks it against measurements taken from the original built-in keyboard.
 
@@ -30,21 +30,21 @@ When you add something, ask whether a profile author should be able to change it
 A root config looks like this:
 
 ```python
-osk.config(
+axidev_osk.config(
     active_profile="default",
     profiles={
-        "default": osk.profile(
-            state={"cow_text": osk.var("string", "")},
+        "default": axidev_osk.profile(
+            state={"cow_text": axidev_osk.var("string", "")},
             theme={"qss": "..."},
-            windows=[osk.window(id="pad", title="Pad", content=osk.grid(id="keys", children=[...]))],
-            attachments=[osk.dwell(id="pad-dwell", window="pad")],
+            windows=[axidev_osk.window(id="pad", title="Pad", content=axidev_osk.grid(id="keys", children=[...]))],
+            attachments=[axidev_osk.dwell(id="pad-dwell", window="pad")],
             on={"hot_corner.triggered": on_corner},
         )
     },
 )
 ```
 
-Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `osk` helpers in `python_defaults/osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error. Every profile in the root config is decoded and checked, not only the active one. A key set to `None` counts as absent, the way a Lua table has no key set to `nil`.
+Everything in it is plain data (maps, lists, strings, numbers, booleans, `None`) plus functions, the same values a Lua table and Lua functions produce. The `axidev_osk` helpers in `python_defaults/axidev_osk/` only build those maps. The engine decodes them in `config/profile.py`, using a decoder per node kind and attachment kind, and rejects unknown keys with the full config path in the error. Every profile in the root config is decoded and checked, not only the active one. A key set to `None` counts as absent, the way a Lua table has no key set to `nil`.
 
 A profile's `theme` holds its stylesheet (`qss`), Qt palette colors by role (`palette`), and its font (`font`). The engine owns no colors or font families: attachments that draw, such as `hot_corners` and `pointer_locator`, take their colors as required options.
 
@@ -52,7 +52,7 @@ Two kinds of function appear in a profile.
 
 A binding is `fn(state) -> value`, given in place of any value field: a node's options and style, a window's title, opacity, minimum size, `default_close`, and `input_blocked`, an attachment's options, or the theme. Fixed fields stay plain values and reject a function: ids, kinds, references such as an attachment's `window`, grid cells, children, `show_on_start`, and a window's `overlay` and `chrome`. The runtime records which state paths the bindings in one record read, and when one of them changes it decodes the whole record again and applies only the fields that differ. At load every binding runs once against the default state, so a binding that reads an undeclared path or returns an invalid value rejects the config with its path. Later, an invalid result produces `callback.failed` and the target keeps its last value.
 
-A callback is `fn(ctx, event) -> [actions]`, given for a node event (`on_press`, `on_release`) or in the profile's `on` table. It receives `ctx.state`, a read-only view of state, and the event as plain data. It returns actions as plain maps, for example `osk.window.show("pad")`. It never touches widgets, services, or backends directly. A callback that raises produces `callback.failed` and the queue continues.
+A callback is `fn(ctx, event) -> [actions]`, given for a node event (`on_press`, `on_release`) or in the profile's `on` table. It receives `ctx.state`, a read-only view of state, and the event as plain data. It returns actions as plain maps, for example `axidev_osk.window.show("pad")`. It never touches widgets, services, or backends directly. A callback that raises produces `callback.failed` and the queue continues.
 
 Functions are stored in a registry, and queue messages only ever carry their IDs.
 
@@ -80,9 +80,9 @@ Where messages are defined:
 
 Durable state lives in one tree, `runtime/state.py`, owned by the runtime. It is a registry of declared variables: the engine stores each value and checks it against its declared type, but it does not know what any of them mean.
 
-A variable is declared in place inside a nested `state` map with `osk.var(type, default)`, which builds `{"var": type, "default": value}`. Types are `"boolean"`, `"integer"`, `"number"`, `"string"`, `osk.list_of(T)`, `osk.map_of(T)`, and `osk.record({...})`, whose fields are `osk.var` declarations. A scalar needs a default, a list or map defaults to empty, and a record takes its default from its fields. `config/variables.py` decodes declarations and checks values.
+A variable is declared in place inside a nested `state` map with `axidev_osk.var(type, default)`, which builds `{"var": type, "default": value}`. Types are `"boolean"`, `"integer"`, `"number"`, `"string"`, `axidev_osk.list_of(T)`, `axidev_osk.map_of(T)`, and `axidev_osk.record({...})`, whose fields are `axidev_osk.var` declarations. A scalar needs a default, a list or map defaults to empty, and a record takes its default from its fields. `config/variables.py` decodes declarations and checks values.
 
-Where a variable is declared sets its lifetime. The root config's `state` (`osk.config(state=...)`) declares variables every profile shares, which survive a profile switch. A profile's `state` declares its own, which reset to their defaults each time it starts. Declaring a path that overlaps another declaration is rejected at load, and nothing is saved to disk.
+Where a variable is declared sets its lifetime. The root config's `state` (`axidev_osk.config(state=...)`) declares variables every profile shares, which survive a profile switch. A profile's `state` declares its own, which reset to their defaults each time it starts. Declaring a path that overlaps another declaration is rejected at load, and nothing is saved to disk.
 
 The registry is strict. `state.set` on a path no declaration covers, or with a value of the wrong type, fails with `action.failed`. Reading an undeclared path raises, so the binding or callback reports `callback.failed`. Reading an absent entry of a declared map returns `None`, the way Lua reads `nil`. Setting a variable to `None` resets it to its default, setting a record field to `None` resets that field, and setting a map entry to `None` removes the entry along with any enclosing entries it left empty. `True` is not equal to `1`, and an integer variable rejects a boolean.
 
@@ -106,13 +106,13 @@ Lifecycle stays in Python: quit sequencing (SIGTERM quits without asking; other 
 
 ## How To Add Things
 
-A node kind. Write its build and apply functions and register a `NodeKind` in `nodes/kinds.py` (or a new module called from `register_builtin_nodes`). Map callback fields to event names. Read the kind's values in `decode_options` with `ConfigReader`, which rejects unknown keys for you; every field read there accepts a binding, and `apply` receives the new options with the previous ones so it changes only what differs. Read fixed fields, such as a box's `direction`, in `decode_structure`. A kind with children also decodes the fields its children are placed with in `decode_child_placement`, the way a grid reads `cell` and a box reads `stretch`, so those fields are unknown keys under any other parent. A kind whose options must fit its children, the way a stack's `current` must name one of its pages, checks them in `check_options`, which receives the children's IDs and runs at load and on every later decode. The builder emits events through `builder.emit(event_name, node.id)` and never decides what a press means. Add a matching builder function in `python_defaults/osk/__init__.py`, then a test next to `tests/test_nodes.py`.
+A node kind. Write its build and apply functions and register a `NodeKind` in `nodes/kinds.py` (or a new module called from `register_builtin_nodes`). Map callback fields to event names. Read the kind's values in `decode_options` with `ConfigReader`, which rejects unknown keys for you; every field read there accepts a binding, and `apply` receives the new options with the previous ones so it changes only what differs. Read fixed fields, such as a box's `direction`, in `decode_structure`. A kind with children also decodes the fields its children are placed with in `decode_child_placement`, the way a grid reads `cell` and a box reads `stretch`, so those fields are unknown keys under any other parent. A kind whose options must fit its children, the way a stack's `current` must name one of its pages, checks them in `check_options`, which receives the children's IDs and runs at load and on every later decode. The builder emits events through `builder.emit(event_name, node.id)` and never decides what a press means. Add a matching builder function in `python_defaults/axidev_osk/__init__.py`, then a test next to `tests/test_nodes.py`.
 
-An attachment. Add its options record and decoder in `attachments/__init__.py` and register it in `register_builtin_attachments`. If it acts on a window, extend `WindowAttachments` and install it in `build_profile_window`. Its options are values a profile may bind, so it owns no state and needs no setter action: `AttachmentRuntime` binds them and calls its applier with each new set of options. Set the kind's `limit` to `"window"` or `"profile"` when at most one fits there: the config decoder checks every attachment's window reference and these limits in every profile at load. Add the `osk` builder and a test in `tests/test_attachments.py`.
+An attachment. Add its options record and decoder in `attachments/__init__.py` and register it in `register_builtin_attachments`. If it acts on a window, extend `WindowAttachments` and install it in `build_profile_window`. Its options are values a profile may bind, so it owns no state and needs no setter action: `AttachmentRuntime` binds them and calls its applier with each new set of options. Set the kind's `limit` to `"window"` or `"profile"` when at most one fits there: the config decoder checks every attachment's window reference and these limits in every profile at load. Add the `axidev_osk` builder and a test in `tests/test_attachments.py`.
 
-An action or event. Pick a lowercase dot-separated name, write an arguments record, a decoder, and a typed constructor, and register the name where the owning subsystem registers its messages. Add the `osk` action builder if profiles should send it. An event that reports an observation profiles should read later also writes observed state: declare its variables with `declare_observed` and write them with `set_observed`, in a handler installed before profiles start so callbacks see current state.
+An action or event. Pick a lowercase dot-separated name, write an arguments record, a decoder, and a typed constructor, and register the name where the owning subsystem registers its messages. Add the `axidev_osk` action builder if profiles should send it. An event that reports an observation profiles should read later also writes observed state: declare its variables with `declare_observed` and write them with `set_observed`, in a handler installed before profiles start so callbacks see current state.
 
-A standard-library helper. Write it in `python_defaults/osk/std/` using only `osk` builders and actions. Take an `opts` map and merge it last with `osk.merge`, so any single field can be overridden. Declare library state in the module's `STATE`, which `std.with_state` merges under `std`. When the library must react to an event, add its handler to `std.with_handlers`, which profiles use to build their `on` table. Test it in `tests/test_std_library.py`.
+A standard-library helper. Write it in `python_defaults/axidev_osk/std/` using only `axidev_osk` builders and actions. Take an `opts` map and merge it last with `axidev_osk.merge`, so any single field can be overridden. Declare library state in the module's `STATE`, which `std.with_state` merges under `std`. When the library must react to an event, add its handler to `std.with_handlers`, which profiles use to build their `on` table. Test it in `tests/test_std_library.py`.
 
 A profile change. Edit `python_defaults/default_profile.py`, or build a new root config with the same helpers. If you change the default keyboard on purpose, update the expected data in `tests/test_default_profile.py` in the same change and say so in the PR.
 

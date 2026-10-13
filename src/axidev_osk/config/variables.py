@@ -93,7 +93,7 @@ def _collect(data: Mapping[object, object], prefix: StatePath, path: str, declar
         elif isinstance(value, Mapping):
             _collect(value, (*prefix, name), child_path, declared)
         else:
-            raise VariableError(f"{child_path} must be a variable declaration (osk.var) or a map of them")
+            raise VariableError(f"{child_path} must be a variable declaration (axidev_osk.var) or a map of them")
 
 
 def decode_variable(data: object, path: str) -> Variable:

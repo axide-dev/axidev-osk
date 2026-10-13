@@ -12,7 +12,7 @@ from axidev_osk.attachments.runtime import AttachmentRuntime
 from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.models import ChromeConfig, OverlayConfig
 from axidev_osk.config.profile import Live, ProfileConfig, StyleConfig, WindowValues
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.app_messages import (
     WINDOW_CLOSE_REQUESTED,
     WINDOW_DRAG_ENDED,
@@ -31,24 +31,24 @@ _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
 
 
 def _root(
-    attachments: list[osk.Map] | None = None,
+    attachments: list[axidev_osk.Map] | None = None,
     windows: tuple[str, ...] = ("pad",),
-    state: osk.Map | None = None,
+    state: axidev_osk.Map | None = None,
     **window_fields: Any,
-) -> osk.Map:
-    return osk.config(
+) -> axidev_osk.Map:
+    return axidev_osk.config(
         active_profile="p",
         profiles={
-            "p": osk.profile(
+            "p": axidev_osk.profile(
                 windows=[
-                    osk.window(
-                        **osk.merge(
+                    axidev_osk.window(
+                        **axidev_osk.merge(
                             {
                                 "id": window,
                                 "title": window.title(),
-                                "content": osk.box(
+                                "content": axidev_osk.box(
                                     id=f"{window}:root",
-                                    children=[osk.button(id=f"{window}:a", label="a")],
+                                    children=[axidev_osk.button(id=f"{window}:a", label="a")],
                                 ),
                             },
                             window_fields,
@@ -68,9 +68,9 @@ class WindowHarness:
 
     def __init__(
         self,
-        attachments: list[osk.Map] | None = None,
+        attachments: list[axidev_osk.Map] | None = None,
         windows: tuple[str, ...] = ("pad",),
-        state: osk.Map | None = None,
+        state: axidev_osk.Map | None = None,
         **window_fields: Any,
     ) -> None:
         qt_app()
@@ -334,7 +334,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertLessEqual(window.minimumHeight(), window.height())
 
     def test_a_bound_minimum_size_uses_current_state_on_the_first_build(self) -> None:
-        harness = WindowHarness(state={"width": osk.var("integer", 100)}, minimum_size=lambda s: [s.width, 50])
+        harness = WindowHarness(state={"width": axidev_osk.var("integer", 100)}, minimum_size=lambda s: [s.width, 50])
         harness.engine.dispatcher.dispatch(state_set("width", 640))
 
         window = harness.build()
@@ -352,7 +352,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertEqual(window.size(), window.minimumSize())
 
     def test_window_installs_pointer_locator_from_its_attachment(self) -> None:
-        harness = WindowHarness([osk.pointer_locator(id="glow", window="pad", gap_color="#242424")], windows=("pad", "other"))
+        harness = WindowHarness([axidev_osk.pointer_locator(id="glow", window="pad", gap_color="#242424")], windows=("pad", "other"))
         window = harness.build("pad")
         other = harness.build("other")
         self.addCleanup(window.deleteLater)
@@ -444,18 +444,18 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         text = "A long sentence that has to wrap over several lines inside a narrow window. " * 3
         harness = WindowHarness(
             minimum_size=[300, 80],
-            content=osk.box(
+            content=axidev_osk.box(
                 id="pad:root",
                 children=[
-                    osk.box(
+                    axidev_osk.box(
                         id="pad:row",
                         direction="horizontal",
                         children=[
-                            osk.label(id="pad:badge", text="!", min_width=40, max_width=40),
-                            osk.label(id="pad:message", text=text, word_wrap=True, stretch=1),
+                            axidev_osk.label(id="pad:badge", text="!", min_width=40, max_width=40),
+                            axidev_osk.label(id="pad:message", text=text, word_wrap=True, stretch=1),
                         ],
                     ),
-                    osk.label(id="pad:hint", text=text, word_wrap=True),
+                    axidev_osk.label(id="pad:hint", text=text, word_wrap=True),
                 ],
             ),
         )
@@ -491,13 +491,13 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
     def test_title_opacity_and_input_block_follow_state(self) -> None:
         harness = WindowHarness(
-            state={"faded": osk.var("boolean", False), "name": osk.var("string", "Pad")},
+            state={"faded": axidev_osk.var("boolean", False), "name": axidev_osk.var("string", "Pad")},
             title=lambda s: s.name,
             opacity=lambda s: 0.01 if s.faded else 0.85,
             input_blocked=lambda s: s.faded,
-            content=osk.box(
+            content=axidev_osk.box(
                 id="pad:root",
-                children=[osk.button(id="pad:a", label="a"), osk.button(id="pad:ghost", label="g", passes_input_block=True)],
+                children=[axidev_osk.button(id="pad:a", label="a"), axidev_osk.button(id="pad:ghost", label="g", passes_input_block=True)],
             ),
         )
         window = harness.build()
@@ -523,7 +523,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
 class RuntimeWindowDwellTests(unittest.TestCase):
     def test_dwell_controller_is_installed_only_on_the_targeted_window(self) -> None:
-        harness = WindowHarness([osk.dwell(id="d", window="pad", enabled=True)], windows=("pad", "other"))
+        harness = WindowHarness([axidev_osk.dwell(id="d", window="pad", enabled=True)], windows=("pad", "other"))
         pad = harness.build("pad")
         other = harness.build("other")
         self.addCleanup(pad.deleteLater)
@@ -535,8 +535,8 @@ class RuntimeWindowDwellTests(unittest.TestCase):
 
     def test_bound_dwell_options_reach_the_built_window(self) -> None:
         harness = WindowHarness(
-            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
-            state={"dwell_on": osk.var("boolean", False)},
+            [axidev_osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
+            state={"dwell_on": axidev_osk.var("boolean", False)},
         )
         window = harness.build()
         self.addCleanup(window.deleteLater)
@@ -548,8 +548,8 @@ class RuntimeWindowDwellTests(unittest.TestCase):
 
     def test_rebuilt_window_starts_from_current_dwell_options(self) -> None:
         harness = WindowHarness(
-            [osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
-            state={"dwell_on": osk.var("boolean", False)},
+            [axidev_osk.dwell(id="d", window="pad", enabled=lambda s: s.dwell_on)],
+            state={"dwell_on": axidev_osk.var("boolean", False)},
         )
         harness.engine.dispatcher.dispatch(state_set("dwell_on", True))
 

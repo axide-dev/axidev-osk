@@ -12,7 +12,7 @@ from axidev_osk.config.profile import ProfileConfig
 from axidev_osk.config.reader import ConfigError
 from axidev_osk.messages import DataMap
 from axidev_osk.nodes import NodeKind
-from axidev_osk.python_defaults import osk
+from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.engine_messages import keyboard_status_changed
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
@@ -59,7 +59,7 @@ class NodeTests(unittest.TestCase):
                     _button("plain", label="Plain", cell={"row": 0, "column": 1, "column_span": 2}),
                 ],
             },
-            state={"shift": osk.var("boolean", False)},
+            state={"shift": axidev_osk.var("boolean", False)},
         )
         window = self._window(profile)
         key = self._find(window, "a")
@@ -126,7 +126,7 @@ class NodeTests(unittest.TestCase):
         self.engine.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
             {"kind": "box", "id": "row", "children": [_button("a", latched=lambda s: s.mode == "on" or s.mode)]},
-            state={"mode": osk.var("string", "on")},
+            state={"mode": axidev_osk.var("string", "on")},
         )
         key = self._find(self._window(profile), "a")
 
@@ -161,7 +161,7 @@ class NodeTests(unittest.TestCase):
                     _button("quiet"),
                 ],
             },
-            state={"count": osk.var("integer", 0)},
+            state={"count": axidev_osk.var("integer", 0)},
         )
         window = self._window(profile)
         cow = self._find(window, "cow")
@@ -187,7 +187,7 @@ class NodeTests(unittest.TestCase):
                     ]},
                 ],
             },
-            state={"page": osk.var("string", "one")},
+            state={"page": axidev_osk.var("string", "one")},
         )
         self.engine.dispatcher.dispatch(keyboard_status_changed(True, "ready", False, ""))
         window = self._window(profile)
@@ -204,7 +204,7 @@ class NodeTests(unittest.TestCase):
         profile = self._profile(
             {"kind": "label", "id": "status", "text": "Status",
              "style": lambda s: {"classes": ["warning"] if s.alert else [], "properties": {"level": s.level}}},
-            state={"alert": osk.var("boolean", False), "level": osk.var("integer", 1)},
+            state={"alert": axidev_osk.var("boolean", False), "level": axidev_osk.var("integer", 1)},
         )
         status = self._find(self._window(profile), "status")
 
@@ -219,7 +219,7 @@ class NodeTests(unittest.TestCase):
             {"kind": "stack", "id": "pages", "current": lambda s: s.page, "children": [
                 {"kind": "label", "id": "one", "text": "One"},
             ]},
-            state={"page": osk.var("string", "one")},
+            state={"page": axidev_osk.var("string", "one")},
         )
         pages = self._find(self._window(profile), "pages")
         assert isinstance(pages, QStackedWidget)
