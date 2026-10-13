@@ -48,10 +48,10 @@ class DefaultProfileHarness:
         self.nodes = nodes_by_id(self.window)
 
     def press(self, node_id: str) -> None:
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
 
     def release(self, node_id: str) -> None:
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
 
     def tap(self, node_id: str) -> None:
         self.press(node_id)
@@ -334,13 +334,13 @@ class LayoutSwitchTests(unittest.TestCase):
                 engine.dispatcher.dispatch(state_set("settings.layout", "dvorak"))
                 if profile_name == "wheel":
                     # Slice 9 opens the top letter row; its first key sits on the left, slice 7.
-                    engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+                    engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
                     node_id = "wheel:slice:7"
                 key = nodes_by_id(window)[node_id]
 
                 self.assertEqual(key.text(), "'")  # type: ignore[attr-defined]
-                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
-                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
                 self.assertEqual(backend.sent, [("down", "'", (), True), ("up", "'")])
 
 

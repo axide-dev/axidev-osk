@@ -9,6 +9,8 @@ This file is a map of the codebase for coding agents and humans: where things be
 
 Axidev OSK is an engine for on-screen input surfaces, and this codebase is the engine. The engine is a set of services that talk only through one queue and its dispatcher: events report what happened, actions request an effect, and no service calls another directly. Follow this strictly. It keeps every part replaceable, which is what lets this accessibility tool be customized as far as possible, and it keeps platform-specific details inside the services, out of every profile.
 
+Every interaction reaches the profile. The widget, attachment, or service that sees one reports it as an event carrying everything it observed, such as which mouse button pressed a key, how far a title bar was dragged, or where a dwell came to rest, and decides nothing about what it means. The profile decides, usually through the standard library's defaults, and asks for effects with actions, so any interaction can be given another meaning, or none, without changing the engine.
+
 The keyboard you see when you start it is not built into the engine: it is the default profile, an ordinary configuration. Anything a profile can express with the engine's building blocks must be possible without changing the engine.
 
 `src/axidev_osk/python_defaults/` holds the `axidev_osk` helpers, the standard library, and the default profile. It is temporary: a Lua layer outside this codebase will replace it, so the engine must not depend on it or assume Python. Only `app.py` reaches into it, to load the bundled config.
@@ -19,7 +21,7 @@ The keyboard you see when you start it is not built into the engine: it is the d
 - The standard library, `python_defaults/axidev_osk/std/`, holds keyboard conventions built only from the `axidev_osk` builders and actions. It is ordinary profile code that ships with the engine.
 - A profile is a root config map. The bundled one is `python_defaults/default_profile.py`, and `tests/test_default_profile.py` holds it to the original keyboard's measurements.
 
-When you add something, ask whether a profile author should be able to change it. If yes, it belongs in a profile or in the standard library, not in the engine.
+When you add something, ask whether a profile author should be able to change it. If yes, it belongs in a profile or in the standard library, not in the engine. Add to the engine only what a profile cannot build from the existing events, actions, and options, and add it in its most general form: an event that reports, an action that causes one effect, or an option with a default.
 
 ## Rules
 
@@ -36,6 +38,9 @@ When you add something, ask whether a profile author should be able to change it
 - Widgets render state and are never its source of truth. Only momentary visual details, such as a pressed look, stay in Qt.
 - The engine fixes nothing about how something looks or behaves that a user may need to change, because each user needs different values: colors, fonts, sizes, timings, and visible text come from a profile's `theme` or stylesheet, or from an option with a default.
 - Buttons never take keyboard focus: an on-screen keyboard must not steal typing from the target app.
+- The engine promises profiles only what it can keep on every platform. Where a platform cannot honor a building block, the block says so instead of behaving differently: an attachment whose service is missing raises `AttachmentUnavailable`, and the engine draws window chrome only where the window is frameless, because on Windows the system frame stays.
+- Only the code that assembles the engine (`runtime/engine.py`, `runtime/application.py`, and the action handlers they register) calls services directly, to start, stop, and reset them and to carry out actions.
+- An observation that fires often, such as pointer movement, is reported only for nodes that opt in through a fixed field (`reports_pointer`, `report_size`).
 - A widget property the engine sets is listed in `widget_properties.py`, which both sets and reserves it; a profile style cannot set it.
 - Profile switching, quit sequencing, the lock-screen panel, and display recovery stay in the engine's lifecycle code; profiles only request them through actions.
 
@@ -46,14 +51,17 @@ When you add something, ask whether a profile author should be able to change it
 - `runtime/engine_messages.py`: messages the engine handles itself: keyboard, processes, logging, and observations.
 - `runtime/timers.py`: timers profiles start and cancel.
 - `runtime/app_messages.py`: messages the application runtime handles or sends, and `APP_ACTION_DECODERS`, the one table of its action decoders.
+- `runtime/application.py`: startup, the running profile, and shutdown. `runtime/event_handlers.py`: the window actions and the Wayland title-bar drag.
 - `nodes/`: node kinds and their events. `attachments/`: attachment kinds.
+- `windows/`: building windows, their chrome, and dwell. `components/`: the widgets nodes build.
+- `services/`, `platform/`, and `hot_corner/`: platform integration behind the queue. `application/`: quit sequencing and Linux permission setup.
 - `config/`: decoding of root configs and state declarations.
 - `config_check/` and `cli/check.py`: `axidev-osk check`.
 - `python_defaults/`: the `axidev_osk` helpers, the standard library, and the bundled config.
 
 ## How To Add Things
 
-A node kind. Register a `NodeKind` in `nodes/kinds.py` with its build and apply functions and its callback fields mapped to event names. Read bindable values in `decode_options`, fixed fields in `decode_structure`, the fields its children are placed with in `decode_child_placement`, child placement that may follow state in `decode_live_placement`, and checks against its children in `check_options`. The builder emits events through `builder.emit` and never decides what a press means. Add the `axidev_osk` builder and a test next to `tests/test_nodes.py`.
+A node kind. Register a `NodeKind` in `nodes/kinds.py` with its build and apply functions and its callback fields mapped to event names. Read bindable values in `decode_options`, fixed fields in `decode_structure`, the fields its children are placed with in `decode_child_placement`, child placement that may follow state in `decode_live_placement`, and checks against its children in `check_options`. The builder emits events through `builder.emit` and never decides what a press means; an event whose record carries more than `node`, such as `button.pressed` with its mouse button, gets its decoder in `event_decoders`. Add the `axidev_osk` builder and a test next to `tests/test_nodes.py`.
 
 An attachment. Add its options record, with its defaults, and its decoder in `attachments/__init__.py`, and register it in `register_builtin_attachments` with its `attach` step. Its options are values a profile may bind, so it owns no state and needs no setter action. Set its `limit` when at most one fits a window or a profile. Add the `axidev_osk` builder and a test in `tests/test_attachments.py`.
 
@@ -67,6 +75,7 @@ A profile change. Edit `python_defaults/default_profile.py`. If you change the d
 
 ## Avoid
 
+- A widget, attachment, or service deciding what an interaction means, such as moving a window on a drag or treating a right click as a left one, instead of reporting it.
 - Layout, legend, latch, or prompt logic anywhere outside `python_defaults/` or a profile.
 - Services, widgets, or backends calling each other directly when a message can carry the request.
 - Callables, Qt objects, or dataclass instances inside queue messages or profile state.

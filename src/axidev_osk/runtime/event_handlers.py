@@ -14,16 +14,19 @@ from .app_messages import (
     APP_ACTION_DECODERS,
     DISPLAY_CONFIGURATION_CHANGED,
     POINTER_MOTION_OBSERVED,
+    WINDOW_CLICK,
     WINDOW_CLOSE,
     WINDOW_DRAG_ENDED,
     WINDOW_DRAG_STARTED,
     WINDOW_HIDE,
     WINDOW_MOVE_BY,
+    WINDOW_RESIZE_BY,
     WINDOW_SHOW,
     PointerMotionObservedArguments,
     WindowArguments,
-    WindowMoveByArguments,
-    window_move_by,
+    WindowClickArguments,
+    WindowDeltaArguments,
+    window_dragged,
 )
 from .decoding import EmptyArguments
 from .dispatcher import ACTION_FAILED, ActionFailedArguments
@@ -56,7 +59,7 @@ def register_window_actions(
         windows.close(arguments.window_id)
         return []
 
-    def move_by(arguments: WindowMoveByArguments) -> MessageResult:
+    def move_by(arguments: WindowDeltaArguments) -> MessageResult:
         window = windows.get(arguments.window_id)
         if window is None:
             return []
@@ -65,10 +68,20 @@ def register_window_actions(
             relative_pointer.commit_surface(int(window.winId()))
         return []
 
+    def resize_by(arguments: WindowDeltaArguments) -> MessageResult:
+        windows.resize_by(arguments.window_id, arguments.dx, arguments.dy)
+        return []
+
+    def click(arguments: WindowClickArguments) -> MessageResult:
+        windows.click(arguments.window_id, arguments.x, arguments.y, arguments.button)
+        return []
+
     dispatcher.register_action(WINDOW_SHOW, APP_ACTION_DECODERS[WINDOW_SHOW], show)
     dispatcher.register_action(WINDOW_HIDE, APP_ACTION_DECODERS[WINDOW_HIDE], hide)
     dispatcher.register_action(WINDOW_CLOSE, APP_ACTION_DECODERS[WINDOW_CLOSE], close)
     dispatcher.register_action(WINDOW_MOVE_BY, APP_ACTION_DECODERS[WINDOW_MOVE_BY], move_by)
+    dispatcher.register_action(WINDOW_RESIZE_BY, APP_ACTION_DECODERS[WINDOW_RESIZE_BY], resize_by)
+    dispatcher.register_action(WINDOW_CLICK, APP_ACTION_DECODERS[WINDOW_CLICK], click)
 
 
 def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
@@ -93,7 +106,12 @@ class RelativePointer(Protocol):
 
 
 class PointerDragRouter:
-    """Own one layer-shell title-bar drag and turn raw pointer motion into window moves."""
+    """Own one layer-shell title-bar drag and report raw pointer motion as ``window.dragged``.
+
+    The profile decides what a drag does; the standard library moves the
+    window with ``window.move_by``. A failing move of the dragged window ends
+    the drag.
+    """
 
     def __init__(self, windows: "WindowManager", relative_pointer: RelativePointer | None) -> None:
         self._windows = windows
@@ -143,7 +161,7 @@ class PointerDragRouter:
         self._remainder = (total_x - dx, total_y - dy)
         if not dx and not dy:
             return []
-        return [window_move_by(window_id, dx, dy)]
+        return [window_dragged(window_id, dx, dy)]
 
     def _action_failed(self, event: ActionFailedArguments) -> MessageResult:
         """Stop the drag when moving the dragged window fails."""

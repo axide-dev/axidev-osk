@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 from unittest.mock import patch
 
+from PySide6.QtCore import QDeadlineTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from axidev_osk.attachments.runtime import WindowAttachments
@@ -33,6 +35,16 @@ HOT_CORNER_COLORS = {
 
 def hot_corner_config(**fields: int) -> HotCornerConfig:
     return HotCornerConfig(**HOT_CORNER_COLORS, **fields)
+
+
+def wait_until(condition: Callable[[], object], timeout_ms: int = 2000) -> None:
+    """Process Qt events until ``condition`` holds; a fixed wait loses a click whose timer fires late on a busy machine."""
+
+    deadline = QDeadlineTimer(timeout_ms)
+    while not condition():
+        if deadline.hasExpired():
+            raise AssertionError(f"condition not met within {timeout_ms} ms")
+        QTest.qWait(10)
 
 
 def qt_app() -> QApplication:

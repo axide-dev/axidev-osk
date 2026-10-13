@@ -5,6 +5,11 @@ and lets clicks pass through it except on the Ghost button. The flag is the
 only source: a ghostable window binds its ``opacity`` with ``ghost_opacity``
 and its ``input_blocked`` with ``ghost_blocked``, so a rebuilt window comes
 back in the right state on its own.
+
+The engine reports title-bar drags, resize-grip drags, and finished dwells
+without acting on them; ``on_dragged``, ``on_resize_dragged``, and
+``on_dwell_completed`` give them their usual meaning, and ``std.with_handlers``
+installs them.
 """
 
 from __future__ import annotations
@@ -97,3 +102,24 @@ def corner_toggle(state: Any, window: str) -> list[axidev_osk.Map]:
     if ghosted(state, window):
         return reveal(state, window)
     return toggle(state, window)
+
+
+def on_dragged(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+    """Move a window by as much as its title bar was dragged."""
+
+    del ctx
+    return [axidev_osk.window.move_by(event["window"], event["dx"], event["dy"])]
+
+
+def on_resize_dragged(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+    """Resize a window by as much as its resize grip was dragged."""
+
+    del ctx
+    return [axidev_osk.window.resize_by(event["window"], event["dx"], event["dy"])]
+
+
+def on_dwell_completed(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+    """Left-click where the pointer came to rest."""
+
+    del ctx
+    return [axidev_osk.window.click(event["window"], event["x"], event["y"])]
