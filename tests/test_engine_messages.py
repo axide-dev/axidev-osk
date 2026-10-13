@@ -19,6 +19,7 @@ from axidev_osk.runtime.engine_messages import (
     KEYBOARD_RESET,
     PROCESS_EXITED,
     ProcessExitedArguments,
+    display_configuration_changed,
     input_key,
     process_exited,
     window_state_changed,
@@ -144,13 +145,38 @@ class ObservationTests(unittest.TestCase):
                 y=20,
                 width=300,
                 height=120,
+                content_width=200,
+                content_height=80,
             )
         )
 
         self.assertEqual(
             harness.engine.profile.state.get(("windows", "pad")),
-            {"visible": True, "minimized": False, "position": {"x": 10, "y": 20}, "size": {"width": 300, "height": 120}},
+            {
+                "visible": True,
+                "minimized": False,
+                "position": {"x": 10, "y": 20},
+                "size": {"width": 300, "height": 120},
+                "content_size": {"width": 200, "height": 80},
+            },
         )
+
+
+    def test_connected_screens_are_observed(self) -> None:
+        harness = Harness()
+        screen = {
+            "name": "DP-1",
+            "primary": True,
+            "x": 0,
+            "y": 0,
+            "width": 2560,
+            "height": 1440,
+            "available": {"x": 0, "y": 32, "width": 2560, "height": 1408},
+        }
+
+        harness.dispatcher.dispatch(display_configuration_changed([screen]))
+
+        self.assertEqual(harness.engine.profile.state.get(("screens",)), [screen])
 
 
 class KeyboardEffectTests(unittest.TestCase):

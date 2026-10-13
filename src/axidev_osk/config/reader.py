@@ -177,13 +177,18 @@ class ConfigReader:
         assert isinstance(copied, dict)
         return _without_none(copied)
 
-    def integer_list(self, key: str, default: tuple[int, ...], *, shape: str) -> tuple[int, ...]:
-        """Read a list of non-negative integers as long as ``default``; ``shape`` names its items in errors."""
+    def integer_list(
+        self, key: str, default: tuple[int, ...], *, shape: str, any_length: bool = False
+    ) -> tuple[int, ...]:
+        """Read a list of non-negative integers as long as ``default``, or of any length with ``any_length``.
+
+        ``shape`` names its items in errors.
+        """
 
         value = self.raw(key, list(default))
         if (
             not isinstance(value, list)
-            or len(value) != len(default)
+            or (not any_length and len(value) != len(default))
             or not all(isinstance(item, int) and not isinstance(item, bool) and item >= 0 for item in value)
         ):
             raise ConfigError(f"{self.field_path(key)} must be {shape}")

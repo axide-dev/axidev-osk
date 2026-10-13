@@ -77,6 +77,33 @@ class NodeTests(unittest.TestCase):
         self.assertEqual(key.focusPolicy(), Qt.FocusPolicy.NoFocus)
         self.assertEqual(window.objectName(), "padWindow")
 
+    def test_a_grid_shares_spare_space_by_its_bound_row_and_column_stretch(self) -> None:
+        profile = self._profile(
+            {
+                "kind": "grid",
+                "id": "keys",
+                "column_stretch": lambda s: [3, 1] if s.wide_first else [],
+                "row_stretch": [0, 1],
+                "children": [
+                    _button("a", cell={"row": 0, "column": 0}),
+                    _button("b", cell={"row": 0, "column": 1}),
+                    _button("c", cell={"row": 1, "column": 0, "column_span": 2}),
+                ],
+            },
+            state={"wide_first": axidev_osk.var("boolean", True)},
+        )
+        window = self._window(profile)
+        window.resize(400, 300)
+        QApplication.processEvents()
+        a, b, c = (self._find(window, node_id) for node_id in ("a", "b", "c"))
+
+        self.assertEqual(a.width(), 3 * b.width())
+        self.assertLess(a.height(), c.height())
+        self.engine.dispatcher.dispatch(state_set("wide_first", False))
+        QApplication.processEvents()
+
+        self.assertEqual(a.width(), b.width())
+
     def test_buttons_report_the_pointer_entering_and_leaving(self) -> None:
         seen: list[tuple[str, str]] = []
 

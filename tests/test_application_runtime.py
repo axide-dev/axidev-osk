@@ -141,10 +141,11 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         self.assertEqual(calls, [("move", (_KEYBOARD_WINDOW, 4, 5)), ("commit", 123)])
 
     def test_pointer_motion_cancels_drag_when_window_is_no_longer_live(self) -> None:
-        runtime, service, _window = self._runtime_with_pointer_service()
-        runtime._window_manager.get = Mock(return_value=None)
+        runtime, service, window = self._runtime_with_pointer_service()
+        runtime._window_manager.get = Mock(return_value=window)
 
         runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
+        runtime._window_manager.get = Mock(return_value=None)
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertIsNone(runtime._pointer_drag.window_id)
@@ -193,6 +194,16 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         self.assertEqual([failure.message for failure in failures], ["commit failed"])
         self.assertIsNone(runtime._pointer_drag.window_id)
         service.end_drag.assert_called_once_with()
+
+    def test_a_window_that_reports_its_own_deltas_collects_no_pointer_motion(self) -> None:
+        runtime, service, window = self._runtime_with_pointer_service()
+        window.uses_runtime_drag_motion = False
+        runtime._window_manager.get = Mock(return_value=window)
+
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
+
+        self.assertIsNone(runtime._pointer_drag.window_id)
+        service.begin_drag.assert_not_called()
 
     def test_drag_end_stops_compositor_pointer_movement(self) -> None:
         runtime = _runtime_without_platform_services()

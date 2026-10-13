@@ -71,6 +71,8 @@ QFrame#layerShellTitleBar {
     );
     border: 1px solid #242433;
     border-radius: 10px;
+    padding: 8px 8px 8px 10px;
+    qproperty-spacing: 8;
 }
 QFrame#layerShellTitleBar:hover {
     background-color: qlineargradient(

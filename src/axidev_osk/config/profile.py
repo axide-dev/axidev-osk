@@ -153,6 +153,9 @@ class WindowValues:
     turns it off for a window whose close it handles itself.
     ``input_blocked`` ignores clicks except on nodes with ``passes_input_block``.
     ``close_label`` is the text of the engine-drawn close button.
+    ``fit_content`` resizes the window to the smallest size that holds its
+    content whenever that size changes, such as when a panel opens or closes;
+    without it the window only grows when its content needs more room.
     """
 
     title: str
@@ -162,6 +165,7 @@ class WindowValues:
     input_blocked: bool
     style: StyleConfig
     close_label: str
+    fit_content: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,6 +469,7 @@ def _decode_window_values(reader: ConfigReader) -> WindowValues:
         input_blocked=reader.boolean("input_blocked", False),
         style=_decode_style(reader),
         close_label=reader.string("close_label", "x"),
+        fit_content=reader.boolean("fit_content", True),
     )
 
 

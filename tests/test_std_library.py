@@ -443,6 +443,13 @@ class LocatorTests(unittest.TestCase):
 
         self.assertEqual(forward, list(reversed(backward)))
 
+    def test_opts_choose_the_hues_and_how_far_nearby_reaches(self) -> None:
+        rects = [_rect(column * 52, 0) for column in range(4)]
+
+        colors = locator.palette(rects, {"warm": [0.0, 0.0], "cool": [240.0, 0.0], "nearby_sizes": 0})
+
+        self.assertEqual(colors, ["#ff0000", "#0000ff", "#ff0000", "#0000ff"])
+
     def test_colored_buttons_glow_the_pattern_of_where_they_are(self) -> None:
         buttons = [axidev_osk.button(id=name, label=name, min_width=48, min_height=48) for name in ("a", "b", "c")]
         harness = StdHarness(self, locator.colored(buttons), also=[locator.on(buttons)])

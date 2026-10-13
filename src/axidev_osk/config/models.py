@@ -107,6 +107,8 @@ class DwellClickConfig:
         acceleration_exponent_far: How strongly slowing down speeds a dwell up
             after ``distance_curve_full_px`` of travel, or before any click.
         poll_interval_ms: How often the pointer is sampled.
+        pause_while_pressed: Whether a held mouse button discards the current
+            dwell and keeps a new one from starting until it is released.
         indicator_size_px: Width and height of the progress indicator.
         indicator_min_dot_px: Dot diameter when progress starts.
         indicator_max_dot_px: Dot diameter at full progress.
@@ -135,6 +137,7 @@ class DwellClickConfig:
     acceleration_exponent_near: float = 0.25
     acceleration_exponent_far: float = 0.5
     poll_interval_ms: int = 16
+    pause_while_pressed: bool = True
     indicator_size_px: int = 30
     indicator_min_dot_px: int = 4
     indicator_max_dot_px: int = 24
