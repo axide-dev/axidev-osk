@@ -64,7 +64,7 @@ class HotCornerService:
 
     def _restart(self) -> None:
         self._stop_controller()
-        if self._dispatcher is None or self._settings is None:
+        if self._dispatcher is None or self._settings is None or not self._settings.enabled:
             return
         self._controller = HotCornerWindowToggleController(
             self._dispatcher,

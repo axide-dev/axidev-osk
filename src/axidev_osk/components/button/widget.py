@@ -10,12 +10,12 @@ from PySide6.QtWidgets import QPushButton, QWidget
 
 from ..mouse_buttons import MOUSE_BUTTONS, mouse_button_name
 
-_PRESSING = (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton)
-"""Buttons that press the widget as the left button does; ``pressed_with`` still names them."""
+_PRESSING = tuple(button for button in MOUSE_BUTTONS if button != Qt.MouseButton.LeftButton)
+"""Every other named mouse button presses the widget as the left button does; ``pressed_with`` still names it."""
 
 
 class Button(QPushButton):
-    """Application button that the left, right, and middle mouse buttons all press.
+    """Application button that every named mouse button presses: left, right, middle, back, and forward.
 
     It decides nothing about what each mouse button means: ``pressed_with``
     names the one behind the current press, the node reports it with

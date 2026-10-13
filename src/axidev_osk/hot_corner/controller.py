@@ -1,9 +1,17 @@
-"""Hot-corner dwell trigger that emits runtime events.
+"""Hot-corner sensing, and the built-in rest-then-fire trigger, reported as runtime events.
 
 A profile's ``hot_corners`` attachment configures which corners are
-watched and how the indicator looks. A completed dwell reaches profiles as
-``hot_corner.triggered`` through the runtime queue; the controller only
-drives its own sensors and indicator overlays.
+watched and how the indicator looks. The pointer reaching and leaving a
+watched corner is reported as ``hot_corner.entered`` and ``hot_corner.left``.
+With ``fires_on_rest``, the built-in trigger also reports
+``hot_corner.triggered`` once the pointer rested there for ``dwell_ms``,
+showing its progress on the indicator; a profile can turn it off and decide
+from the entered and left reports instead. The controller only drives its own
+sensors and indicator overlays.
+
+Sensing is a built-in because only the engine can watch screen corners on
+every platform: on Wayland a client cannot read the pointer outside its own
+surfaces, so each corner gets a small layer-shell sensor surface.
 
 Internally, the controller picks one of two strategies based on the
 detected overlay backend:
@@ -38,7 +46,7 @@ from ..platform.layer_shell import (
     attach_wayland_layer_shell,
 )
 from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
-from ..runtime.app_messages import hot_corner_triggered
+from ..runtime.app_messages import hot_corner_entered, hot_corner_left, hot_corner_triggered
 from ..runtime.dispatcher import Dispatcher
 
 
@@ -299,28 +307,31 @@ class HotCornerIndicator(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        bounds = QRectF(6, 6, self.width() - 12, self.height() - 12)
-        center_bounds = QRectF(16, 16, self.width() - 32, self.height() - 32)
-        shell_fill = QColor(self._config.indicator_background)
-        shell_fill.setAlpha(220)
-        shell_edge = QColor(self._config.indicator_track)
-        shell_edge.setAlpha(180)
-        active_edge = QColor(self._config.indicator_progress)
-        active_edge.setAlpha(235)
-        active_fill = QColor(self._config.indicator_center)
-        active_fill.setAlpha(105 + int(90 * self._progress))
+        config = self._config
+        whole = QRectF(self.rect())
+        disc = config.indicator_disc_inset_px
+        ring = config.indicator_ring_inset_px
+        center = config.indicator_center_inset_px
+        bounds = whole.adjusted(ring, ring, -ring, -ring)
+        center_bounds = whole.adjusted(center, center, -center, -center)
+        shell_fill = QColor(config.indicator_background)
+        shell_edge = QColor(config.indicator_track)
+        active_edge = QColor(config.indicator_progress)
+        active_fill = QColor(config.indicator_center)
+        start = config.indicator_center_start_opacity
+        active_fill.setAlpha(round(active_fill.alpha() * (start + (1 - start) * self._progress)))
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(shell_fill)
-        painter.drawEllipse(QRectF(2, 2, self.width() - 4, self.height() - 4))
+        painter.drawEllipse(whole.adjusted(disc, disc, -disc, -disc))
 
-        track_pen = QPen(shell_edge, 4)
+        track_pen = QPen(shell_edge, config.indicator_track_width_px)
         track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(track_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(bounds)
 
-        progress_pen = QPen(active_edge, 5)
+        progress_pen = QPen(active_edge, config.indicator_progress_width_px)
         progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(progress_pen)
         painter.drawArc(bounds, 90 * 16, int(-360 * self._progress * 16))
@@ -456,15 +467,24 @@ class HotCornerWindowToggleController(QObject):
         corner = self._detect_corner(cursor_pos)
         if corner is None:
             self._indicator.hide()
+            if self._active_corner is not None:
+                self._dispatcher.post(hot_corner_left(self._active_corner.value))
             self._reset_corner_tracking()
             return
 
         now = time.monotonic()
         if corner != self._active_corner:
+            if self._active_corner is not None:
+                self._dispatcher.post(hot_corner_left(self._active_corner.value))
+            self._dispatcher.post(hot_corner_entered(corner.value))
             self._active_corner = corner
             self._entered_at = now
             self._triggered_corner = None
-            self._show_indicator(corner, cursor_pos, 0.0)
+            if self._config.fires_on_rest:
+                self._show_indicator(corner, cursor_pos, 0.0)
+            return
+
+        if not self._config.fires_on_rest:
             return
 
         if self._triggered_corner == corner:
@@ -482,7 +502,7 @@ class HotCornerWindowToggleController(QObject):
         self._emit_hot_corner_triggered(corner)
 
     def _poll_active_sensor(self) -> None:
-        if self._active_corner is None or self._active_screen is None:
+        if self._active_corner is None or self._active_screen is None or not self._config.fires_on_rest:
             self._indicator.hide()
             return
 
@@ -664,14 +684,17 @@ class HotCornerWindowToggleController(QObject):
         if self._triggered_corner == handle.corner and self._active_screen is handle.screen:
             return
 
+        self._dispatcher.post(hot_corner_entered(handle.corner.value))
         self._active_corner = handle.corner
         self._active_screen = handle.screen
         self._entered_at = time.monotonic()
         self._triggered_corner = None
-        self._show_indicator_for_screen(handle.corner, handle.screen, 0.0)
+        if self._config.fires_on_rest:
+            self._show_indicator_for_screen(handle.corner, handle.screen, 0.0)
 
     def _sensor_left(self, handle: HotCornerSensorHandle) -> None:
         if self._active_corner != handle.corner or self._active_screen is not handle.screen:
             return
+        self._dispatcher.post(hot_corner_left(handle.corner.value))
         self._indicator.hide()
         self._reset_corner_tracking()

@@ -7,12 +7,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QPushButton, QWidget
 
-from axidev_osk.components.pointer_locator import (
-    PointerLocator,
-    _build_proximity_graph,
-    build_component_palette,
-    gaussian_opacity,
-)
+from axidev_osk.components.pointer_locator import PointerLocator, gaussian_opacity
 from axidev_osk.config.models import PointerLocatorConfig
 from support import qt_app
 
@@ -75,48 +70,6 @@ class PointerLocatorPaletteTests(unittest.TestCase):
         self.assertAlmostEqual(halfway, 0.19, delta=0.01)
         self.assertEqual(edge, 0)
 
-    def test_component_palette_is_deterministic_distinct_and_vivid(self) -> None:
-        rectangles = tuple(QRect(column * 52, row * 52, 48, 48) for row in range(3) for column in range(4))
-
-        first = build_component_palette(rectangles)
-        second = build_component_palette(rectangles)
-        graph = _build_proximity_graph(rectangles)
-
-        self.assertEqual(first, second)
-        for color in first:
-            self.assertAlmostEqual(color.hsvSaturationF(), 1.0)
-            self.assertGreaterEqual(color.valueF(), 0.69)
-        for index, neighbors in enumerate(graph):
-            for neighbor in neighbors:
-                self.assertNotEqual(first[index], first[neighbor])
-
-        for row in range(3):
-            for column in range(4):
-                hue = first[row * 4 + column].hsvHueF() * 360
-                if (row + column) % 2 == 0:
-                    self.assertTrue(hue >= 329.9 or hue <= 60.1)
-                else:
-                    self.assertTrue(149.9 <= hue <= 270.1)
-
-    def test_nearby_components_receive_different_colors(self) -> None:
-        rectangles = (
-            QRect(0, 0, 48, 48),
-            QRect(52, 0, 48, 48),
-            QRect(104, 0, 48, 48),
-        )
-
-        colors = build_component_palette(rectangles)
-
-        self.assertEqual(len({color.name() for color in colors}), 3)
-
-    def test_distant_components_still_alternate_temperature(self) -> None:
-        colors = build_component_palette((QRect(0, 0, 48, 48), QRect(1000, 0, 48, 48)))
-
-        first_hue = colors[0].hsvHueF() * 360
-        second_hue = colors[1].hsvHueF() * 360
-        self.assertTrue(first_hue >= 329.9 or first_hue <= 60.1)
-        self.assertTrue(149.9 <= second_hue <= 270.1)
-
 
 class PointerLocatorWidgetTests(unittest.TestCase):
     def test_glow_tracks_pointer_inside_host_and_hides_outside(self) -> None:
@@ -149,15 +102,15 @@ class PointerLocatorWidgetTests(unittest.TestCase):
 
         self.assertFalse(locator.isVisible())
 
-    def test_glow_uses_button_colors_and_a_muted_gap_color(self) -> None:
+    def test_glow_takes_each_widgets_locator_color_and_the_gap_color_elsewhere(self) -> None:
         app = qt_app()
         host = QWidget()
         host.resize(220, 80)
         left = QPushButton("Left", host)
-        left.setProperty("componentType", "button")
+        left.setProperty("locatorColor", "#ff0000")
         left.setGeometry(10, 10, 90, 60)
         right = QPushButton("Right", host)
-        right.setProperty("componentType", "button")
+        right.setProperty("locatorColor", "#0000ff")
         right.setGeometry(120, 10, 90, 60)
         host.show()
         app.processEvents()
@@ -165,22 +118,16 @@ class PointerLocatorWidgetTests(unittest.TestCase):
         self.addCleanup(host.close)
 
         locator.update_from_global_position(host.mapToGlobal(QPoint(20, 40)))
-        left_color = locator.current_color
-        locator.update_from_global_position(host.mapToGlobal(QPoint(90, 40)))
-        self.assertEqual(locator.current_color, left_color)
-
+        self.assertEqual(locator.current_color.name(), "#ff0000")
         locator.update_from_global_position(host.mapToGlobal(QPoint(190, 40)))
-        self.assertNotEqual(locator.current_color, left_color)
+        self.assertEqual(locator.current_color.name(), "#0000ff")
+        locator.update_from_global_position(host.mapToGlobal(QPoint(105, 40)))
+        self.assertEqual(locator.current_color.name(), "#242424")
 
         right.hide()
         app.processEvents()
         locator.update_from_global_position(host.mapToGlobal(QPoint(190, 40)))
-        self.assertLess(locator.current_color.hsvSaturationF(), 0.1)
-
-        locator.update_from_global_position(host.mapToGlobal(QPoint(105, 40)))
-        self.assertNotEqual(locator.current_color, left_color)
-        self.assertLess(locator.current_color.hsvSaturationF(), 0.1)
-        self.assertLess(locator.current_color.valueF(), 0.2)
+        self.assertEqual(locator.current_color.name(), "#242424")
 
     def test_stale_wayland_position_cannot_restore_glow_after_leave(self) -> None:
         app = qt_app()

@@ -4,7 +4,9 @@ A node kind declares everything about one widget type in one place: its
 callback fields and events, how its fixed fields and its values decode, how it
 builds a widget, and how a set of values is applied to that widget. Any value
 may be a binding; the builder decodes a node's values again whenever the state
-they read changes and hands the kind the new values with the previous ones.
+they read changes and hands the kind the new values with the previous ones. The
+builder also reports where a node built with ``report_geometry`` sits in its
+window.
 """
 
 from __future__ import annotations
@@ -13,15 +15,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint
+from PySide6.QtWidgets import QMainWindow, QWidget
 
 from ..config.profile import NodeConfig, NodeValues, StyleConfig
 from ..config.reader import ConfigReader
 from ..kind_registry import KindRegistry
 from ..messages import DataMap, DataValue, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
+from ..runtime.engine_messages import node_geometry_changed
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
-from .pointer import PointerReporter
+from .pointer import HoverReporter, PointerReporter, WheelReporter
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher, Unsubscribe
@@ -149,6 +153,12 @@ class NodeBuilder:
         if node.reports_pointer:
             # Built after the kind, so the reporter also watches the children the kind built.
             PointerReporter(node.id, widget, self._dispatcher)
+        if node.reports_hover:
+            HoverReporter(node.id, widget, self._dispatcher)
+        if node.reports_wheel:
+            WheelReporter(node.id, widget, self._dispatcher)
+        if node.report_geometry:
+            _GeometryReporter(node.id, widget, self._dispatcher)
 
         def apply(values: NodeValues, previous: NodeValues | None) -> None:
             apply_style(widget, values.style, previous.style if previous is not None else None)
@@ -162,6 +172,60 @@ class NodeBuilder:
 
         decoder = self._kinds.event_decoder(event_name)
         self._dispatcher.post(validated_event(event_name, {"node": node_id, **fields}, decoder))
+
+
+class _GeometryReporter(QObject):
+    """Post ``node.geometry_changed`` whenever a node's place in its window's content changes.
+
+    A node also moves in its window when an ancestor moves or resizes, so once
+    the node is shown, its ancestors are watched too.
+    """
+
+    _CHANGES = {QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show}
+
+    def __init__(self, node_id: str, widget: QWidget, dispatcher: "Dispatcher") -> None:
+        super().__init__(widget)
+        self._node_id = node_id
+        self._widget = widget
+        self._dispatcher = dispatcher
+        self._watched: set[int] = {id(widget)}
+        self._last: tuple[int, int, int, int] | None = None
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if event.type() in self._CHANGES:
+            self._watch_ancestors()
+            self._report()
+        return False
+
+    def _watch_ancestors(self) -> None:
+        parent = self._widget.parentWidget()
+        while parent is not None:
+            if id(parent) not in self._watched:
+                self._watched.add(id(parent))
+                parent.installEventFilter(self)
+            parent = parent.parentWidget()
+
+    def _report(self) -> None:
+        widget = self._widget
+        content = _window_content(widget)
+        corner = widget.mapTo(content, QPoint()) if content is not widget else QPoint()
+        geometry = (corner.x(), corner.y(), widget.width(), widget.height())
+        if geometry == self._last:
+            return
+        self._last = geometry
+        # Posted, so bindings reading the geometry never run inside this Qt event.
+        self._dispatcher.post(node_geometry_changed(self._node_id, *geometry))
+
+
+def _window_content(widget: QWidget) -> QWidget:
+    """The widget a node's position is measured from: its window's content, or the window itself."""
+
+    window = widget.window()
+    content = window.centralWidget() if isinstance(window, QMainWindow) else None
+    if content is not None and (content is widget or content.isAncestorOf(widget)):
+        return content
+    return window
 
 
 def apply_style(widget: QWidget, style: StyleConfig, previous: StyleConfig | None = None) -> None:
