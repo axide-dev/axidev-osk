@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from ..components.button.widget import Button
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
+from ..widget_properties import COMPONENT_ID
 from .registry import NodeBuilder, NodeKind, NodeKindRegistry
 
 BUTTON_PRESSED = "button.pressed"
@@ -397,7 +398,7 @@ def _apply_stack(widget: QWidget, options: object, previous: object | None) -> N
         for index in range(widget.count()):
             page = widget.widget(index)
             # The decoder checked that ``current`` names a page.
-            if page is not None and page.property("componentId") == options.current:
+            if page is not None and page.property(COMPONENT_ID) == options.current:
                 widget.setCurrentWidget(page)
                 break
     if old is None or options.visible != old.visible:

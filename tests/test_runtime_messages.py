@@ -7,6 +7,8 @@ from axidev_osk.messages import DataMap, MessageResult, RuntimeAction, RuntimeEv
 from axidev_osk.runtime.app_messages import window_move_by, window_show
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments, Dispatcher
 
+from support import has_pending
+
 
 def _identity(arguments: DataMap) -> DataMap:
     return arguments
@@ -98,7 +100,7 @@ class RuntimeMessageTests(unittest.TestCase):
             dispatcher.dispatch(RuntimeAction("test.step", {"name": "later"}))
 
         self.assertEqual(order, ["close"])
-        self.assertFalse(dispatcher.has_pending())
+        self.assertFalse(has_pending(dispatcher))
 
     def test_handler_results_keep_fifo_order(self) -> None:
         dispatcher = Dispatcher()
@@ -269,7 +271,7 @@ class RuntimeMessageTests(unittest.TestCase):
         )
 
         self.assertEqual(order, ["plain", "idle-a", "after-a", "idle-b"])
-        self.assertFalse(dispatcher.has_pending())
+        self.assertFalse(has_pending(dispatcher))
 
     def test_idle_actions_wait_for_messages_from_other_threads(self) -> None:
         dispatcher = Dispatcher()

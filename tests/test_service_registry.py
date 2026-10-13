@@ -6,11 +6,10 @@ from unittest.mock import patch
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.registries import ServiceRegistry
-from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.services import register_services
 from axidev_osk.services.displays import DisplayService
 from axidev_osk.services.keyboard import KeyboardService
-from support import RecordingBackend, qt_app
+from support import RecordingBackend, make_test_engine, qt_app
 
 
 class RecordingService:

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from PySide6.QtWidgets import QWidget
-
 from ..messages import MessageResult
 from .app_messages import (
     DISPLAY_CONFIGURATION_CHANGED,
@@ -29,14 +27,23 @@ from .app_messages import (
     window_move_by,
 )
 from .decoding import EmptyArguments
+from .dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
     from .window_manager import WindowManager
 
 
-def register_window_actions(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
-    """Register the window actions profiles send, routed to the window manager."""
+def register_window_actions(
+    dispatcher: "Dispatcher",
+    windows: "WindowManager",
+    relative_pointer: "RelativePointer | None",
+) -> None:
+    """Register the window actions profiles send, routed to the window manager.
+
+    A moved layer-shell surface is committed through the relative-pointer
+    service in the same step, so a move is visible at once.
+    """
 
     def show(arguments: WindowArguments) -> MessageResult:
         windows.show(arguments.window_id)
@@ -50,9 +57,19 @@ def register_window_actions(dispatcher: "Dispatcher", windows: "WindowManager") 
         windows.close(arguments.window_id)
         return []
 
+    def move_by(arguments: WindowMoveByArguments) -> MessageResult:
+        window = windows.get(arguments.window_id)
+        if window is None:
+            return []
+        windows.move_by(arguments.window_id, arguments.dx, arguments.dy)
+        if relative_pointer is not None:
+            relative_pointer.commit_surface(int(window.winId()))
+        return []
+
     dispatcher.register_action(WINDOW_SHOW, decode_window, show)
     dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
     dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
+    dispatcher.register_action(WINDOW_MOVE_BY, decode_window_move_by, move_by)
 
 
 def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
@@ -92,10 +109,10 @@ class PointerDragRouter:
         return self._window_id
 
     def register(self, dispatcher: "Dispatcher") -> None:
-        dispatcher.register_action(WINDOW_MOVE_BY, decode_window_move_by, self._move_by)
         dispatcher.add_event_handler(WINDOW_DRAG_STARTED, self._drag_started)
         dispatcher.add_event_handler(WINDOW_DRAG_ENDED, self._drag_ended)
         dispatcher.add_event_handler(POINTER_MOTION_OBSERVED, self._motion_observed)
+        dispatcher.add_event_handler(ACTION_FAILED, self._action_failed)
 
     def _drag_started(self, event: WindowArguments) -> MessageResult:
         if self._window_id is not None:
@@ -129,19 +146,11 @@ class PointerDragRouter:
             return []
         return [window_move_by(window_id, dx, dy)]
 
-    def _move_by(self, arguments: WindowMoveByArguments) -> MessageResult:
-        """Move one managed window, then commit its surface in the same step."""
+    def _action_failed(self, event: ActionFailedArguments) -> MessageResult:
+        """Stop the drag when moving the dragged window fails."""
 
-        window = self._windows.get(arguments.window_id)
-        if window is None:
-            return []
-        try:
-            self._windows.move_by(arguments.window_id, arguments.dx, arguments.dy)
-            self._commit_surface(window)
-        except Exception:
-            if self._window_id == arguments.window_id:
-                self._stop()
-            raise
+        if event.action == WINDOW_MOVE_BY and event.arguments.get("window") == self._window_id:
+            self._stop()
         return []
 
     def _stop(self) -> None:
@@ -158,9 +167,3 @@ class PointerDragRouter:
             self._relative_pointer.begin_drag()
         else:
             self._relative_pointer.end_drag()
-
-    def _commit_surface(self, window: QWidget) -> None:
-        """Commit a moved layer-shell surface through the relative-pointer service."""
-
-        if self._relative_pointer is not None:
-            self._relative_pointer.commit_surface(int(window.winId()))

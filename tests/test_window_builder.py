@@ -21,11 +21,10 @@ from axidev_osk.runtime.app_messages import (
 )
 from axidev_osk.runtime.engine import Engine
 from axidev_osk.runtime.profile_runtime import state_set
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
-from support import FakeOverlay, RecordingBackend, qt_app
+from support import FakeOverlay, RecordingBackend, make_test_engine, qt_app, start_test_profile
 
 _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
 
@@ -76,7 +75,7 @@ class WindowHarness:
         qt_app()
         self.engine: Engine = make_test_engine(RecordingBackend())
         self.built: dict[str, RuntimeWindow] = {}
-        self.attachments = AttachmentRuntime(self.engine.bindings, window_lookup=self.built.get)
+        self.attachments = AttachmentRuntime(self.engine.bindings, self.engine.attachments, window_lookup=self.built.get)
         self.profile: ProfileConfig = start_test_profile(self.engine, _root(attachments, windows, state, **window_fields))
         self.attachments.start(self.profile)
 
@@ -203,6 +202,8 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         assert title_bar is not None
         title_bar.dragStarted.emit()
         title_bar.dragEnded.emit()
+        self.assertEqual(events, [])
+        harness.engine.dispatcher.process_pending()
 
         self.assertEqual(
             events,

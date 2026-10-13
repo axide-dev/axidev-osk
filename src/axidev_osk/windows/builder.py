@@ -16,6 +16,7 @@ from ..config.profile import Live, WindowConfig, WindowValues
 from ..nodes import apply_style
 from ..runtime.app_messages import window_close_requested, window_drag_ended, window_drag_started
 from ..runtime.engine_messages import window_state_changed
+from ..widget_properties import COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
 from .dwell_click import DwellClickController
 from .opacity import WindowOpacityController
@@ -53,7 +54,7 @@ class _WindowInputBlocker(QObject):
 
         current: QWidget | None = watched
         while current is not None:
-            if current.property("passesInputBlock"):
+            if current.property(PASSES_INPUT_BLOCK):
                 return False
             if current is self._window:
                 break
@@ -100,8 +101,8 @@ class RuntimeWindow(QMainWindow):
         self._chrome_widgets: OverlayChromeWidgets | None = None
         self._dwell_click: DwellClickController | None = None
         self._pointer_locators: dict[str, PointerLocator] = {}
-        self.setProperty("componentType", "window")
-        self.setProperty("componentId", window_id)
+        self.setProperty(COMPONENT_TYPE, "window")
+        self.setProperty(COMPONENT_ID, window_id)
         self.setWindowTitle(values.initial.title)
 
         if overlay.always_on_top:
@@ -122,12 +123,12 @@ class RuntimeWindow(QMainWindow):
                         on_resize=self._overlay.resize_by,
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
-                            lambda: engine.dispatcher.dispatch(window_drag_started(window_id))
+                            lambda: engine.dispatcher.post(window_drag_started(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
                         on_drag_ended=(
-                            lambda: engine.dispatcher.dispatch(window_drag_ended(window_id))
+                            lambda: engine.dispatcher.post(window_drag_ended(window_id))
                         )
                         if use_runtime_drag_motion
                         else None,
@@ -341,8 +342,8 @@ def build_profile_window(
     def build_content() -> QWidget:
         surface = RootSurface()
         surface.setObjectName("rootSurface")
-        surface.setProperty("componentType", "surface")
-        surface.setProperty("componentId", config.id)
+        surface.setProperty(COMPONENT_TYPE, "surface")
+        surface.setProperty(COMPONENT_ID, config.id)
         surface.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(0, 0, 0, 0)

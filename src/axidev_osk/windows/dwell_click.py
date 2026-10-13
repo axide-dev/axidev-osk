@@ -26,6 +26,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
 
 from ..config.models import DwellClickConfig
+from ..widget_properties import COMPONENT_TYPE
 
 _POLL_INTERVAL_MS = 16
 _INDICATOR_SIZE_PX = 30
@@ -64,7 +65,7 @@ class _DwellFadeFeedback(QWidget):
         self._opacity = 0.0
         self._color_role = color_role
         self.setObjectName(object_name)
-        self.setProperty("componentType", component_type)
+        self.setProperty(COMPONENT_TYPE, component_type)
         self.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
@@ -118,7 +119,7 @@ class DwellClickIndicator(QWidget):
         self._progress = 0.0
         self._visible_from_progress = visible_from_progress
         self.setObjectName("dwellClickIndicator")
-        self.setProperty("componentType", "dwell-click-indicator")
+        self.setProperty(COMPONENT_TYPE, "dwell-click-indicator")
         self.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,

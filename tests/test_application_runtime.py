@@ -32,7 +32,7 @@ from axidev_osk.runtime.engine_messages import keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
-from support import RecordingBackend, qt_app
+from support import RecordingBackend, has_pending, qt_app
 
 _KEYBOARD_WINDOW = "keyboard"
 
@@ -410,7 +410,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         exit_app.assert_called_once_with(0)
         self.assertEqual(len(reopened), 1)
         self.assertEqual(runtime._window_manager.all_windows(), [])
-        self.assertFalse(dispatcher.has_pending())
+        self.assertFalse(has_pending(dispatcher))
 
     def test_profile_without_close_handler_closes_only_that_window_while_another_is_visible(self) -> None:
         root = axidev_osk.config(

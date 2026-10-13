@@ -1,11 +1,9 @@
 """Hot-corner dwell trigger that emits runtime events.
 
-TEMPORARY: this subsystem currently lives outside the main runtime
-event/action queue and talks to its own overlays directly. It is
-intentionally kept self-contained so it can be ported to per-corner
-events through the central runtime queue later (see issue #8). New
-features should not extend this controller — add them through the
-queue instead.
+A profile's ``hot_corners`` attachment configures which corners are
+watched and how the indicator looks. A completed dwell reaches profiles as
+``hot_corner.triggered`` through the runtime queue; the controller only
+drives its own sensors and indicator overlays.
 
 Internally, the controller picks one of two strategies based on the
 detected overlay backend:

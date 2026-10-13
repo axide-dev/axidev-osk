@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QCursor, QPaintEvent, QPainter, QRadialGradien
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import PointerLocatorConfig
+from ..widget_properties import COMPONENT_ID, COMPONENT_TYPE, POINTER_LOCATOR_ENABLED
 from ..windows.surface import RootSurface
 
 _GRADIENT_SEGMENTS = 32
@@ -18,7 +19,7 @@ _GRADIENT_SEGMENTS = 32
 def install_pointer_locator(host: RootSurface, settings: PointerLocatorConfig) -> "PointerLocator":
     """Install pointer feedback behind a root surface's content."""
 
-    host.setProperty("pointerLocatorEnabled", True)
+    host.setProperty(POINTER_LOCATOR_ENABLED, True)
     locator = PointerLocator(settings, host)
     host.install_background_component(locator)
     return locator
@@ -161,8 +162,8 @@ class PointerLocator(QWidget):
         self._color_target_signature: tuple[tuple[int, int, int, int, int], ...] = ()
 
         self.setObjectName("pointerLocator")
-        self.setProperty("componentType", "pointer-locator")
-        self.setProperty("componentId", config.id)
+        self.setProperty(COMPONENT_TYPE, "pointer-locator")
+        self.setProperty(COMPONENT_ID, config.id)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setGeometry(parent.rect())
@@ -242,7 +243,7 @@ class PointerLocator(QWidget):
         widgets = [
             widget
             for widget in self._host.findChildren(QWidget)
-            if widget.property("componentType") == "button" and widget.isVisibleTo(self._host)
+            if widget.property(COMPONENT_TYPE) == "button" and widget.isVisibleTo(self._host)
         ]
         positioned = [
             (

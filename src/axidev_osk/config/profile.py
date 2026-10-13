@@ -29,6 +29,7 @@ from typing import Generic, Protocol, TypeVar
 
 from ..function_registry import FunctionRef, FunctionRegistry
 from ..messages import DataMap
+from ..widget_properties import ENGINE_WIDGET_PROPERTIES
 from .models import AlwaysOnTopWindowConfig, ChromeConfig, OverlayConfig, OverlayPlacement
 from .reader import ConfigError, ConfigReader, Resolver
 from .variables import StatePath, Variable, VariableError, decode_state
@@ -98,12 +99,6 @@ class AttachmentKindSpec(Protocol):
     def decode_options(self, reader: ConfigReader, /) -> object: ...
 
 
-ENGINE_WIDGET_PROPERTIES = frozenset(
-    {"componentType", "componentId", "classes", "pointerLocatorEnabled", "passesInputBlock"}
-)
-"""Widget properties the engine sets on windows and nodes, which a profile style cannot set."""
-
-
 @dataclass(frozen=True, slots=True)
 class StyleConfig:
     object_name: str | None = None
@@ -138,12 +133,6 @@ class NodeConfig:
     structure: object = None
     placement: object = None
     passes_input_block: bool = False
-
-    @property
-    def options(self) -> object:
-        """The kind's options as decoded from default state."""
-
-        return self.values.initial.options
 
     def walk(self) -> "list[NodeConfig]":
         nodes: list[NodeConfig] = [self]
@@ -188,10 +177,6 @@ class AttachmentConfig:
     id: str
     target: str | None
     values: Live[object]
-
-    @property
-    def options(self) -> object:
-        return self.values.initial
 
 
 PALETTE_ROLES = frozenset(
@@ -473,7 +458,8 @@ def _decode_theme(reader: ConfigReader) -> ThemeConfig:
 def _decode_palette(reader: ConfigReader) -> dict[str, str]:
     """Read colors by palette role; ``finish`` rejects a role name Qt does not have."""
 
-    return {role: reader.color(role) for role in sorted(PALETTE_ROLES) if reader.has(role)}
+    colors = {role: reader.optional_color(role) for role in sorted(PALETTE_ROLES)}
+    return {role: color for role, color in colors.items() if color is not None}
 
 
 def _decode_font(reader: ConfigReader) -> FontConfig:

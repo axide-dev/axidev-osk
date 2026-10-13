@@ -1,29 +1,34 @@
-"""Shared test doubles and helpers: the Qt application, a recording keyboard backend, an overlay, window building, and app-action recorders."""
+"""Shared test doubles and helpers: the Qt application, a recording keyboard backend, an overlay, window building, app-action recorders, and a real engine around a fake keyboard backend."""
 
 from __future__ import annotations
 
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication, QWidget
 
 from axidev_osk.attachments.runtime import WindowAttachments
 from axidev_osk.config.models import HotCornerConfig
-from axidev_osk.config.profile import WindowConfig
+from axidev_osk.config.profile import ProfileConfig, WindowConfig
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import (
     APP_QUIT,
     LINUX_OPEN_PERMISSION_SETUP,
     WINDOW_CLOSE,
     WINDOW_HIDE,
+    WINDOW_MOVE_BY,
     WINDOW_SHOW,
     decode_app_quit,
     decode_window,
+    decode_window_move_by,
 )
 from axidev_osk.runtime.decoding import decode_empty
-from axidev_osk.runtime.engine import Engine
 from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.runtime.engine import Engine, build_engine
+from axidev_osk.runtime.qt_wake import QtDispatcherWake
+from axidev_osk.services.keyboard import KeyboardService
 from axidev_osk.services.keyboard.io import KeyPressHandle
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 
@@ -31,6 +36,7 @@ _APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
     WINDOW_SHOW: decode_window,
     WINDOW_HIDE: decode_window,
     WINDOW_CLOSE: decode_window,
+    WINDOW_MOVE_BY: decode_window_move_by,
     APP_QUIT: decode_app_quit,
     LINUX_OPEN_PERMISSION_SETUP: decode_empty,
 }
@@ -183,3 +189,55 @@ def record_app_actions(dispatcher: Dispatcher) -> list[tuple[str, DataMap]]:
         decode, record = recorder(name, decoder)
         dispatcher.register_action(name, decode, record)
     return recorded
+
+
+class RecordingProcesses:
+    """Process effects that record spawn requests instead of starting programs."""
+
+    def __init__(self) -> None:
+        self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
+
+    def spawn(self, argv: tuple[str, ...], tag: str, detached: bool) -> None:
+        self.spawned.append((argv, tag, detached))
+
+
+def make_test_engine(keyboard_backend: Any) -> Engine:
+    """Build an engine whose keyboard service wraps a test keyboard backend.
+
+    The dispatcher has every built-in event, the engine actions, node kinds,
+    and attachment kinds registered; the window and app actions belong to
+    ``ApplicationRuntime``.
+    """
+
+    return make_keyboard_test_engine(keyboard_backend)[0]
+
+
+def make_keyboard_test_engine(keyboard_backend: Any) -> tuple[Engine, KeyboardService]:
+    """Build a test engine and return the keyboard service it sends key effects to.
+
+    The service is bound to the dispatcher but not started, so tests decide
+    when output initializes.
+    """
+
+    dispatcher = Dispatcher()
+    # Kept alive by the dispatcher's wake callback, like the app's own wake.
+    QtDispatcherWake(dispatcher)
+    keyboard = KeyboardService(cast(Any, keyboard_backend))
+    engine = build_engine(dispatcher, keyboard=keyboard, processes=RecordingProcesses())
+    keyboard.bind_dispatcher(dispatcher)
+    return engine, keyboard
+
+
+def start_test_profile(engine: Engine, root_config: Mapping[str, Any]) -> ProfileConfig:
+    """Decode ``root_config`` with ``engine`` and start its active profile."""
+
+    profile = engine.decoder().decode_root(root_config)
+    engine.profile.start(profile)
+    return profile
+
+
+def has_pending(dispatcher: Dispatcher) -> bool:
+    """Whether any message is waiting in the dispatcher's queue, inbox, or idle actions."""
+
+    with dispatcher._inbox_lock:
+        return bool(dispatcher._queue or dispatcher._inbox or dispatcher._idle)

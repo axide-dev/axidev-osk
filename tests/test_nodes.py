@@ -16,8 +16,7 @@ from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.engine_messages import keyboard_status_changed
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
-from support import RecordingBackend, build_window, find_node, qt_app
+from support import RecordingBackend, build_window, find_node, make_test_engine, qt_app, start_test_profile
 
 
 def _button(node_id: str, **fields: object) -> dict[str, object]:
@@ -169,6 +168,7 @@ class NodeTests(unittest.TestCase):
         QTest.mouseClick(cow, Qt.MouseButton.LeftButton)
         QTest.mouseClick(cow, Qt.MouseButton.RightButton)
         QTest.mouseClick(self._find(window, "quiet"), Qt.MouseButton.LeftButton)
+        self.engine.dispatcher.process_pending()
 
         self.assertEqual(self.pressed, [{"node": "cow"}, {"node": "cow"}])
         self.assertEqual(cow.text(), "Moo 2")  # type: ignore[attr-defined]
@@ -211,6 +211,18 @@ class NodeTests(unittest.TestCase):
         self.engine.dispatcher.dispatch(state_set("alert", True), state_set("level", 2))
 
         self.assertEqual((status.property("classes"), status.property("level")), (["warning"], 2))
+
+    def test_a_style_property_changing_from_true_to_1_is_applied(self) -> None:
+        profile = self._profile(
+            {"kind": "label", "id": "status", "text": "Status",
+             "style": lambda s: {"properties": {"flag": True if s.mode == "a" else 1}}},
+            state={"mode": axidev_osk.var("string", "a")},
+        )
+        status = self._find(self._window(profile), "status")
+
+        self.engine.dispatcher.dispatch(state_set("mode", "b"))
+
+        self.assertIs(type(status.property("flag")), int)
 
     def test_a_stack_page_that_does_not_exist_is_reported(self) -> None:
         failures: list[DataMap] = []

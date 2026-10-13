@@ -143,6 +143,17 @@ class ConfigReader:
         """Read a ``#RRGGBB`` or ``#AARRGGBB`` color."""
 
         value = self.raw(key, default)
+        return self._checked_color(key, value)
+
+    def optional_color(self, key: str) -> str | None:
+        """Read a color that may be absent, whether written as ``None`` or returned as ``None`` by a binding."""
+
+        value = self.raw(key, None)
+        if value is None:
+            return None
+        return self._checked_color(key, value)
+
+    def _checked_color(self, key: str, value: object) -> str:
         if not isinstance(value, str) or not _COLOR.fullmatch(value):
             raise ConfigError(f"{self.field_path(key)} must be a color like #RRGGBB or #AARRGGBB")
         return value

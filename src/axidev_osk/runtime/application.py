@@ -96,6 +96,7 @@ class ApplicationRuntime:
         hot_corners = self._services.find("hot_corner")
         self._attachments = AttachmentRuntime(
             engine.bindings,
+            engine.attachments,
             window_lookup=lambda window_id: self._window_manager.get(window_id),
             hot_corners=hot_corners if isinstance(hot_corners, HotCornerService) else None,
         )
@@ -111,10 +112,10 @@ class ApplicationRuntime:
             ask_to_quit=self._ask_to_quit if asks else None,
             parent=app,
         )
-        register_window_actions(self._dispatcher, self._window_manager)
+        relative_pointer = cast("RelativePointer | None", self._services.find("wayland_relative_pointer"))
+        register_window_actions(self._dispatcher, self._window_manager, relative_pointer)
         register_display_recovery(self._dispatcher, self._window_manager)
-        relative_pointer = self._services.find("wayland_relative_pointer")
-        self._pointer_drag = PointerDragRouter(self._window_manager, cast("RelativePointer | None", relative_pointer))
+        self._pointer_drag = PointerDragRouter(self._window_manager, relative_pointer)
         self._pointer_drag.register(self._dispatcher)
         self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit, when_idle=True)
         self._dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel)

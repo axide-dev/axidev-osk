@@ -10,9 +10,8 @@ from PySide6.QtWidgets import QApplication
 from axidev_osk.components.button import Button
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.windows.chrome import OverlayTitleBar
-from support import RecordingBackend, build_window, find_node, qt_app
+from support import RecordingBackend, build_window, find_node, make_test_engine, qt_app, start_test_profile
 
 
 class ButtonTests(unittest.TestCase):
@@ -80,6 +79,8 @@ class ButtonTests(unittest.TestCase):
         window.show()
 
         QTest.mouseClick(find_node(window, "moo"), Qt.MouseButton.RightButton)
+        self.assertEqual(events, [])
+        engine.dispatcher.process_pending()
 
         self.assertEqual(events, [(BUTTON_PRESSED, {"node": "moo"}), (BUTTON_RELEASED, {"node": "moo"})])
 

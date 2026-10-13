@@ -11,9 +11,8 @@ from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, Sc
 from axidev_osk.hot_corner.service import HotCornerService
 from axidev_osk.messages import MessageResult
 from axidev_osk.runtime.app_messages import HOT_CORNER_TRIGGERED, HotCornerTriggeredArguments, display_configuration_changed
-from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.windows.overlay.always_on_top import OverlayBackend
-from support import RecordingBackend, hot_corner_config
+from support import RecordingBackend, hot_corner_config, make_test_engine
 
 
 class FakeOverlayController:

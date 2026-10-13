@@ -20,8 +20,7 @@ from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_d
 from axidev_osk.python_defaults.axidev_osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
-from support import RecordingBackend, build_window, nodes_by_id, qt_app, record_app_actions
+from support import RecordingBackend, build_window, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
 
 _MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "SuperRight", "AltLeft", "AltRight"}
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
@@ -39,7 +38,7 @@ class DefaultProfileHarness:
         self.backend = RecordingBackend()
         self.engine = make_test_engine(self.backend)
         self.actions = record_app_actions(self.engine.dispatcher)
-        self.attachments = AttachmentRuntime(self.engine.bindings, window_lookup=lambda _id: None)
+        self.attachments = AttachmentRuntime(self.engine.bindings, self.engine.attachments, window_lookup=lambda _id: None)
         self.profile = start_test_profile(self.engine, build_default_config())
         self.attachments.start(self.profile)
         self.window = build_window(test, self.profile.window("keyboard"), self.engine)
@@ -108,7 +107,7 @@ class ConfigParityTests(unittest.TestCase):
 
     def _attachment(self, attachment_id: str) -> tuple[str | None, object]:
         attachment = next(attachment for attachment in self.profile.attachments if attachment.id == attachment_id)
-        return attachment.target, attachment.options
+        return attachment.target, attachment.values.initial
 
     def test_dwell_starts_disabled_with_the_original_tuning(self) -> None:
         window, settings = self._attachment("keyboard-dwell")

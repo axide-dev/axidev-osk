@@ -9,8 +9,8 @@ whenever the state they read changes.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TypeVar
+from dataclasses import MISSING, dataclass, fields
+from typing import Protocol, TypeVar
 
 from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
 from ..config.reader import ConfigError, ConfigReader
@@ -27,17 +27,52 @@ class HotCornersOptions:
     settings: HotCornerConfig
 
 
+class AttachmentWindow(Protocol):
+    def set_dwell(self, config: DwellClickConfig) -> None: ...
+
+    def set_pointer_locator(self, settings: PointerLocatorConfig) -> None: ...
+
+
+class HotCornerTarget(Protocol):
+    def configure(self, settings: HotCornerConfig, corners: frozenset[str]) -> None: ...
+
+
+class AttachmentHost(Protocol):
+    """What an attachment kind may use when it is attached for the running profile."""
+
+    def window(self, window_id: str) -> AttachmentWindow | None: ...
+
+    def keep_dwell(self, window_id: str, config: DwellClickConfig) -> None: ...
+
+    def keep_pointer_locator(self, window_id: str, settings: PointerLocatorConfig) -> None: ...
+
+    def hot_corners(self) -> HotCornerTarget | None: ...
+
+    def set_secure_input_panel(self, window_id: str) -> None: ...
+
+
+class AttachmentUnavailable(Exception):
+    """The running app has no service this attachment kind needs, so the attachment does nothing."""
+
+
+Apply = Callable[[object], None]
+
+
 @dataclass(frozen=True, slots=True)
 class AttachmentKind:
-    """How one attachment kind reads its fixed target window and its options.
+    """How one attachment kind reads its fixed target window and its options, and attaches to the app.
 
-    ``limit`` is ``"window"`` when a window takes at most one attachment of the
-    kind, ``"profile"`` when a profile does, and ``None`` when any number fit.
+    ``attach`` receives the host and the target and returns the function that
+    applies each new set of options; it raises ``AttachmentUnavailable`` when
+    the host lacks what the kind needs. ``limit`` is ``"window"`` when a window
+    takes at most one attachment of the kind, ``"profile"`` when a profile
+    does, and ``None`` when any number fit.
     """
 
     name: str
     decode_target: Callable[[ConfigReader], str | None]
     decode_options: Callable[[ConfigReader], object]
+    attach: Callable[[AttachmentHost, str | None], Apply]
     limit: str | None = None
 
 
@@ -45,10 +80,12 @@ AttachmentKindRegistry = KindRegistry[AttachmentKind]
 
 
 def register_builtin_attachments(registry: AttachmentKindRegistry) -> None:
-    registry.register(AttachmentKind("dwell", _window_target, _decode_dwell, limit="window"))
-    registry.register(AttachmentKind("pointer_locator", _window_target, _decode_pointer_locator))
-    registry.register(AttachmentKind("hot_corners", _no_target, _decode_hot_corners, limit="profile"))
-    registry.register(AttachmentKind("secure_input_panel", _window_target, _no_options, limit="profile"))
+    registry.register(AttachmentKind("dwell", _window_target, _decode_dwell, _attach_dwell, limit="window"))
+    registry.register(AttachmentKind("pointer_locator", _window_target, _decode_pointer_locator, _attach_pointer_locator))
+    registry.register(AttachmentKind("hot_corners", _no_target, _decode_hot_corners, _attach_hot_corners, limit="profile"))
+    registry.register(
+        AttachmentKind("secure_input_panel", _window_target, _no_options, _attach_secure_input_panel, limit="profile")
+    )
 
 
 def _window_target(reader: ConfigReader) -> str:
@@ -74,38 +111,44 @@ def _settings(reader: ConfigReader, build: Callable[[], SettingsT]) -> SettingsT
         raise ConfigError(f"{reader.path}: {exc}") from exc
 
 
+def _defaults(record: type) -> dict[str, object]:
+    """Return a settings record's own field defaults, so each default is written once, on the record."""
+
+    return {item.name: item.default for item in fields(record) if item.default is not MISSING}
+
+
 def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
-    defaults = DwellClickConfig()
+    defaults = _defaults(DwellClickConfig)
     return _settings(
         reader,
         lambda: DwellClickConfig(
-            enabled=reader.boolean("enabled", defaults.enabled),
-            delay_ms=reader.integer("delay_ms", defaults.delay_ms),
-            dead_zone_px=reader.integer("dead_zone_px", defaults.dead_zone_px),
-            full_speed_px_s=reader.number("full_speed_px_s", defaults.full_speed_px_s),
-            stop_speed_px_s=reader.number("stop_speed_px_s", defaults.stop_speed_px_s),
-            maximum_progress_rate=reader.number("maximum_progress_rate", defaults.maximum_progress_rate),
-            indicator_start_progress=reader.number("indicator_start_progress", defaults.indicator_start_progress),
+            enabled=reader.boolean("enabled", defaults["enabled"]),
+            delay_ms=reader.integer("delay_ms", defaults["delay_ms"]),
+            dead_zone_px=reader.integer("dead_zone_px", defaults["dead_zone_px"]),
+            full_speed_px_s=reader.number("full_speed_px_s", defaults["full_speed_px_s"]),
+            stop_speed_px_s=reader.number("stop_speed_px_s", defaults["stop_speed_px_s"]),
+            maximum_progress_rate=reader.number("maximum_progress_rate", defaults["maximum_progress_rate"]),
+            indicator_start_progress=reader.number("indicator_start_progress", defaults["indicator_start_progress"]),
             direction_reversal_progress_factor=reader.number(
-                "direction_reversal_progress_factor",
-                defaults.direction_reversal_progress_factor,
+                "direction_reversal_progress_factor", defaults["direction_reversal_progress_factor"]
             ),
-            movement_penalty_px=reader.number("movement_penalty_px", defaults.movement_penalty_px),
-            distance_curve_full_px=reader.number("distance_curve_full_px", defaults.distance_curve_full_px),
-            velocity_release_ms=reader.integer("velocity_release_ms", defaults.velocity_release_ms),
+            movement_penalty_px=reader.number("movement_penalty_px", defaults["movement_penalty_px"]),
+            distance_curve_full_px=reader.number("distance_curve_full_px", defaults["distance_curve_full_px"]),
+            velocity_release_ms=reader.integer("velocity_release_ms", defaults["velocity_release_ms"]),
         ),
     )
 
 
 def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorConfig:
     attachment_id = reader.string("id")
+    defaults = _defaults(PointerLocatorConfig)
     return _settings(
         reader,
         lambda: PointerLocatorConfig(
             id=attachment_id,
-            radius_percent=reader.number("radius_percent", 30.0),
-            maximum_opacity_percent=reader.number("maximum_opacity_percent", 60.0),
-            radius_standard_deviations=reader.number("radius_standard_deviations", 3.0),
+            radius_percent=reader.number("radius_percent", defaults["radius_percent"]),
+            maximum_opacity_percent=reader.number("maximum_opacity_percent", defaults["maximum_opacity_percent"]),
+            radius_standard_deviations=reader.number("radius_standard_deviations", defaults["radius_standard_deviations"]),
             gap_color=reader.color("gap_color"),
         ),
     )
@@ -116,6 +159,7 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
     unknown = sorted(corners - CORNERS)
     if unknown:
         raise ConfigError(f"{reader.field_path('corners')} has unknown corners: {', '.join(unknown)}")
+    defaults = _defaults(HotCornerConfig)
     return HotCornersOptions(
         corners=corners,
         settings=HotCornerConfig(
@@ -123,10 +167,54 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
             indicator_track=reader.color("indicator_track"),
             indicator_progress=reader.color("indicator_progress"),
             indicator_center=reader.color("indicator_center"),
-            dwell_ms=reader.integer("dwell_ms", 200, minimum=1),
-            poll_interval_ms=reader.integer("poll_interval_ms", 25, minimum=1),
-            corner_size_px=reader.integer("corner_size_px", 20, minimum=1),
-            indicator_size_px=reader.integer("indicator_size_px", 52, minimum=1),
-            indicator_margin_px=reader.integer("indicator_margin_px", 14, minimum=0),
+            dwell_ms=reader.integer("dwell_ms", defaults["dwell_ms"], minimum=1),
+            poll_interval_ms=reader.integer("poll_interval_ms", defaults["poll_interval_ms"], minimum=1),
+            corner_size_px=reader.integer("corner_size_px", defaults["corner_size_px"], minimum=1),
+            indicator_size_px=reader.integer("indicator_size_px", defaults["indicator_size_px"], minimum=1),
+            indicator_margin_px=reader.integer("indicator_margin_px", defaults["indicator_margin_px"], minimum=0),
         ),
     )
+
+
+def _attach_dwell(host: AttachmentHost, target: str | None) -> Apply:
+    window_id = target or ""
+
+    def apply(options: object) -> None:
+        assert isinstance(options, DwellClickConfig)
+        host.keep_dwell(window_id, options)
+        window = host.window(window_id)
+        if window is not None:
+            window.set_dwell(options)
+
+    return apply
+
+
+def _attach_pointer_locator(host: AttachmentHost, target: str | None) -> Apply:
+    window_id = target or ""
+
+    def apply(options: object) -> None:
+        assert isinstance(options, PointerLocatorConfig)
+        host.keep_pointer_locator(window_id, options)
+        window = host.window(window_id)
+        if window is not None:
+            window.set_pointer_locator(options)
+
+    return apply
+
+
+def _attach_hot_corners(host: AttachmentHost, target: str | None) -> Apply:
+    del target
+    hot_corners = host.hot_corners()
+    if hot_corners is None:
+        raise AttachmentUnavailable("this app runs without the hot-corner service")
+
+    def apply(options: object) -> None:
+        assert isinstance(options, HotCornersOptions)
+        hot_corners.configure(options.settings, options.corners)
+
+    return apply
+
+
+def _attach_secure_input_panel(host: AttachmentHost, target: str | None) -> Apply:
+    host.set_secure_input_panel(target or "")
+    return lambda _options: None

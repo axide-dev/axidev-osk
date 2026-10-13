@@ -18,8 +18,9 @@ from PySide6.QtWidgets import QWidget
 from ..config.profile import NodeConfig, NodeValues, StyleConfig
 from ..config.reader import ConfigReader
 from ..kind_registry import KindRegistry
-from ..messages import DataMap, RuntimeEvent
+from ..messages import DataMap, RuntimeEvent, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
+from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher
@@ -110,10 +111,10 @@ class NodeBuilder:
     def build(self, node: NodeConfig) -> QWidget:
         kind = self._kinds[node.kind]
         widget = kind.build(node, self)
-        widget.setProperty("componentType", node.kind)
-        widget.setProperty("componentId", node.id)
+        widget.setProperty(COMPONENT_TYPE, node.kind)
+        widget.setProperty(COMPONENT_ID, node.id)
         if node.passes_input_block:
-            widget.setProperty("passesInputBlock", True)
+            widget.setProperty(PASSES_INPUT_BLOCK, True)
 
         def apply(values: NodeValues, previous: NodeValues | None) -> None:
             apply_style(widget, values.style, previous.style if previous is not None else None)
@@ -124,20 +125,20 @@ class NodeBuilder:
         return widget
 
     def emit(self, event_name: str, node_id: str) -> None:
-        self._dispatcher.dispatch(node_event(event_name, node_id))
+        self._dispatcher.post(node_event(event_name, node_id))
 
 
 def apply_style(widget: QWidget, style: StyleConfig, previous: StyleConfig | None = None) -> None:
     """Apply profile style hooks that QSS can target, undoing the ones a previous style set."""
 
-    if previous is not None and style == previous:
+    if previous is not None and _same_style(style, previous):
         return
     if style.object_name is not None:
         widget.setObjectName(style.object_name)
     elif previous is not None and previous.object_name is not None:
         widget.setObjectName("")
     if style.classes or (previous is not None and previous.classes):
-        widget.setProperty("classes", list(style.classes) if style.classes else None)
+        widget.setProperty(CLASSES, list(style.classes) if style.classes else None)
     if previous is not None:
         for name in previous.properties:
             if name not in style.properties:
@@ -152,3 +153,14 @@ def apply_style(widget: QWidget, style: StyleConfig, previous: StyleConfig | Non
         widget.style().unpolish(widget)
         widget.style().polish(widget)
         widget.update()
+
+
+def _same_style(style: StyleConfig, previous: StyleConfig) -> bool:
+    """Compare styles the way the binding tracker compares values, so ``True`` is not ``1``."""
+
+    return (
+        style.object_name == previous.object_name
+        and style.classes == previous.classes
+        and style.qss == previous.qss
+        and data_equal(style.properties, previous.properties)
+    )

@@ -80,7 +80,8 @@ class Dispatcher:
         self._idle: deque[RuntimeAction] = deque()
         self._draining = False
         self._owner_thread = threading.get_ident()
-        self._inbox: deque[RuntimeMessage] = deque()
+        # One entry per post call, so each posted batch finishes, follow-ups included, before the next starts.
+        self._inbox: deque[tuple[RuntimeMessage, ...]] = deque()
         self._inbox_lock = threading.Lock()
         self._wake: Wake | None = None
         self._closed = False
@@ -151,18 +152,12 @@ class Dispatcher:
     def has_event(self, name: str) -> bool:
         return name in self._events
 
-    def has_pending(self) -> bool:
-        """Whether any message is waiting, in the queue, the inbox, or among idle actions."""
-
-        with self._inbox_lock:
-            return bool(self._queue or self._inbox or self._idle)
-
     def close(self) -> None:
         """Drop every waiting message and refuse later ones; used once the app shuts down."""
 
         self._closed = True
         with self._inbox_lock:
-            dropped = len(self._queue) + len(self._inbox) + len(self._idle)
+            dropped = len(self._queue) + sum(len(batch) for batch in self._inbox) + len(self._idle)
             self._inbox.clear()
         self._queue.clear()
         self._idle.clear()
@@ -205,21 +200,23 @@ class Dispatcher:
         Qt event handlers post what they observe, so a drain never runs
         inside the event that reported it. During a drain the messages run
         once the queue empties; otherwise they wait for the wake callback.
+        Each call is one batch: a batch and every follow-up it produces run
+        before the next posted batch starts.
         """
 
         if self._closed:
             _logger.info("Dropped %d runtime messages sent after shutdown", len(messages))
             return
         with self._inbox_lock:
-            self._inbox.extend(messages)
+            self._inbox.append(messages)
         wake = self._wake
         if wake is not None:
             wake()
 
     def _take_inbox(self) -> None:
         with self._inbox_lock:
-            self._queue.extend(self._inbox)
-            self._inbox.clear()
+            if self._inbox:
+                self._queue.extend(self._inbox.popleft())
 
     def _drain(self) -> None:
         self._draining = True

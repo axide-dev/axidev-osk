@@ -12,10 +12,9 @@ from PySide6.QtTest import QTest
 from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import APP_ACTIVATED
 from axidev_osk.runtime.registries import ServiceRegistry
-from axidev_osk.runtime.testing import make_test_engine
 from axidev_osk.services import register_services
 from axidev_osk.services.single_instance import ExistingInstanceActivated, WindowsSingleInstanceService
-from support import RecordingBackend, qt_app
+from support import RecordingBackend, make_test_engine, qt_app
 
 
 class WindowsSingleInstanceServiceTests(unittest.TestCase):

@@ -154,17 +154,17 @@ class PointerLocatorConfig:
 
     Attributes:
         id: Attachment ID.
+        gap_color: Glow color while the pointer is between buttons.
         radius_percent: Glow radius as a percentage of the surface's shorter side.
         maximum_opacity_percent: Glow opacity at the pointer position.
         radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
-        gap_color: Glow color while the pointer is between buttons.
     """
 
     id: str
-    radius_percent: float
-    maximum_opacity_percent: float
-    radius_standard_deviations: float
     gap_color: str
+    radius_percent: float = 30.0
+    maximum_opacity_percent: float = 60.0
+    radius_standard_deviations: float = 3.0
 
     def __post_init__(self) -> None:
         """Reject values that cannot define a visible glow."""

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
 
-from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
-from ..config.profile import AttachmentConfig, ProfileConfig
+from ..config.models import DwellClickConfig, PointerLocatorConfig
+from ..config.profile import ProfileConfig
 from ..runtime.dispatcher import Unsubscribe
 from ..runtime.profile_runtime import BindingTracker
-from . import HotCornersOptions
+from . import AttachmentKind, AttachmentUnavailable, AttachmentWindow, HotCornerTarget
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,27 +23,19 @@ class WindowAttachments:
     pointer_locators: tuple[PointerLocatorConfig, ...] = ()
 
 
-class AttachmentWindow(Protocol):
-    def set_dwell(self, config: DwellClickConfig) -> None: ...
-
-    def set_pointer_locator(self, settings: PointerLocatorConfig) -> None: ...
-
-
-class HotCornerTarget(Protocol):
-    def configure(self, settings: HotCornerConfig, corners: frozenset[str]) -> None: ...
-
-
 class AttachmentRuntime:
     """Hold the active profile's attachments and keep their options following state."""
 
     def __init__(
         self,
         bindings: BindingTracker,
+        kinds: Mapping[str, AttachmentKind],
         *,
         window_lookup: Callable[[str], AttachmentWindow | None],
         hot_corners: HotCornerTarget | None = None,
     ) -> None:
         self._bindings = bindings
+        self._kinds = kinds
         self._window_lookup = window_lookup
         self._hot_corners = hot_corners
         self._dwell: dict[str, DwellClickConfig] = {}
@@ -54,21 +48,23 @@ class AttachmentRuntime:
         return self._secure_input_panel_window
 
     def start(self, profile: ProfileConfig) -> None:
-        """Bind every attachment's options for ``profile``; the config decoder already checked their references."""
+        """Attach and bind every attachment of ``profile``; the config decoder already checked their references."""
 
-        by_kind: dict[str, list[AttachmentConfig]] = {}
-        for attachment in profile.attachments:
-            by_kind.setdefault(attachment.kind, []).append(attachment)
         self.stop()
-        panels = by_kind.get("secure_input_panel", [])
-        self._secure_input_panel_window = panels[0].target if panels else None
-        for attachment in by_kind.get("dwell", []):
-            self._bind(attachment, self._dwell_applier(attachment.target or ""))
-        for attachment in by_kind.get("pointer_locator", []):
-            self._bind(attachment, self._locator_applier(attachment.target or ""))
-        if self._hot_corners is not None:
-            for attachment in by_kind.get("hot_corners", []):
-                self._bind(attachment, self._hot_corners_applier(self._hot_corners))
+        for attachment in profile.attachments:
+            try:
+                apply = self._kinds[attachment.kind].attach(self, attachment.target)
+            except AttachmentUnavailable as exc:
+                _logger.warning("Attachment %r does nothing: %s", attachment.id, exc)
+                continue
+            self._unbinds.append(
+                self._bindings.bind(
+                    attachment.values.decode,
+                    f"attachment:{attachment.id}",
+                    lambda options, _previous, apply=apply: apply(options),
+                    fallback=attachment.values.initial,
+                )
+            )
 
     def stop(self) -> None:
         for unbind in self._unbinds:
@@ -76,6 +72,7 @@ class AttachmentRuntime:
         self._unbinds.clear()
         self._dwell.clear()
         self._locators.clear()
+        self._secure_input_panel_window = None
 
     def for_window(self, window_id: str) -> WindowAttachments:
         """Return the attachments a window installs, with their current options."""
@@ -85,40 +82,17 @@ class AttachmentRuntime:
             pointer_locators=tuple(self._locators.get(window_id, {}).values()),
         )
 
-    def _bind(self, attachment: AttachmentConfig, apply: Callable[[object], None]) -> None:
-        self._unbinds.append(
-            self._bindings.bind(
-                attachment.values.decode,
-                f"attachment:{attachment.id}",
-                lambda options, _previous: apply(options),
-                fallback=attachment.values.initial,
-            )
-        )
+    def window(self, window_id: str) -> AttachmentWindow | None:
+        return self._window_lookup(window_id)
 
-    def _dwell_applier(self, window_id: str) -> Callable[[object], None]:
-        def apply(options: object) -> None:
-            assert isinstance(options, DwellClickConfig)
-            self._dwell[window_id] = options
-            window = self._window_lookup(window_id)
-            if window is not None:
-                window.set_dwell(options)
+    def keep_dwell(self, window_id: str, config: DwellClickConfig) -> None:
+        self._dwell[window_id] = config
 
-        return apply
+    def keep_pointer_locator(self, window_id: str, settings: PointerLocatorConfig) -> None:
+        self._locators.setdefault(window_id, {})[settings.id] = settings
 
-    def _locator_applier(self, window_id: str) -> Callable[[object], None]:
-        def apply(options: object) -> None:
-            assert isinstance(options, PointerLocatorConfig)
-            self._locators.setdefault(window_id, {})[options.id] = options
-            window = self._window_lookup(window_id)
-            if window is not None:
-                window.set_pointer_locator(options)
+    def hot_corners(self) -> HotCornerTarget | None:
+        return self._hot_corners
 
-        return apply
-
-    @staticmethod
-    def _hot_corners_applier(target: HotCornerTarget) -> Callable[[object], None]:
-        def apply(options: object) -> None:
-            assert isinstance(options, HotCornersOptions)
-            target.configure(options.settings, options.corners)
-
-        return apply
+    def set_secure_input_panel(self, window_id: str) -> None:
+        self._secure_input_panel_window = window_id

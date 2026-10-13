@@ -14,8 +14,7 @@ from axidev_osk.python_defaults.axidev_osk.std import keys, prompts, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.state import StateTree
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
-from support import RecordingBackend, build_window, find_node, nodes_by_id, qt_app, record_app_actions
+from support import RecordingBackend, build_window, find_node, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
 
 
 class StdHarness:

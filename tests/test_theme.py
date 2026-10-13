@@ -9,9 +9,8 @@ from axidev_osk.config.reader import ConfigError
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.python_defaults.theme import DEFAULT_FONT, DEFAULT_QSS
-from axidev_osk.runtime.testing import make_test_engine, start_test_profile
 from axidev_osk.styles.theme import apply_theme
-from support import FakeOverlay, RecordingBackend, build_window, qt_app
+from support import FakeOverlay, RecordingBackend, build_window, make_test_engine, qt_app, start_test_profile
 
 
 def _decode(theme: axidev_osk.Map) -> object:
@@ -51,6 +50,13 @@ class ThemeTests(unittest.TestCase):
         self.assertEqual(app.palette().color(QPalette.ColorRole.Window), previous[1].color(QPalette.ColorRole.Window))
         self.assertEqual(app.font().pixelSize(), previous[2].pixelSize())
 
+    def test_a_palette_role_bound_to_none_is_absent_like_a_written_none(self) -> None:
+        profile = _decode(
+            {"palette": {"window": "#FF0000", "highlight": lambda s: None, "base": None}}
+        )
+
+        self.assertEqual(dict(profile.theme.initial.palette), {"window": "#FF0000"})  # type: ignore[attr-defined]
+
     def test_theme_rejects_unknown_palette_roles_and_malformed_colors(self) -> None:
         cases = {
             "unknown keys: glow": {"palette": {"glow": "#FFFFFF"}},
@@ -64,7 +70,7 @@ class ThemeTests(unittest.TestCase):
     def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
         qt_app()
         engine = make_test_engine(RecordingBackend())
-        attachments = AttachmentRuntime(engine.bindings, window_lookup=lambda _id: None)
+        attachments = AttachmentRuntime(engine.bindings, engine.attachments, window_lookup=lambda _id: None)
         profile = start_test_profile(engine, build_default_config())
         attachments.start(profile)
         window = build_window(

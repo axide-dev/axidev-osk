@@ -10,9 +10,8 @@ from axidev_osk.runtime.engine_messages import (
     KEYBOARD_RESET,
     KEYBOARD_STATUS_CHANGED,
 )
-from axidev_osk.runtime.testing import make_keyboard_test_engine
 from axidev_osk.services.keyboard.io import KeyObservation, KeyPressHandle
-from support import RecordingBackend
+from support import RecordingBackend, make_keyboard_test_engine
 
 
 def _upper_letters(key: str) -> str:

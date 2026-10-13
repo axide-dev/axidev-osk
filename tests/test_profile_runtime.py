@@ -285,7 +285,7 @@ class ConfigDecoderTests(unittest.TestCase):
         child = profile.window("pad").content.children[0]
         self.assertEqual(profile.state, declared({"shift": var("boolean", False)}))
         self.assertEqual(profile.shared, declared({"opacity": var("number", 0.85)}))
-        self.assertEqual(child.options, {"size": 3, "label": "a", "latched": False})
+        self.assertEqual(child.values.initial.options, {"size": 3, "label": "a", "latched": False})
         self.assertEqual(profile.window("pad").values.initial.opacity, 0.85)
         self.assertEqual(child.callbacks, {"probe.pressed": self.functions.register(pressed)})
         self.assertEqual(child.placement, 4)
@@ -337,7 +337,7 @@ class ConfigDecoderTests(unittest.TestCase):
         )
 
         window = profile.window("pad")
-        self.assertEqual((window.values.initial.opacity, window.content.options), (1.0, {"size": 1, "label": None, "latched": False}))
+        self.assertEqual((window.values.initial.opacity, window.content.values.initial.options), (1.0, {"size": 1, "label": None, "latched": False}))
 
     def test_inactive_profiles_are_validated_too(self) -> None:
         root = _with_spare_profile({"windows": [], "colour": "red"})
@@ -587,6 +587,8 @@ class ProfileRuntimeTests(unittest.TestCase):
 
         with self.assertLogs(level="ERROR"):
             self.tracker.bind(reads(upper_mode), "node:a", lambda value, previous: applied.append(value), fallback="?")
+            self.assertEqual(applied, ["?"])
+            self.dispatcher.process_pending()
 
         self.assertEqual(applied, ["?", "FIXED"])
 

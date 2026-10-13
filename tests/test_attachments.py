@@ -13,8 +13,7 @@ from axidev_osk.hot_corner.controller import HotCornerWindowToggleController, Sc
 from axidev_osk.messages import DataMap
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.runtime.profile_runtime import CALLBACK_FAILED, state_set
-from axidev_osk.runtime.testing import make_test_engine
-from support import HOT_CORNER_COLORS, RecordingBackend, hot_corner_config, qt_app
+from support import HOT_CORNER_COLORS, RecordingBackend, hot_corner_config, make_test_engine, qt_app
 
 
 class FakeHotCornerOverlay:
@@ -80,6 +79,8 @@ class AttachmentHarness:
         attachments: list[axidev_osk.Map],
         windows: tuple[str, ...] = ("pad",),
         state: axidev_osk.Map | None = None,
+        *,
+        hot_corner_service: bool = True,
     ) -> None:
         qt_app()
         self.engine = make_test_engine(RecordingBackend())
@@ -87,8 +88,9 @@ class AttachmentHarness:
         self.hot_corners = RecordingHotCorners()
         self.runtime = AttachmentRuntime(
             self.engine.bindings,
+            self.engine.attachments,
             window_lookup=self.windows.get,
-            hot_corners=self.hot_corners,
+            hot_corners=self.hot_corners if hot_corner_service else None,
         )
         self.profile = self.engine.decoder().decode_root(_root(attachments, windows, state))
         self.engine.profile.start(self.profile)
@@ -189,6 +191,18 @@ class AttachmentRuntimeTests(unittest.TestCase):
         settings, corners = harness.hot_corners.configured[0]
         self.assertEqual((settings.dwell_ms, corners), (150, frozenset({"top_left", "bottom_right"})))
         self.assertEqual(harness.runtime.secure_input_panel_window, "pad")
+
+    def test_an_attachment_whose_service_is_missing_is_logged_and_the_others_still_apply(self) -> None:
+        harness = AttachmentHarness(
+            [axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS), axidev_osk.dwell(id="d", window="pad", delay_ms=250)],
+            hot_corner_service=False,
+        )
+
+        with self.assertLogs("axidev_osk.attachments.runtime", level="WARNING") as logs:
+            harness.start()
+
+        self.assertIn("'hc' does nothing", logs.output[0])
+        self.assertEqual([config.delay_ms for config in harness.windows["pad"].dwell], [250])
 
 
 class HotCornerFilterTests(unittest.TestCase):

@@ -320,8 +320,9 @@ class BindingTracker:
         ``apply`` receives each new value that differs from the last one,
         with the last one, or ``None`` the first time. When the first decode
         fails, ``fallback`` (the values decoded from default state at load) is
-        applied instead, and the failure is reported. When the fallback cannot
-        be applied either, nothing stays bound and the error is raised.
+        applied instead, and the failure is posted, so binding never runs
+        profile handlers before it returns. When the fallback cannot be
+        applied either, nothing stays bound and the error is raised.
         """
 
         binding: _Binding[object] = _Binding(decode=decode, source=source, apply=apply, reads=frozenset())  # type: ignore[arg-type]
@@ -341,7 +342,7 @@ class BindingTracker:
                     raise
                 binding.value = fallback
                 binding.applied = True
-            self._dispatcher.dispatch(failure)
+            self._dispatcher.post(failure)
         return unbind
 
     def _handle_state_changed(self, event: StateChangedArguments) -> MessageResult:
