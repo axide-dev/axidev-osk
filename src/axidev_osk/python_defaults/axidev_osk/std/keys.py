@@ -18,6 +18,11 @@ way.
 Profiles route ``keyboard.reset`` to ``on_reset`` (``std.with_handlers`` does it)
 so latches clear when the engine releases every held key, and declare these
 variables with ``std.with_state``.
+
+Every builder's ``opts`` may also set ``latched``, a boolean or a binding, to
+light the key while it is true; the key is lit as ``active`` while its output
+is down. Both reach the button through ``styles.lit``, and a ``style`` in
+``opts`` adds to that style.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ... import axidev_osk
+from .styles import lit
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
@@ -95,11 +101,10 @@ def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axide
     defaults = {
         "id": f"key:{output}",
         "label": label,
-        "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, "repeat")))
+    return _lit_button(defaults, _without(opts, "repeat"), active=lambda state: key_down(state, output))
 
 
 def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
@@ -148,10 +153,9 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
         defaults: dict[str, Any] = {
             "id": f"key:{output}",
             "label": label,
-            "latched": latched,
             "on_release": toggle_one_shot,
         }
-        return axidev_osk.button(**axidev_osk.merge(defaults, options))
+        return _lit_button(defaults, {"latched": latched, **options})
 
     def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
@@ -169,12 +173,10 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
     defaults = {
         "id": f"key:{output}",
         "label": label,
-        "latched": latched,
-        "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return axidev_osk.button(**axidev_osk.merge(defaults, options))
+    return _lit_button(defaults, {"latched": latched, **options}, active=lambda state: key_down(state, output))
 
 
 def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
@@ -216,6 +218,14 @@ def _flag(opts: Mapping[str, Any] | None, name: str, default: bool) -> bool:
 
     value = (opts or {}).get(name)
     return default if value is None else bool(value)
+
+
+def _lit_button(defaults: Mapping[str, Any], opts: Mapping[str, Any], active: Any = False) -> axidev_osk.Map:
+    """A button from ``defaults`` and ``opts``, lit through ``styles.lit`` by ``active`` and ``opts``' ``latched``."""
+
+    latched = opts.get("latched")
+    style = {**lit(active, False if latched is None else latched), **(opts.get("style") or {})}
+    return axidev_osk.button(**axidev_osk.merge(defaults, {**_without(opts, "latched", "style"), "style": style}))
 
 
 def _without(opts: Mapping[str, Any] | None, *names: str) -> dict[str, Any]:

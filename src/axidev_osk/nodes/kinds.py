@@ -30,6 +30,8 @@ from .registry import NodeBuilder, NodeKind, NodeKindRegistry
 
 BUTTON_PRESSED = "button.pressed"
 BUTTON_RELEASED = "button.released"
+BUTTON_ENTERED = "button.entered"
+BUTTON_LEFT = "button.left"
 
 
 _QT_MAX_SIZE = 16_777_215
@@ -58,8 +60,6 @@ class SizeOptions:
 @dataclass(frozen=True, slots=True)
 class ButtonOptions:
     label: str = ""
-    active: bool = False
-    latched: bool = False
     enabled: bool = True
     visible: bool = True
     size: SizeOptions = SizeOptions()
@@ -124,8 +124,12 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             build=_build_button,
             apply=_apply_button,
             decode_options=_decode_button,
-            callbacks={"on_press": BUTTON_PRESSED, "on_release": BUTTON_RELEASED},
-            widget_properties=frozenset({"pressed", "latched", "interactionState"}),
+            callbacks={
+                "on_press": BUTTON_PRESSED,
+                "on_release": BUTTON_RELEASED,
+                "on_enter": BUTTON_ENTERED,
+                "on_leave": BUTTON_LEFT,
+            },
         )
     )
     registry.register(NodeKind(name="label", build=_build_label, apply=_apply_label, decode_options=_decode_label))
@@ -180,8 +184,6 @@ def _visible(reader: ConfigReader) -> bool:
 def _decode_button(reader: ConfigReader) -> ButtonOptions:
     return ButtonOptions(
         label=reader.optional_string("label") or "",
-        active=reader.boolean("active", False),
-        latched=reader.boolean("latched", False),
         enabled=reader.boolean("enabled", True),
         visible=_visible(reader),
         size=_decode_size(reader),
@@ -263,6 +265,8 @@ def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     button.pressed.connect(lambda: builder.emit(BUTTON_PRESSED, node.id))
     button.released.connect(lambda: builder.emit(BUTTON_RELEASED, node.id))
+    button.entered.connect(lambda: builder.emit(BUTTON_ENTERED, node.id))
+    button.left.connect(lambda: builder.emit(BUTTON_LEFT, node.id))
     return button
 
 
@@ -276,19 +280,6 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
         widget.setText(options.label.replace("&", "&&"))
     if old is None or options.enabled != old.enabled:
         widget.setEnabled(options.enabled)
-    if old is None or (options.active, options.latched) != (old.active, old.latched):
-        widget.setProperty("pressed", options.active)
-        widget.setProperty("latched", options.latched)
-        state = (
-            "latched_pressed" if options.active and options.latched
-            else "pressed" if options.active
-            else "latched" if options.latched
-            else "idle"
-        )
-        widget.setProperty("interactionState", state)
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-        widget.update()
     if old is None or options.visible != old.visible:
         _apply_visible(widget, options.visible)
 

@@ -225,6 +225,18 @@ class keyboard:  # noqa: N801
         return action("keyboard.type_text", text=text)
 
 
+class timer:  # noqa: N801
+    @staticmethod
+    def start(timer_id: str, delay_ms: int, repeat: bool = False) -> Map:
+        """Post ``timer.fired`` with ``timer_id`` after ``delay_ms``, and every ``delay_ms`` while ``repeat``."""
+
+        return action("timer.start", id=timer_id, delay_ms=delay_ms, repeat=repeat)
+
+    @staticmethod
+    def cancel(timer_id: str) -> Map:
+        return action("timer.cancel", id=timer_id)
+
+
 class process:  # noqa: N801
     @staticmethod
     def spawn(argv: list[str], tag: str, detached: bool = False) -> Map:

@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from . import controls, keys, prompts, windows
+from . import controls, keys, prompts, styles, windows
+from .styles import lit
 
-__all__ = ["controls", "keys", "prompts", "windows", "with_handlers", "with_state"]
+__all__ = ["controls", "keys", "lit", "prompts", "styles", "windows", "with_handlers", "with_state"]
 
 
 def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:

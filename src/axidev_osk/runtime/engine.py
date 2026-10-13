@@ -8,11 +8,13 @@ from ..attachments import AttachmentKindRegistry, register_builtin_attachments
 from ..config.profile import ConfigDecoder
 from ..function_registry import FunctionRegistry
 from ..nodes import NodeBuilder, NodeKindRegistry, register_builtin_nodes
+from ..nodes.pointer import register_pointer_events
 from .app_messages import register_app_events
 from .dispatcher import Dispatcher
 from .engine_messages import KeyboardEffects, ProcessEffects, install_engine_handlers, register_engine_events
 from .profile_runtime import BindingTracker, ProfileRuntime, register_profile_events
 from .state import StateTree
+from .timers import Timers
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,9 +58,13 @@ def build_engine(
     register_profile_events(dispatcher)
     register_engine_events(dispatcher)
     register_app_events(dispatcher)
+    register_pointer_events(dispatcher)
     functions = FunctionRegistry()
     profile = ProfileRuntime(dispatcher, functions, StateTree())
     install_engine_handlers(dispatcher, profile_runtime=profile, keyboard=keyboard, processes=processes)
+    timers = Timers(dispatcher)
+    timers.register()
+    profile.when_stopped(timers.cancel_all)
     bindings = BindingTracker(dispatcher, functions, profile.state)
     nodes = NodeKindRegistry(dispatcher)
     register_builtin_nodes(nodes)

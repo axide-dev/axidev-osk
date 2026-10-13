@@ -174,7 +174,7 @@ def _dwell_button(placement: axidev_osk.Map) -> axidev_osk.Map:
         del event
         return [axidev_osk.state.set("settings.dwell.enabled", not enabled(ctx.state))]
 
-    return axidev_osk.button(id="dwell", label="Dwell", latched=enabled, on_release=toggle, **placement)
+    return axidev_osk.button(id="dwell", label="Dwell", style=std.lit(latched=enabled), on_release=toggle, **placement)
 
 
 STRIP_STYLE = {"object_name": "settingsStrip"}

@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from ... import axidev_osk
+from .styles import lit
 
 STATE = {"menus": axidev_osk.var(axidev_osk.map_of("string"))}
 """The library's control variables, merged under ``std`` by ``std.with_state``."""
@@ -63,7 +64,7 @@ def checkbox(id: str, label: Any, path: str | list[str], opts: Mapping[str, Any]
     defaults = {
         "id": id,
         "label": label,
-        "latched": lambda state: bool(axidev_osk.read(state, path)),
+        "style": lit(latched=lambda state: bool(axidev_osk.read(state, path))),
         "on_release": toggle,
     }
     return axidev_osk.button(**axidev_osk.merge(defaults, opts))
@@ -159,7 +160,7 @@ def menu(
     button_defaults = {
         "id": id,
         "label": label,
-        "latched": lambda state: menu_open(state, id, group),
+        "style": lit(latched=lambda state: menu_open(state, id, group)),
         "on_release": lambda ctx, event: toggle_menu(ctx.state, id, group),
     }
     panel_defaults = {
@@ -206,7 +207,7 @@ def dropdown(
         axidev_osk.button(
             id=f"{id}:choice:{index}",
             label=text,
-            latched=lambda state, choice=choice: value(state) == choice,
+            style=lit(latched=lambda state, choice=choice: value(state) == choice),
             on_release=pick(choice),
         )
         for index, (choice, text) in enumerate(choices)
@@ -264,13 +265,12 @@ def strip(
                             {
                                 "id": f"{id}:toggle",
                                 "label": "⋯",
-                                "latched": is_open,
                                 "on_release": toggle,
                                 "min_width": 64,
                                 "max_width": 64,
                                 "min_height": 24,
                                 "max_height": 24,
-                                "style": {"object_name": "stripToggle"},
+                                "style": {"object_name": "stripToggle", **lit(latched=is_open)},
                             },
                             toggle_opts,
                         )

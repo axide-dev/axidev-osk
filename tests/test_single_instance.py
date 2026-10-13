@@ -31,7 +31,7 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
         engine = make_test_engine(RecordingBackend())
 
         with patch("axidev_osk.services.single_instance.sys.platform", "linux"):
-            service.start(engine)
+            service.start(engine.dispatcher)
 
         self.assertIsNone(service._server)
 
@@ -57,10 +57,10 @@ class WindowsSingleInstanceServiceTests(unittest.TestCase):
             "axidev_osk.services.single_instance._lock_path",
             return_value=Path(temp_dir) / "single-instance.lock",
         ):
-            primary.start(engine)
+            primary.start(engine.dispatcher)
             try:
                 with self.assertRaises(ExistingInstanceActivated):
-                    secondary.start(engine)
+                    secondary.start(engine.dispatcher)
                 QTest.qWait(100)
             finally:
                 secondary.stop()
