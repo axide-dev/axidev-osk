@@ -58,7 +58,7 @@ HOT_CORNER_COLORS = {
 """Indicator colors for tests; profiles always give their own."""
 
 
-def hot_corner_config(**fields: int) -> HotCornerConfig:
+def hot_corner_config(**fields: Any) -> HotCornerConfig:
     return HotCornerConfig(**HOT_CORNER_COLORS, **fields)
 
 

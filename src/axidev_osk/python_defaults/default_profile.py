@@ -112,6 +112,10 @@ def _dwell_button(placement: axidev_osk.Map) -> axidev_osk.Map:
     return axidev_osk.button(id="dwell", label="Dwell", style=std.lit(latched=enabled), on_release=toggle, **placement)
 
 
+def _key_nodes() -> list[axidev_osk.Map]:
+    return [_key_node(spot, cell) for spot, cell in zip(SPOTS, _cells(), strict=True)]
+
+
 STRIP_STYLE = {"object_name": "settingsStrip"}
 
 # Dwell option, caption, minimum, maximum, step, unit. Each range holds the
@@ -281,7 +285,7 @@ def keyboard_window() -> axidev_osk.Map:
                     id="keyboard-grid",
                     spacing=GRID_GAP_PX,
                     style={"object_name": "keyboard"},
-                    children=[_key_node(spot, cell) for spot, cell in zip(SPOTS, _cells(), strict=True)],
+                    children=std.locator.colored(_key_nodes()),
                 ),
                 _status_label(),
             ],
@@ -397,6 +401,13 @@ def _on_permission_setup_opened(ctx: Any, event: Any) -> list[axidev_osk.Map]:
 SOCIAL_KEYS = [("↑", "Up"), ("↓", "Down"), ("L", "L"), ("K", "K")]
 
 
+def _social_keys() -> list[axidev_osk.Map]:
+    return [
+        keys.key(label, output, {"min_width": KEY_UNIT_PX * 2, "min_height": KEY_UNIT_PX * 2})
+        for label, output in SOCIAL_KEYS
+    ]
+
+
 def social_window() -> axidev_osk.Map:
     """A small keyboard for scrolling a feed, opening where the main keyboard was."""
 
@@ -417,10 +428,7 @@ def social_window() -> axidev_osk.Map:
                     id="social-keys",
                     direction="horizontal",
                     spacing=GRID_GAP_PX,
-                    children=[
-                        keys.key(label, output, {"min_width": KEY_UNIT_PX * 2, "min_height": KEY_UNIT_PX * 2})
-                        for label, output in SOCIAL_KEYS
-                    ],
+                    children=std.locator.colored(_social_keys()),
                 ),
                 _status_label(),
             ],
@@ -448,9 +456,25 @@ def social_profile() -> axidev_osk.Map:
                 "window.close_requested": _on_close_requested,
                 "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
                 "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
-            }
+            },
+            also=[std.locator.on(_social_keys())],
         ),
     )
+
+
+def _wheel() -> axidev_osk.Map:
+    """The 10-slice wheel, each slice and the center glowing their own locator color."""
+
+    canvas = wheel.wheel(
+        "wheel",
+        wheel.TKL,
+        layouts.LAYOUTS,
+        _setting("layout"),
+        {"min_width": 260, "min_height": 260},
+        inner=0.22,
+        spacing=GRID_GAP_PX,
+    )
+    return axidev_osk.merge(canvas, {"children": std.locator.colored(canvas["children"])})
 
 
 def wheel_window() -> axidev_osk.Map:
@@ -470,15 +494,7 @@ def wheel_window() -> axidev_osk.Map:
             margins=[10, 10, 10, 10],
             spacing=8,
             children=[
-                wheel.wheel(
-                    "wheel",
-                    wheel.TKL,
-                    layouts.LAYOUTS,
-                    _setting("layout"),
-                    {"min_width": 260, "min_height": 260},
-                    inner=0.22,
-                    spacing=GRID_GAP_PX,
-                ),
+                _wheel(),
                 _status_label(),
             ],
         ),
@@ -511,7 +527,9 @@ def _keyboard_attachments() -> list[axidev_osk.Map]:
     ]
 
 
-def _keyboard_handlers() -> dict[str, Any]:
+def _keyboard_handlers(colored: list[axidev_osk.Map]) -> dict[str, Any]:
+    """The keyboard window's handlers, with ``std.locator`` coloring the ``colored`` buttons."""
+
     return std.with_handlers(
         {
             "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
@@ -520,7 +538,8 @@ def _keyboard_handlers() -> dict[str, Any]:
             "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
             "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
             "linux.permission_setup_opened": _on_permission_setup_opened,
-        }
+        },
+        also=[std.locator.on(colored)],
     )
 
 
@@ -530,7 +549,7 @@ def wheel_profile() -> axidev_osk.Map:
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
         windows=_with_settings([wheel_window(), *prompt_windows()]),
         attachments=_keyboard_attachments(),
-        on=_keyboard_handlers(),
+        on=_keyboard_handlers(_wheel()["children"]),
     )
 
 
@@ -542,7 +561,7 @@ def keyboard_profile() -> axidev_osk.Map:
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
         windows=_with_settings([keyboard_window(), *prompt_windows()]),
         attachments=_keyboard_attachments(),
-        on=_keyboard_handlers(),
+        on=_keyboard_handlers(_key_nodes()),
     )
 
 

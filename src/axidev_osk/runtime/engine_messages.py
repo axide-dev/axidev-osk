@@ -37,7 +37,7 @@ KEYBOARD_PERMISSION_REQUIRED = "keyboard.permission_required"
 KEYBOARD_RESET = "keyboard.reset"
 PROCESS_EXITED = "process.exited"
 WINDOW_STATE_CHANGED = "window.state_changed"
-NODE_RESIZED = "node.resized"
+NODE_GEOMETRY_CHANGED = "node.geometry_changed"
 
 KEYBOARD_DOWN = "keyboard.down"
 KEYBOARD_UP = "keyboard.up"
@@ -94,10 +94,20 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         ),
         {},
     ),
-    ("nodes",): Variable(MapOf(Record({"size": _record(width=_integer(), height=_integer())})), {}),
+    ("nodes",): Variable(
+        MapOf(
+            Record(
+                {
+                    "position": _record(x=_integer(), y=_integer()),
+                    "size": _record(width=_integer(), height=_integer()),
+                }
+            )
+        ),
+        {},
+    ),
 }
-"""What the engine observes: keys and locks, keyboard output status, the running and available profiles,
-each built window, and each node built with ``report_size``."""
+"""What the engine observes: keys and locks, keyboard output status, the running and available profiles, each built
+window, and each node built with ``report_geometry``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +145,10 @@ class WindowStateArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class NodeResizedArguments:
+class NodeGeometryArguments:
     node: str
+    x: int
+    y: int
     width: int
     height: int
 
@@ -260,12 +272,6 @@ def window_state_changed(
     )
 
 
-def node_resized(node_id: str, width: int, height: int) -> RuntimeEvent:
-    """Report the size a node built with ``report_size`` now has on screen."""
-
-    return validated_event(NODE_RESIZED, {"node": node_id, "width": width, "height": height}, decode_node_resized)
-
-
 def keyboard_down(key: str, mods: tuple[str, ...] = (), repeat: bool = True) -> RuntimeAction:
     return validated_action(KEYBOARD_DOWN, {"key": key, "mods": list(mods), "repeat": repeat}, decode_keyboard_down)
 
@@ -312,10 +318,20 @@ def decode_window_state(arguments: DataMap) -> WindowStateArguments:
     )
 
 
-def decode_node_resized(arguments: DataMap) -> NodeResizedArguments:
-    require_keys(arguments, ("node", "width", "height"))
-    return NodeResizedArguments(
+def node_geometry_changed(node_id: str, x: int, y: int, width: int, height: int) -> RuntimeEvent:
+    """Report where a node built with ``report_geometry`` now is: ``x`` and ``y`` are its top-left corner
+    in its window's content, in pixels."""
+
+    arguments = {"node": node_id, "x": x, "y": y, "width": width, "height": height}
+    return validated_event(NODE_GEOMETRY_CHANGED, arguments, decode_node_geometry)
+
+
+def decode_node_geometry(arguments: DataMap) -> NodeGeometryArguments:
+    require_keys(arguments, ("node", "x", "y", "width", "height"))
+    return NodeGeometryArguments(
         node=non_empty_string_value(arguments, "node"),
+        x=int_value(arguments, "x"),
+        y=int_value(arguments, "y"),
         width=int_value(arguments, "width"),
         height=int_value(arguments, "height"),
     )
@@ -372,7 +388,7 @@ def register_engine_events(dispatcher: Dispatcher) -> None:
     dispatcher.register_event(KEYBOARD_RESET, decode_empty)
     dispatcher.register_event(PROCESS_EXITED, decode_process_exited)
     dispatcher.register_event(WINDOW_STATE_CHANGED, decode_window_state)
-    dispatcher.register_event(NODE_RESIZED, decode_node_resized)
+    dispatcher.register_event(NODE_GEOMETRY_CHANGED, decode_node_geometry)
 
 
 def install_engine_handlers(
@@ -415,8 +431,11 @@ def install_engine_handlers(
             messages.extend(profile_runtime.set_observed(("windows", event.window_id, name), value))
         return messages
 
-    def record_node_size(event: NodeResizedArguments) -> MessageResult:
-        return profile_runtime.set_observed(("nodes", event.node, "size"), {"width": event.width, "height": event.height})
+    def record_node_geometry(event: NodeGeometryArguments) -> MessageResult:
+        messages = profile_runtime.set_observed(("nodes", event.node, "position"), {"x": event.x, "y": event.y})
+        size: dict[str, DataValue] = {"width": event.width, "height": event.height}
+        messages.extend(profile_runtime.set_observed(("nodes", event.node, "size"), size))
+        return messages
 
     def press(arguments: KeyboardDownArguments) -> MessageResult:
         keyboard.press(arguments.key, arguments.mods, arguments.repeat)
@@ -448,7 +467,7 @@ def install_engine_handlers(
     dispatcher.add_event_handler(INPUT_KEY, record_input_key)
     dispatcher.add_event_handler(KEYBOARD_STATUS_CHANGED, record_keyboard_status)
     dispatcher.add_event_handler(WINDOW_STATE_CHANGED, record_window_state)
-    dispatcher.add_event_handler(NODE_RESIZED, record_node_size)
+    dispatcher.add_event_handler(NODE_GEOMETRY_CHANGED, record_node_geometry)
     dispatcher.register_action(KEYBOARD_DOWN, decode_keyboard_down, press)
     dispatcher.register_action(KEYBOARD_UP, decode_keyboard_key, release)
     dispatcher.register_action(KEYBOARD_TAP, decode_keyboard_tap, tap)

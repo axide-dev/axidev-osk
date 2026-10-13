@@ -253,8 +253,10 @@ class ButtonTests(unittest.TestCase):
 
         self.assertIsNotNone(close_button)
         assert close_button is not None
+        pressed: list[str] = []
+        title_bar.closePressed.connect(pressed.append)
         QTest.mouseClick(close_button, Qt.MouseButton.RightButton)
-        self.assertFalse(title_bar.isVisible())
+        self.assertEqual(pressed, ["right"])
 
 
 if __name__ == "__main__":

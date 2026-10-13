@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import unittest
 from typing import Any
 
@@ -10,12 +11,22 @@ from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.axidev_osk import std
-from axidev_osk.python_defaults.axidev_osk.std import controls, keys, layouts, prompts, wheel, windows
+from axidev_osk.python_defaults.axidev_osk.std import controls, keys, layouts, locator, prompts, wheel, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.state import StateTree
-from support import RecordingBackend, build_window, find_node, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile
+from support import (
+    RecordingBackend,
+    build_window,
+    find_node,
+    make_test_engine,
+    nodes_by_id,
+    qt_app,
+    record_app_actions,
+    start_test_profile,
+    wait_until,
+)
 
 
 class StdHarness:
@@ -26,6 +37,7 @@ class StdHarness:
         *,
         on: dict[str, Any] | None = None,
         state: dict[str, Any] | None = None,
+        also: list[dict[str, Any]] | None = None,
         **window_fields: Any,
     ) -> None:
         qt_app()
@@ -38,7 +50,7 @@ class StdHarness:
                 "p": axidev_osk.profile(
                     windows=[axidev_osk.window(id="pad", title="Pad", content=axidev_osk.box(id="root", children=children), **window_fields)],
                     state=std.with_state(state),
-                    on=std.with_handlers(on),
+                    on=std.with_handlers(on, also or []),
                 )
             },
         )
@@ -486,8 +498,11 @@ class WindowHelperTests(unittest.TestCase):
         harness = StdHarness(self, [keys.letter("a")])
 
         harness.engine.dispatcher.dispatch(
-            RuntimeEvent("window.dragged", {"window": "pad", "dx": 3, "dy": -4}),
-            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 5, "dy": 6}),
+            RuntimeEvent("window.dragged", {"window": "pad", "dx": 3, "dy": -4, "button": "left"}),
+            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 5, "dy": 6, "button": "left"}),
+            # Other mouse buttons are left for the profile to give a meaning.
+            RuntimeEvent("window.dragged", {"window": "pad", "dx": 1, "dy": 1, "button": "right"}),
+            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 1, "dy": 1, "button": "middle"}),
             RuntimeEvent("dwell.completed", {"window": "pad", "x": 70, "y": 80}),
         )
 
@@ -516,6 +531,57 @@ class WindowHelperTests(unittest.TestCase):
         self.assertEqual(run(visible=True, minimized=True), ["window.show"])
         self.assertEqual(run(visible=True), ["window.hide"])
         self.assertEqual(run(), ["window.show"])
+
+
+def _rect(x: int, y: int, width: int = 48, height: int = 48) -> dict[str, int]:
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+class LocatorTests(unittest.TestCase):
+    def test_keys_alternate_warm_and_cool_like_a_checkerboard(self) -> None:
+        rects = [_rect(column * 52, row * 52) for row in range(3) for column in range(4)]
+
+        colors = locator.palette(rects)
+
+        for index, color in enumerate(colors):
+            row, column = divmod(index, 4)
+            hue = _hue(color)
+            if (row + column) % 2 == 0:
+                self.assertTrue(hue >= 329 or hue <= 61, (row, column, color))
+            else:
+                self.assertTrue(149 <= hue <= 271, (row, column, color))
+
+    def test_nearby_keys_get_different_colors(self) -> None:
+        row = [_rect(column * 52, 0) for column in range(3)]
+
+        self.assertEqual(len(set(locator.palette(row))), 3)
+
+    def test_colors_do_not_depend_on_the_order_keys_come_in(self) -> None:
+        rects = [_rect(column * 52, row * 52) for row in range(2) for column in range(5)]
+
+        forward = locator.palette(rects)
+        backward = locator.palette(list(reversed(rects)))
+
+        self.assertEqual(forward, list(reversed(backward)))
+
+    def test_colored_buttons_glow_the_pattern_of_where_they_are(self) -> None:
+        buttons = [axidev_osk.button(id=name, label=name, min_width=48, min_height=48) for name in ("a", "b", "c")]
+        harness = StdHarness(self, locator.colored(buttons), also=[locator.on(buttons)])
+        harness.window.show()
+        widgets = nodes_by_id(harness.window)
+
+        wait_until(lambda: all(widgets[name].property("locatorColor") for name in ("a", "b", "c")))
+
+        rects = []
+        for name in ("a", "b", "c"):
+            corner = widgets[name].mapTo(harness.window.centralWidget(), widgets[name].rect().topLeft())
+            rects.append(_rect(corner.x(), corner.y(), widgets[name].width(), widgets[name].height()))
+        self.assertEqual([widgets[name].property("locatorColor") for name in ("a", "b", "c")], locator.palette(rects))
+
+
+def _hue(color: str) -> float:
+    red, green, blue = (int(color[index : index + 2], 16) / 255 for index in (1, 3, 5))
+    return colorsys.rgb_to_hsv(red, green, blue)[0] * 360
 
 
 class PromptTests(unittest.TestCase):

@@ -105,16 +105,20 @@ def corner_toggle(state: Any, window: str) -> list[axidev_osk.Map]:
 
 
 def on_dragged(ctx: Any, event: Any) -> list[axidev_osk.Map]:
-    """Move a window by as much as its title bar was dragged."""
+    """Move a window by as much as its title bar was dragged with the left mouse button."""
 
     del ctx
+    if event["button"] != "left":
+        return []
     return [axidev_osk.window.move_by(event["window"], event["dx"], event["dy"])]
 
 
 def on_resize_dragged(ctx: Any, event: Any) -> list[axidev_osk.Map]:
-    """Resize a window by as much as its resize grip was dragged."""
+    """Resize a window by as much as its resize grip was dragged with the left mouse button."""
 
     del ctx
+    if event["button"] != "left":
+        return []
     return [axidev_osk.window.resize_by(event["window"], event["dx"], event["dy"])]
 
 

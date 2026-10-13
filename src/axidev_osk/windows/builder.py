@@ -128,11 +128,16 @@ class RuntimeWindow(QMainWindow):
                         central_layout,
                         title=self.windowTitle(),
                         parent=central,
-                        on_move=lambda dx, dy: engine.dispatcher.post(window_dragged(window_id, dx, dy)),
-                        on_resize=lambda dx, dy: engine.dispatcher.post(window_resize_dragged(window_id, dx, dy)),
+                        on_move=lambda dx, dy, button: engine.dispatcher.post(
+                            window_dragged(window_id, dx, dy, button)
+                        ),
+                        on_resize=lambda dx, dy, button: engine.dispatcher.post(
+                            window_resize_dragged(window_id, dx, dy, button)
+                        ),
+                        on_close=lambda button: engine.dispatcher.post(window_close_requested(window_id, button)),
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
-                            lambda: engine.dispatcher.post(window_drag_started(window_id))
+                            lambda button: engine.dispatcher.post(window_drag_started(window_id, button))
                         )
                         if use_runtime_drag_motion
                         else None,

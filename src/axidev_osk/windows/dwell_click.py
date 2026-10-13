@@ -35,8 +35,10 @@ from ..components.mouse_buttons import BUTTONS_BY_NAME
 from ..config.models import DwellClickConfig
 from ..widget_properties import COMPONENT_TYPE
 
-_POLL_INTERVAL_MS = 16
-_DIRECTION_REVERSAL_COSINE = -0.5
+
+
+def _alpha(opacity: float) -> int:
+    return round(255 * opacity)
 
 
 def _paint_dot(widget: QWidget, progress: float, color: QColor, config: DwellClickConfig) -> None:
@@ -95,7 +97,7 @@ class _DwellFadeFeedback(QWidget):
     @property
     def feedback_color(self) -> QColor:
         color = self.palette().color(self._color_role)
-        color.setAlpha(round(240 * self._opacity))
+        color.setAlpha(round(_alpha(self._config.indicator_opacity) * self._opacity))
         return color
 
     def show_feedback(self, position: QPoint, progress: float) -> None:
@@ -174,7 +176,7 @@ class DwellClickIndicator(QWidget):
         """Return the theme gray used while dwell progress accumulates."""
 
         color = self.palette().color(QPalette.ColorRole.Mid)
-        color.setAlpha(240)
+        color.setAlpha(_alpha(self._config.indicator_opacity))
         return color
 
     @property
@@ -182,7 +184,7 @@ class DwellClickIndicator(QWidget):
         """Return the translucent gray marking full progress."""
 
         color = self.palette().color(QPalette.ColorRole.Mid)
-        color.setAlpha(130)
+        color.setAlpha(_alpha(self._config.indicator_track_opacity))
         return color
 
     def show_progress(self, global_position: QPoint, progress: float) -> None:
@@ -277,7 +279,7 @@ class DwellClickController(QObject):
         self._travel_distance_since_click: float | None = None
         self._progress = 0.0
         self._timer = QTimer(self)
-        self._timer.setInterval(_POLL_INTERVAL_MS)
+        self._timer.setInterval(config.poll_interval_ms)
         self._timer.timeout.connect(self._poll_cursor)
 
     def start(self) -> None:
@@ -299,6 +301,7 @@ class DwellClickController(QObject):
         """Use new dwell settings from the next sample on, enabling or disabling dwell as they say."""
 
         self._config = config
+        self._timer.setInterval(config.poll_interval_ms)
         self.indicator.set_config(config)
         self.set_enabled(config.enabled)
 
@@ -515,7 +518,8 @@ class DwellClickController(QObject):
             self._distance_squared(previous_direction, QPoint())
             * self._distance_squared(current_direction, QPoint())
         )
-        if dot_product > _DIRECTION_REVERSAL_COSINE * magnitude_product:
+        reversal_cosine = math.cos(math.radians(self._config.direction_reversal_angle_deg))
+        if dot_product > reversal_cosine * magnitude_product:
             return
         factor = self._config.direction_reversal_progress_factor
         self._progress *= factor
@@ -542,14 +546,15 @@ class DwellClickController(QObject):
             base_rate = (
                 self._config.stop_speed_px_s - speed
             ) / speed_range
-        score_exponent = 0.5
+        near = self._config.acceleration_exponent_near
+        score_exponent = self._config.acceleration_exponent_far
         if self._travel_distance_since_click is not None:
             distance_ratio = min(
                 1.0,
                 self._travel_distance_since_click
                 / self._config.distance_curve_full_px,
             )
-            score_exponent = 0.25 + 0.25 * distance_ratio
+            score_exponent = near + (score_exponent - near) * distance_ratio
         acceleration = 1 + (
             (self._config.maximum_progress_rate - 1)
             * self._deceleration_score**score_exponent
