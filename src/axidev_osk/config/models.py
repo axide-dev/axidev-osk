@@ -73,6 +73,10 @@ class DwellClickConfig:
             normal rather than short-distance curve.
         velocity_release_ms: Time for remembered speed to fall from the stop
             threshold to zero after movement ends.
+        indicator_size_px: Width and height of the progress indicator.
+        indicator_min_dot_px: Dot diameter when progress starts.
+        indicator_max_dot_px: Dot diameter at full progress.
+        indicator_fade_ms: How long the dot fades after a cancel or a click.
     """
 
     enabled: bool = False
@@ -86,6 +90,10 @@ class DwellClickConfig:
     movement_penalty_px: float = 15.0
     distance_curve_full_px: float = 200.0
     velocity_release_ms: int = 100
+    indicator_size_px: int = 30
+    indicator_min_dot_px: int = 4
+    indicator_max_dot_px: int = 24
+    indicator_fade_ms: int = 250
 
     def __post_init__(self) -> None:
         """Reject timing and distance values that cannot define a dwell."""
@@ -146,6 +154,14 @@ class DwellClickConfig:
             raise ValueError(
                 "Dwell click velocity release must be at least 1 millisecond"
             )
+        if self.indicator_size_px < 1:
+            raise ValueError("Dwell click indicator size must be at least 1 pixel")
+        if not 0 <= self.indicator_min_dot_px <= self.indicator_max_dot_px <= self.indicator_size_px:
+            raise ValueError(
+                "Dwell click indicator dots must satisfy 0 <= minimum <= maximum <= indicator size"
+            )
+        if self.indicator_fade_ms < 0:
+            raise ValueError("Dwell click indicator fade must be at least 0 milliseconds")
 
 
 @dataclass(frozen=True, slots=True)

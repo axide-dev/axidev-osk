@@ -34,7 +34,7 @@ When you add something, ask whether a profile author should be able to change it
 - A failure is reported, not raised through the queue: a failing action becomes `action.failed`, a failing callback or binding becomes `callback.failed`, and the queue continues.
 - Durable state lives in the declared variables of `runtime/state.py`. A variable is declared where its lifetime belongs: the root config's `state` for values every profile shares, a profile's `state` for values that reset when it starts, `std` modules' `STATE` for library values, and `OBSERVED_VARIABLES` for what the engine observes. Profiles read observed variables but never set them.
 - Widgets render state and are never its source of truth. Only momentary visual details, such as a pressed look, stay in Qt.
-- The engine owns no colors or font families: a profile's `theme` and an attachment's options carry them.
+- The engine fixes nothing about how something looks or behaves that a user may need to change, because each user needs different values: colors, fonts, sizes, timings, and visible text come from a profile's `theme` or stylesheet, or from an option with a default.
 - Buttons never take keyboard focus: an on-screen keyboard must not steal typing from the target app.
 - A widget property the engine sets is listed in `widget_properties.py`, which both sets and reserves it; a profile style cannot set it.
 - Profile switching, quit sequencing, the lock-screen panel, and display recovery stay in the engine's lifecycle code; profiles only request them through actions.

@@ -29,18 +29,14 @@ from ..config.models import DwellClickConfig
 from ..widget_properties import COMPONENT_TYPE
 
 _POLL_INTERVAL_MS = 16
-_INDICATOR_SIZE_PX = 30
-_MINIMUM_DOT_SIZE_PX = 4
-_MAXIMUM_DOT_SIZE_PX = 24
-_CANCEL_FADE_DURATION_MS = 250
 _DIRECTION_REVERSAL_COSINE = -0.5
 
 
-def _paint_dot(widget: QWidget, progress: float, color: QColor) -> None:
+def _paint_dot(widget: QWidget, progress: float, color: QColor, config: DwellClickConfig) -> None:
     painter = QPainter(widget)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    diameter = _MINIMUM_DOT_SIZE_PX + (
-        (_MAXIMUM_DOT_SIZE_PX - _MINIMUM_DOT_SIZE_PX) * progress
+    diameter = config.indicator_min_dot_px + (
+        (config.indicator_max_dot_px - config.indicator_min_dot_px) * progress
     )
     inset = (widget.width() - diameter) / 2
     bounds = QRectF(widget.rect()).adjusted(inset, inset, -inset, -inset)
@@ -59,9 +55,11 @@ class _DwellFadeFeedback(QWidget):
         object_name: str,
         component_type: str,
         color_role: QPalette.ColorRole,
+        config: DwellClickConfig,
     ) -> None:
         super().__init__(parent)
         self._progress = 0.0
+        self._config = config
         self._opacity = 0.0
         self._color_role = color_role
         self.setObjectName(object_name)
@@ -71,14 +69,21 @@ class _DwellFadeFeedback(QWidget):
             True,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(_INDICATOR_SIZE_PX, _INDICATOR_SIZE_PX)
         self._fade = QVariantAnimation(self)
-        self._fade.setDuration(_CANCEL_FADE_DURATION_MS)
         self._fade.setStartValue(1.0)
         self._fade.setEndValue(0.0)
         self._fade.valueChanged.connect(self._set_opacity)
         self._fade.finished.connect(self.clear)
+        self.set_config(config)
         self.hide()
+
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Take the dot's size and fade time from ``config``."""
+
+        self._config = config
+        self.resize(config.indicator_size_px, config.indicator_size_px)
+        self._fade.setDuration(config.indicator_fade_ms)
+        self.update()
 
     @property
     def feedback_color(self) -> QColor:
@@ -108,16 +113,16 @@ class _DwellFadeFeedback(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:  # type: ignore[override]
         del event
-        _paint_dot(self, self._progress, self.feedback_color)
+        _paint_dot(self, self._progress, self.feedback_color, self._config)
 
 
 class DwellClickIndicator(QWidget):
     """Paint growing dwell progress without intercepting pointer input."""
 
-    def __init__(self, parent: QWidget, *, visible_from_progress: float) -> None:
+    def __init__(self, parent: QWidget, config: DwellClickConfig) -> None:
         super().__init__(parent)
         self._progress = 0.0
-        self._visible_from_progress = visible_from_progress
+        self._config = config
         self.setObjectName("dwellClickIndicator")
         self.setProperty(COMPONENT_TYPE, "dwell-click-indicator")
         self.setAttribute(
@@ -125,25 +130,31 @@ class DwellClickIndicator(QWidget):
             True,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(_INDICATOR_SIZE_PX, _INDICATOR_SIZE_PX)
         self.cancel_feedback = _DwellFadeFeedback(
             parent,
             object_name="dwellClickCancelFeedback",
             component_type="dwell-click-cancel-feedback",
             color_role=QPalette.ColorRole.Mid,
+            config=config,
         )
         self.complete_feedback = _DwellFadeFeedback(
             parent,
             object_name="dwellClickCompleteFeedback",
             component_type="dwell-click-complete-feedback",
             color_role=QPalette.ColorRole.Highlight,
+            config=config,
         )
+        self.set_config(config)
         self.hide()
 
-    def set_visible_from_progress(self, progress: float) -> None:
-        """Show the dot only once progress reaches ``progress``."""
+    def set_config(self, config: DwellClickConfig) -> None:
+        """Take when the dot appears, its size, and its fade time from ``config``."""
 
-        self._visible_from_progress = progress
+        self._config = config
+        self.resize(config.indicator_size_px, config.indicator_size_px)
+        self.cancel_feedback.set_config(config)
+        self.complete_feedback.set_config(config)
+        self.update()
 
     @property
     def progress(self) -> float:
@@ -170,7 +181,7 @@ class DwellClickIndicator(QWidget):
     def show_progress(self, global_position: QPoint, progress: float) -> None:
         """Place the dot behind a screen point and display its progress."""
 
-        if progress < self._visible_from_progress:
+        if progress < self._config.indicator_start_progress:
             self.clear()
             return
         parent = self.parentWidget()
@@ -221,8 +232,8 @@ class DwellClickIndicator(QWidget):
         """Paint a gray dot that grows with dwell progress."""
 
         del event
-        _paint_dot(self, 1.0, self.track_color)
-        _paint_dot(self, self._progress, self.progress_color)
+        _paint_dot(self, 1.0, self.track_color, self._config)
+        _paint_dot(self, self._progress, self.progress_color, self._config)
 
 
 class DwellClickController(QObject):
@@ -238,10 +249,7 @@ class DwellClickController(QObject):
         self._window = window
         self._config = config
         self._enabled = config.enabled
-        self.indicator = DwellClickIndicator(
-            surface,
-            visible_from_progress=config.indicator_start_progress,
-        )
+        self.indicator = DwellClickIndicator(surface, config)
         self._clicked_position: QPoint | None = None
         self._target: QWidget | None = None
         self._last_position: QPoint | None = None
@@ -277,7 +285,7 @@ class DwellClickController(QObject):
         """Use new dwell settings from the next sample on, enabling or disabling dwell as they say."""
 
         self._config = config
-        self.indicator.set_visible_from_progress(config.indicator_start_progress)
+        self.indicator.set_config(config)
         self.set_enabled(config.enabled)
 
     def set_enabled(self, enabled: bool) -> None:

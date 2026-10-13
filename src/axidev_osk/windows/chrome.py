@@ -12,7 +12,11 @@ standard-library title bar made of nodes could work there. On Windows the
 window keeps the operating system's own frame and title bar, which no
 profile can replace. The engine promises profiles only what it can keep on
 every platform, so a profile can turn this chrome off with
-``chrome.enabled`` but not replace it.
+``chrome.enabled`` but not replace it. A profile's stylesheet styles and
+sizes each part by its object name (``layerShellTitleBar``,
+``layerShellTitleLabel``, ``layerShellCloseButton``,
+``layerShellResizeHandle``), and the window's ``close_label`` value sets the
+close button's text.
 """
 
 from __future__ import annotations
@@ -94,6 +98,12 @@ class OverlayTitleBar(QFrame):
         """Show a new window title."""
 
         self._title_label.setText(title)
+
+    def set_close_label(self, label: str) -> None:
+        """Show ``label`` on the close button."""
+
+        # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
+        self._close_button.setText(label.replace("&", "&&"))
 
     def set_close_enabled(self, enabled: bool) -> None:
         """Set whether the title bar exposes its close control."""
