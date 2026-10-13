@@ -103,7 +103,7 @@ class LayoutParityTests(unittest.TestCase):
 
 class ConfigParityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
+        self.profile = make_test_engine(RecordingBackend()).decoder().decode_config(build_default_config()).active
 
     def _attachment(self, attachment_id: str) -> tuple[str | None, object]:
         attachment = next(attachment for attachment in self.profile.attachments if attachment.id == attachment_id)

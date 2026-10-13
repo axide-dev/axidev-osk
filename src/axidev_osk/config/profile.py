@@ -280,11 +280,6 @@ class ConfigDecoder:
         self._check_profile = check_profile
         self._load_state = load_state
 
-    def decode_root(self, data: object) -> ProfileConfig:
-        """Validate every profile in a root config and return the active one."""
-
-        return self.decode_config(data).active
-
     def decode_config(self, data: object) -> RootConfig:
         """Validate every profile in a root config and return them all."""
 

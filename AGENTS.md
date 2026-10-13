@@ -37,7 +37,7 @@ When you add something, ask whether a profile author should be able to change it
 - The engine owns no colors or font families: a profile's `theme` and an attachment's options carry them.
 - Buttons never take keyboard focus: an on-screen keyboard must not steal typing from the target app.
 - A widget property the engine sets is listed in `widget_properties.py`, which both sets and reserves it; a profile style cannot set it.
-- Quit sequencing, the lock-screen panel, and display recovery stay in the engine's lifecycle code; profiles only request them through actions.
+- Profile switching, quit sequencing, the lock-screen panel, and display recovery stay in the engine's lifecycle code; profiles only request them through actions.
 
 ## Where Things Live
 

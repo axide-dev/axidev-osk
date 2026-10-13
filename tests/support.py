@@ -237,7 +237,7 @@ def make_keyboard_test_engine(keyboard_backend: Any) -> tuple[Engine, KeyboardSe
 def start_test_profile(engine: Engine, root_config: Mapping[str, Any]) -> ProfileConfig:
     """Decode ``root_config`` with ``engine`` and start its active profile."""
 
-    profile = engine.decoder().decode_root(root_config)
+    profile = engine.decoder().decode_config(root_config).active
     engine.profile.start(profile)
     return profile
 
