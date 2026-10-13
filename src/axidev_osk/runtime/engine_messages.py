@@ -67,6 +67,9 @@ def _record(**fields: Variable) -> Variable:
     return Variable(record, record_default(record))
 
 
+# Variables the engine writes from observations; profiles read them but cannot set them. A value a
+# binding can set, such as a window's opacity, has no setter action and no copy here: the variable
+# its binding reads is its only source.
 OBSERVED_VARIABLES: dict[StatePath, Variable] = {
     ("input", "keys"): Variable(MapOf(Scalar("boolean")), {}),
     ("input", "locks"): _record(**{lock: _boolean() for lock in _LOCKS}),
@@ -248,38 +251,6 @@ def window_state_changed(
 
 def keyboard_down(key: str, mods: tuple[str, ...] = (), repeat: bool = True) -> RuntimeAction:
     return validated_action(KEYBOARD_DOWN, {"key": key, "mods": list(mods), "repeat": repeat}, decode_keyboard_down)
-
-
-def keyboard_up(key: str) -> RuntimeAction:
-    return validated_action(KEYBOARD_UP, {"key": key}, decode_keyboard_key)
-
-
-def keyboard_tap(key: str, mods: tuple[str, ...] = ()) -> RuntimeAction:
-    return validated_action(KEYBOARD_TAP, {"key": key, "mods": list(mods)}, decode_keyboard_tap)
-
-
-def keyboard_type_text(text: str) -> RuntimeAction:
-    return validated_action(KEYBOARD_TYPE_TEXT, {"text": text}, decode_text)
-
-
-def process_spawn(argv: tuple[str, ...], tag: str, detached: bool = False) -> RuntimeAction:
-    return validated_action(
-        PROCESS_SPAWN,
-        {"argv": list(argv), "tag": tag, "detached": detached},
-        decode_process_spawn,
-    )
-
-
-def log_info(message: str) -> RuntimeAction:
-    return validated_action(LOG_INFO, {"message": message}, decode_log)
-
-
-def log_warn(message: str) -> RuntimeAction:
-    return validated_action(LOG_WARN, {"message": message}, decode_log)
-
-
-def log_error(message: str) -> RuntimeAction:
-    return validated_action(LOG_ERROR, {"message": message}, decode_log)
 
 
 def decode_input_key(arguments: DataMap) -> InputKeyArguments:

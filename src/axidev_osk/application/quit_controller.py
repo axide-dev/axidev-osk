@@ -35,6 +35,11 @@ class ApplicationQuitController(QObject):
     sending ``app.quit``. Otherwise it calls ``send_quit``, which queues
     ``app.quit``. The ``app.quit`` handler calls ``shutdown``.
 
+    SIGTERM quits without asking. Other signals, stdin closing, and closing the
+    last visible window ask first, with the reason ``signal``,
+    ``stdin_closed``, or ``window_closed``. A shutdown step that fails is
+    logged and the remaining steps still run.
+
     Side effects:
         Installs OS signal handlers, owns a heartbeat ``QTimer`` so
         Python signal handlers run promptly under Qt's event loop, and

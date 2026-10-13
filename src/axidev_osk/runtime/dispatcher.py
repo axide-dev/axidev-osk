@@ -69,8 +69,11 @@ class Dispatcher:
     ``process_pending``. An action registered ``when_idle`` waits until no
     other message is queued or in the inbox; such actions then run one at a
     time in the order they arrived. The dispatcher owns ``action.failed``, the
-    event it reports when an action fails. Once closed, it drops every waiting
-    and later message.
+    event it reports when an action fails. A failing event handler is logged
+    and the event's other handlers still run. A drain logs a warning every
+    10,000 messages but never stops, so an action that keeps producing work
+    can keep the owner thread busy. Once closed, it drops every waiting and
+    later message.
     """
 
     def __init__(self) -> None:

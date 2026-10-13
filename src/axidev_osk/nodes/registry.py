@@ -65,7 +65,10 @@ class NodeKind:
     decode_structure: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
     check_options: Callable[[ConfigReader, object, tuple[str, ...]], None] = lambda reader, options, children: None
-    """Reject decoded options that do not fit the node's children, given their IDs."""
+    """Reject decoded options that do not fit the node's children, given their IDs.
+
+    It runs at load and on every later decode.
+    """
 
     @property
     def events(self) -> tuple[str, ...]:

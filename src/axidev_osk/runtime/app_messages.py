@@ -137,10 +137,6 @@ def app_quit(exit_code: int = 0) -> RuntimeAction:
     return validated_action(APP_QUIT, {"exit_code": exit_code}, decode_app_quit)
 
 
-def linux_open_permission_setup() -> RuntimeAction:
-    return validated_action(LINUX_OPEN_PERMISSION_SETUP, {}, decode_empty)
-
-
 def window_show(window_id: str) -> RuntimeAction:
     return validated_action(WINDOW_SHOW, {"window": window_id}, decode_window)
 

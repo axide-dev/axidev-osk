@@ -3,7 +3,8 @@
 Every value lives in a declared variable. The engine declares what it
 observes, the root config declares what every profile shares, and the active
 profile declares its own. The tree stores values and checks them against
-their declared type, but it never knows what any of them mean.
+their declared type, but it never knows what any of them mean. Values live
+only in memory; nothing is saved to disk.
 """
 
 from __future__ import annotations
@@ -253,8 +254,9 @@ class StateView:
     """Read-only access to declared state with Lua-like semantics.
 
     ``view.name`` and ``view["name"]`` return the stored value, a nested view
-    for maps, or ``None`` for an absent map entry. Reading a path no
-    declaration covers raises ``VariableError``.
+    for maps, or ``None`` for an absent map entry. Each lookup reads one
+    segment, so ``view["keys"]["."]`` reads a name that contains a dot. Reading
+    a path no declaration covers raises ``VariableError``.
     """
 
     __slots__ = ("_tree", "_path", "_recorder")

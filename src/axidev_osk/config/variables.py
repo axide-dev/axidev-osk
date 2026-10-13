@@ -9,7 +9,9 @@ A type is one of ``"boolean"``, ``"integer"``, ``"number"``, ``"string"``,
 ``{"list": T}``, ``{"map": T}``, or ``{"record": {field: declaration}}``. A
 scalar needs a ``default``; a list or map defaults to empty, and a record takes
 its default from its fields' declarations. The engine stores these values and
-checks them against their type, but it never knows what they mean.
+checks them against their type, but it never knows what they mean. Booleans
+and numbers never mix: ``True`` is not ``1``, and an integer variable rejects a
+boolean.
 """
 
 from __future__ import annotations
