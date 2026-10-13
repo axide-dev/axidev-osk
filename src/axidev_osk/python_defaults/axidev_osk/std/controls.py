@@ -225,11 +225,10 @@ def strip(
     """A bottom row holding a ``⋯`` button that shows ``children`` beside it and ``panels`` above it.
 
     Closed, the strip is only that button: wide and easy to hit, but one short
-    row tall. Menus
-    among ``children`` take ``group=strip_group(id)`` and put their panels in
-    ``panels``. Closing the strip closes them too. ``opts`` replaces fields of
-    the strip's outer box and ``toggle_opts`` fields of the ``⋯`` button, whose
-    style name is ``stripToggle``.
+    row tall. Menus among ``children`` take ``group=strip_group(id)`` and put
+    their panels in ``panels``. Closing the strip closes them too. ``opts``
+    replaces fields of the strip's outer box and ``toggle_opts`` fields of the
+    ``⋯`` button, whose style name is ``stripToggle``.
     """
 
     def is_open(state: Any) -> bool:

@@ -209,6 +209,13 @@ class AttachmentRuntimeTests(unittest.TestCase):
         self.assertIn("'hc' does nothing", logs.output[0])
         self.assertEqual([config.delay_ms for config in harness.windows["pad"].dwell], [250])
 
+    def test_starting_while_attachments_still_run_raises(self) -> None:
+        harness = AttachmentHarness([axidev_osk.dwell(id="d", window="pad")])
+        harness.start()
+
+        with self.assertRaisesRegex(RuntimeError, "still running"):
+            harness.runtime.start(harness.profile)
+
     def test_stopping_turns_hot_corners_off_until_a_profile_with_them_starts(self) -> None:
         harness = AttachmentHarness([axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS)])
         harness.start()

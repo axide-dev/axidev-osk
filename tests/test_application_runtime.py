@@ -30,7 +30,7 @@ from axidev_osk.runtime.app_messages import (
 )
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
-from axidev_osk.runtime.engine_messages import keyboard_down, keyboard_reset
+from axidev_osk.runtime.engine_messages import WINDOW_STATE_CHANGED, keyboard_down, keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services.keyboard import KeyboardService
@@ -669,6 +669,27 @@ class ProfileSwitchTests(unittest.TestCase):
         # Only the new window's own reports while it is built and shown; the
         # old window's closing reports ran before c started.
         self.assertEqual(self._state(runtime, "seen"), [False, False, True])
+
+    def test_a_window_shown_between_two_profiles_fails_instead_of_building_an_old_window(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("c")], extra={"c": _profile_c()}))
+        failures = _record_failures(runtime)
+        shown: list[str] = []
+
+        def show_once(event: DataMap) -> MessageResult:
+            if shown or runtime._switching_to is None:
+                return []
+            shown.append(str(event["window"]))
+            return [window_show("pad")]
+
+        runtime.engine.dispatcher.add_raw_event_handler(WINDOW_STATE_CHANGED, show_once)
+        self._release(runtime, "a:go")
+
+        self.assertEqual(shown, ["pad"])
+        self.assertEqual([failure.message for failure in failures], ["No window named 'pad' in the active profile"])
+        window = runtime._window_manager.get("pad")
+        assert window is not None
+        self.assertIn("c:root", nodes_by_id(window))
+        self.assertNotIn("a:go", nodes_by_id(window))
 
     def test_a_quit_queued_after_a_switch_still_exits(self) -> None:
         runtime = self._runtime(_switch_root(lambda ctx, event: []))

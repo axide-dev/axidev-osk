@@ -121,6 +121,7 @@ class NodeBuilder:
         """
 
         unbinds: list[Unsubscribe] = []
+        outer = self._unbinds
         self._unbinds = unbinds
         try:
             widget = self.build(node)
@@ -129,7 +130,7 @@ class NodeBuilder:
                 unbind()
             raise
         finally:
-            self._unbinds = None
+            self._unbinds = outer
         return widget, unbinds
 
     def build(self, node: NodeConfig) -> QWidget:

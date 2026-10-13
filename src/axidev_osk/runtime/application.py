@@ -146,9 +146,11 @@ class ApplicationRuntime:
     def start(self) -> int:
         """Start the profile, services, and startup windows, then run the Qt event loop.
 
-        Startup and a profile switch show start windows the same way. Shutdown
-        closes the queue, then stops the profile, so its callbacks never see
-        teardown. The shutdown steps are registered first: when a step of
+        Startup and a profile switch show start windows the same way. At
+        startup that runs outside a queue drain, which is safe because
+        building a window never drains: a binding that fails while it is
+        bound posts its report. Shutdown closes the queue, then stops the
+        profile, so its callbacks never see teardown. The shutdown steps are registered first: when a step of
         starting fails, they run before the error is raised.
         """
 
@@ -218,6 +220,8 @@ class ApplicationRuntime:
             self._unbind_theme = None
         self._attachments.stop()
         self._window_manager.close_all()
+        # Until the next profile starts, a window action fails instead of building an old window.
+        self._window_manager.set_factories({})
 
     def _switch_profile(self, arguments: ProfileSwitchArguments) -> MessageResult:
         """Tear the running profile down and send ``profile.start`` for the requested one.
@@ -285,10 +289,8 @@ class ApplicationRuntime:
                 continue
             window = self._window_manager.get_or_create(window_config.id)
             position = state.get(("windows", window_config.id, "position"))
-            if isinstance(position, dict):
-                x, y = position["x"], position["y"]
-                assert isinstance(x, int) and isinstance(y, int)
-                window.restore_position(x, y)
+            if position is not None:
+                window.restore_position(position["x"], position["y"])  # type: ignore[index]
             self._window_manager.show(window_config.id)
         if self._panel_prepared:
             self._window_manager.show(self._secure_input_panel_window()).set_close_enabled(False)

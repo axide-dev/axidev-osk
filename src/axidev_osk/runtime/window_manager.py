@@ -27,8 +27,14 @@ class WindowManager:
         self._factories: dict[str, WindowFactory] = dict(factories)
 
     def set_factories(self, factories: Mapping[str, WindowFactory]) -> None:
-        """Build later windows from ``factories``, such as another profile's; live windows stay as they are."""
+        """Build later windows from ``factories``, such as another profile's.
 
+        Raises while windows are live, so no window outlives the factories it
+        was built from.
+        """
+
+        if self._windows:
+            raise RuntimeError(f"Close the live windows {sorted(self._windows)} before replacing their factories")
         self._factories = dict(factories)
 
     def get_or_create(self, window_id: str) -> RuntimeWindow:

@@ -7,6 +7,7 @@ corners and quit requests behave. The engine knows none of it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from . import axidev_osk
@@ -176,7 +177,6 @@ def _dwell_button(placement: axidev_osk.Map) -> axidev_osk.Map:
     return axidev_osk.button(id="dwell", label="Dwell", latched=enabled, on_release=toggle, **placement)
 
 
-PROFILES = [("default", "Default"), ("social", "Social")]
 STRIP_STYLE = {"object_name": "settingsStrip"}
 
 # Dwell option, caption, minimum, maximum, step, unit. Each range holds the
@@ -212,7 +212,7 @@ DWELL_STEPPERS: list[tuple[str, str, Any, Any, Any, str]] = [
 
 def _with_unit(unit: str) -> Any:
     def show(value: float) -> str:
-        text = f"{value:.2f}" if isinstance(value, float) and not float(value).is_integer() else f"{value:g}"
+        text = f"{value:.2f}" if isinstance(value, float) and not value.is_integer() else f"{value:g}"
         return f"{text}{unit}"
 
     return show
@@ -221,7 +221,7 @@ def _with_unit(unit: str) -> Any:
 def _profile_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map]:
     return controls.dropdown(
         f"{window}:profile-menu",
-        PROFILES,
+        [(name, caption) for name, caption, _build in PROFILES],
         value=lambda state: axidev_osk.read(state, "app.profile"),
         on_select=lambda ctx, profile: [axidev_osk.profile.switch(profile)],
         label="Profile",
@@ -504,49 +504,59 @@ def social_profile() -> axidev_osk.Map:
     )
 
 
+def keyboard_profile() -> axidev_osk.Map:
+    """The keyboard the app starts with."""
+
+    return axidev_osk.profile(
+        state=std.with_state(),
+        theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
+        windows=_with_settings([keyboard_window(), *prompt_windows()]),
+        attachments=[
+            axidev_osk.dwell(
+                id=DWELL,
+                window=KEYBOARD,
+                **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
+            ),
+            axidev_osk.pointer_locator(
+                id="keyboard-locator",
+                window=KEYBOARD,
+                radius_percent=30,
+                maximum_opacity_percent=60,
+                radius_standard_deviations=3,
+                **POINTER_LOCATOR,
+            ),
+            axidev_osk.hot_corners(
+                id="hot-corners",
+                corners=["top_left", "top_right", "bottom_left", "bottom_right"],
+                **HOT_CORNER_INDICATOR,
+            ),
+            axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
+        ],
+        on=std.with_handlers(
+            {
+                "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
+                "window.close_requested": _on_close_requested,
+                "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
+                "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
+                "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
+                "linux.permission_setup_opened": _on_permission_setup_opened,
+            }
+        ),
+    )
+
+
+PROFILES: list[tuple[str, str, Callable[[], axidev_osk.Map]]] = [
+    ("default", "Default", keyboard_profile),
+    ("social", "Social", social_profile),
+]
+"""Every bundled profile: its name, its caption in the profile menu, and how it is built."""
+
+
 def build_default_config() -> axidev_osk.Map:
     """Return the bundled root config: the keyboard the app starts with, and the social profile."""
 
     return axidev_osk.config(
         active_profile="default",
         state=SHARED_STATE,
-        profiles={
-            "default": axidev_osk.profile(
-                state=std.with_state(),
-                theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
-                windows=_with_settings([keyboard_window(), *prompt_windows()]),
-                attachments=[
-                    axidev_osk.dwell(
-                        id=DWELL,
-                        window=KEYBOARD,
-                        **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
-                    ),
-                    axidev_osk.pointer_locator(
-                        id="keyboard-locator",
-                        window=KEYBOARD,
-                        radius_percent=30,
-                        maximum_opacity_percent=60,
-                        radius_standard_deviations=3,
-                        **POINTER_LOCATOR,
-                    ),
-                    axidev_osk.hot_corners(
-                        id="hot-corners",
-                        corners=["top_left", "top_right", "bottom_left", "bottom_right"],
-                        **HOT_CORNER_INDICATOR,
-                    ),
-                    axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
-                ],
-                on=std.with_handlers(
-                    {
-                        "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
-                        "window.close_requested": _on_close_requested,
-                        "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
-                        "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
-                        "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
-                        "linux.permission_setup_opened": _on_permission_setup_opened,
-                    }
-                ),
-            ),
-            "social": social_profile(),
-        },
+        profiles={name: build() for name, _caption, build in PROFILES},
     )
