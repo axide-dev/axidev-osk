@@ -24,6 +24,11 @@ way.
 Profiles route ``keyboard.reset`` to ``on_reset`` (``std.with_handlers`` does it)
 so latches clear when the engine releases every held key, and declare these
 variables with ``std.with_state``.
+
+Every builder's ``opts`` may also set ``latched``, a boolean or a binding, to
+light the key while it is true; the key is lit as ``active`` while its output
+is down. Both reach the button through ``styles.lit``, and a ``style`` in
+``opts`` adds to that style.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ from typing import Any
 
 from ... import axidev_osk
 from . import layouts
+from .styles import lit
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
@@ -91,8 +97,9 @@ def legend(state: Any, entry: Mapping[str, Any]) -> str:
 def from_entry(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A key button for one layout entry; ``opts`` overrides any button field."""
 
-    defaults = {"id": f"key:{entry['output']}", **behavior(entry, opts)}
-    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
+    fields = behavior(entry, opts)
+    defaults = {"id": f"key:{entry['output']}", **_without(fields, "active", "latched")}
+    return _lit_button(defaults, _without(opts, *_BEHAVIOR), fields.get("active", False), fields.get("latched", False))
 
 
 def at(
@@ -112,12 +119,15 @@ def at(
     defaults = {
         "id": f"key:{position}",
         "label": lambda state: value(state, position, "label", ""),
-        "active": lambda state: value(state, position, "active", False),
-        "latched": lambda state: value(state, position, "latched", False),
         "on_press": lambda ctx, event: run(ctx, event, position, "on_press"),
         "on_release": lambda ctx, event: run(ctx, event, position, "on_release"),
     }
-    return axidev_osk.button(**axidev_osk.merge(defaults, _without(opts, *_BEHAVIOR)))
+    return _lit_button(
+        defaults,
+        _without(opts, *_BEHAVIOR),
+        lambda state: value(state, position, "active", False),
+        lambda state: value(state, position, "latched", False),
+    )
 
 
 def on_layout(
@@ -199,9 +209,10 @@ def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axid
 def behavior(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """How a layout entry behaves as a key, whatever widget shows it.
 
-    Returns button fields: its ``label``, ``active`` while its key is down,
-    ``latched`` while a modifier or lock holds, and the ``on_press`` and
-    ``on_release`` callbacks. Pressing sends the key down, repeating while it
+    Returns its ``label``, ``active`` while its key is down, ``latched``
+    while a modifier or lock holds, and the ``on_press`` and ``on_release``
+    callbacks. ``label`` and the callbacks are button fields; ``active`` and
+    ``latched`` light the widget through ``styles.lit``. Pressing sends the key down, repeating while it
     is held, and releasing lets it go; a modifier latches instead.
 
     ``opts`` may set ``repeat`` for any key, and ``mode`` and ``latch`` for a modifier.
@@ -314,6 +325,17 @@ def _flag(opts: Mapping[str, Any] | None, name: str, default: bool) -> bool:
 
     value = (opts or {}).get(name)
     return default if value is None else bool(value)
+
+
+def _lit_button(defaults: Mapping[str, Any], opts: Mapping[str, Any], active: Any, latched: Any) -> axidev_osk.Map:
+    """A button from ``defaults`` and ``opts``, lit through ``styles.lit`` by ``active`` and ``latched``.
+
+    A ``latched`` in ``opts`` replaces the behavior's own, and a ``style`` in ``opts`` adds to the lit style.
+    """
+
+    chosen = opts.get("latched")
+    style = {**lit(active, latched if chosen is None else chosen), **(opts.get("style") or {})}
+    return axidev_osk.button(**axidev_osk.merge(defaults, {**_without(opts, "latched", "style"), "style": style}))
 
 
 def _without(opts: Mapping[str, Any] | None, *names: str) -> dict[str, Any]:

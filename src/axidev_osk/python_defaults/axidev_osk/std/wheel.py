@@ -20,6 +20,7 @@ from typing import Any
 
 from ... import axidev_osk
 from . import keys
+from .styles import lit
 
 SLICES = 10
 
@@ -171,16 +172,15 @@ def wheel(
                 return [*run(ctx, event, found, "on_release"), axidev_osk.state.set(path_var, None)]
             return []
 
+        lit_properties = lit(field("active", False), field("latched", False))["properties"]
         return axidev_osk.button(
             id=f"{wheel_id}:slice:{index}",
             shape=lambda state: wedge(*ellipse(state), inner, spacing, index, slices),
             anchor=lambda state: middle(*ellipse(state), inner, index, slices),
             label=field("label", ""),
-            active=field("active", False),
-            latched=field("latched", False),
             on_press=on_press,
             on_release=on_release,
-            style={"properties": kind},
+            style={"properties": lambda state: {**lit_properties(state), **kind(state)}},
         )
 
     center = axidev_osk.button(

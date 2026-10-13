@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import cast
 
-from PySide6.QtCore import QEvent, QRect, QRectF, Qt
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
+    QEnterEvent,
     QFont,
     QFontInfo,
     QFontMetrics,
@@ -29,8 +30,9 @@ _SAMPLE_SIZE = 32
 class Button(QPushButton):
     """Application button that treats right clicks like left clicks.
 
-    The widget keeps no interaction state of its own. Callers render
-    pressed and latched state from runtime snapshots.
+    The widget keeps no interaction state of its own beyond whether the
+    pointer is over it, so ``entered`` and ``left`` always alternate. Profiles
+    render any lasting look, such as a latched key, through style properties.
 
     Its label is never cut: the font its style gives it is the largest size
     used, and a label that does not fit its content area, or its shape, is
@@ -50,11 +52,17 @@ class Button(QPushButton):
     solid left border, no margin, and a corner radius under half the sample.
     """
 
+    entered = Signal()
+    """The pointer moved onto the button."""
+    left = Signal()
+    """The pointer moved off the button."""
+
     def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
         super().__init__(label, parent)
         self._parts: tuple[str, ...] | None = None
         self._outline: QPainterPath | None = None
         self._border_colors: dict[int, QColor] = {}
+        self._hovered = False
 
     def set_parts(self, parts: tuple[str, ...] | None) -> None:
         """Show ``parts`` spread over the button, or, given ``None``, the one label set with ``setText``."""
@@ -234,6 +242,19 @@ class Button(QPushButton):
         self.style().drawControl(QStyle.ControlElement.CE_PushButtonBevel, rectangle, painter, self)
         painter.end()
         return sample.pixelColor(0, _SAMPLE_SIZE // 2)
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        super().enterEvent(event)
+        # Qt can repeat an enter, for example when another window closes under the pointer.
+        if not self._hovered:
+            self._hovered = True
+            self.entered.emit()
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        if self._hovered:
+            self._hovered = False
+            self.left.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Treat a right-button press as a left-button press."""

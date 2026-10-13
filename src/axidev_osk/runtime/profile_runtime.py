@@ -135,7 +135,13 @@ class ProfileRuntime:
         self._functions = functions
         self._state = state
         self._unsubscribes: list[Unsubscribe] = []
+        self._stop_hooks: list[Callable[[], None]] = []
         dispatcher.register_action(STATE_SET, decode_state_set, self._handle_state_set)
+
+    def when_stopped(self, hook: Callable[[], None]) -> None:
+        """Run ``hook`` whenever the running profile stops, to drop what it owned, such as its timers."""
+
+        self._stop_hooks.append(hook)
 
     def declare_observed(self, variables: Mapping[StatePath, Variable]) -> None:
         """Declare variables the engine writes from observations, at their default values."""
@@ -207,6 +213,8 @@ class ProfileRuntime:
         for unsubscribe in self._unsubscribes:
             unsubscribe()
         self._unsubscribes.clear()
+        for hook in self._stop_hooks:
+            hook()
 
     def run_callback(self, ref: FunctionRef, source: str, event: DataMap) -> MessageResult:
         """Run one profile callback, turning failures into ``callback.failed``."""

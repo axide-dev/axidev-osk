@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
+from PySide6.QtGui import QEnterEvent, QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLabel, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QWidget
 
 from axidev_osk.components.button import Button
 from axidev_osk.config.profile import ProfileConfig
@@ -54,7 +54,12 @@ class NodeTests(unittest.TestCase):
                 "id": "keys",
                 "spacing": 4,
                 "children": [
-                    _button("a", label=legend, latched=lambda s: s.shift, cell={"row": 0, "column": 0}),
+                    _button(
+                        "a",
+                        label=legend,
+                        style={"properties": lambda s: {"latched": s.shift}},
+                        cell={"row": 0, "column": 0},
+                    ),
                     _button("plain", label="Plain", cell={"row": 0, "column": 1, "column_span": 2}),
                 ],
             },
@@ -64,13 +69,90 @@ class NodeTests(unittest.TestCase):
         key = self._find(window, "a")
         assert isinstance(key, Button)
 
-        self.assertEqual((key.text(), key.property("interactionState")), ("a", "idle"))
+        self.assertEqual((key.text(), key.property("latched")), ("a", False))
         self.engine.dispatcher.dispatch(state_set("shift", True))
 
-        self.assertEqual((key.text(), key.property("latched"), key.property("interactionState")), ("A", True, "latched"))
+        self.assertEqual((key.text(), key.property("latched")), ("A", True))
         self.assertEqual(self._find(window, "plain").text(), "Plain")  # type: ignore[attr-defined]
         self.assertEqual(key.focusPolicy(), Qt.FocusPolicy.NoFocus)
         self.assertEqual(window.objectName(), "padWindow")
+
+    def test_buttons_report_the_pointer_entering_and_leaving(self) -> None:
+        seen: list[tuple[str, str]] = []
+
+        def record(name: str) -> object:
+            return lambda ctx, event: seen.append((name, event["node"])) or []
+
+        profile = self._profile(
+            {
+                "kind": "box",
+                "id": "row",
+                "children": [_button("a", on_enter=record("enter"), on_leave=record("leave"))],
+            }
+        )
+        key = self._find(self._window(profile), "a")
+        # Showing the window may report the pointer already over it, so start from the pointer outside.
+        QApplication.sendEvent(key, QEvent(QEvent.Type.Leave))
+        self.engine.dispatcher.process_pending()
+        seen.clear()
+
+        QApplication.sendEvent(key, QEnterEvent(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1)))
+        QApplication.sendEvent(key, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
+        QApplication.sendEvent(key, QEvent(QEvent.Type.Leave))
+        self.engine.dispatcher.process_pending()
+
+        self.assertEqual(seen, [("enter", "a"), ("leave", "a")])
+
+    def test_a_node_reporting_the_pointer_follows_a_swipe_across_its_children(self) -> None:
+        reports: list[tuple[str, str, float, float]] = []
+        pressed: list[str] = []
+
+        def record(ctx: object, event: DataMap) -> list[object]:
+            del ctx
+            reports.append((str(event["name"]), str(event["node"]), float(event["x"]), float(event["y"])))  # type: ignore[arg-type]
+            return []
+
+        def on(name: str) -> object:
+            return lambda ctx, event: record(ctx, {**event, "name": name})
+
+        window = {
+            "id": "pad",
+            "title": "Pad",
+            "content": {
+                "kind": "grid",
+                "id": "keys",
+                "reports_pointer": True,
+                "children": [
+                    _button("a", cell={"row": 0, "column": 0}, on_press=lambda ctx, event: pressed.append(event["node"]) or []),
+                    _button("b", cell={"row": 0, "column": 1}),
+                ],
+            },
+        }
+        handlers = {name: on(name) for name in ("node.pointer_pressed", "node.pointer_moved", "node.pointer_released")}
+        profile = start_test_profile(
+            self.engine,
+            {"active_profile": "p", "profiles": {"p": {"windows": [window], "on": handlers}}},
+        )
+        shown = self._window(profile)
+        shown.resize(200, 60)
+        QTest.qWait(10)
+        grid, a, b = (self._find(shown, node_id) for node_id in ("keys", "a", "b"))
+        start = a.rect().center()
+        end = b.mapTo(a, b.rect().center())
+
+        QTest.mousePress(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+        QTest.mouseMove(a, end)
+        QTest.mouseRelease(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+        QTest.qWait(10)
+
+        in_grid = (a.mapTo(grid, start), a.mapTo(grid, end))
+        self.assertEqual(pressed, ["a"])
+        self.assertEqual(
+            [(name, node) for name, node, _x, _y in reports],
+            [("node.pointer_pressed", "keys"), ("node.pointer_moved", "keys"), ("node.pointer_released", "keys")],
+        )
+        self.assertEqual((reports[0][2], reports[0][3]), (in_grid[0].x(), in_grid[0].y()))
+        self.assertEqual((reports[2][2], reports[2][3]), (in_grid[1].x(), in_grid[1].y()))
 
     def test_button_labels_show_ampersands_as_written(self) -> None:
         profile = self._profile(
@@ -124,16 +206,16 @@ class NodeTests(unittest.TestCase):
         failures: list[DataMap] = []
         self.engine.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: failures.append(event) or [])
         profile = self._profile(
-            {"kind": "box", "id": "row", "children": [_button("a", latched=lambda s: s.mode == "on" or s.mode)]},
+            {"kind": "box", "id": "row", "children": [_button("a", enabled=lambda s: s.mode == "on" or s.mode)]},
             state={"mode": axidev_osk.var("string", "on")},
         )
         key = self._find(self._window(profile), "a")
 
         self.engine.dispatcher.dispatch(state_set("mode", "no"))
 
-        self.assertTrue(key.property("latched"))
+        self.assertTrue(key.isEnabled())
         self.assertEqual([failure["source"] for failure in failures], ["node:a"])
-        self.assertIn("latched must be a boolean", str(failures[0]["message"]))
+        self.assertIn("enabled must be a boolean", str(failures[0]["message"]))
 
     def test_a_kind_added_later_gets_its_events_and_collisions_are_rejected(self) -> None:
         nodes = self.engine.nodes
@@ -265,7 +347,7 @@ class NodeTests(unittest.TestCase):
     def test_styles_cannot_set_the_properties_the_engine_sets(self) -> None:
         cases = {
             "componentId": {"kind": "label", "id": "a"},
-            "latched": _button("a"),
+            "classes": _button("a"),
         }
         for name, node in cases.items():
             content = {**node, "style": {"properties": {name: "x"}}}
