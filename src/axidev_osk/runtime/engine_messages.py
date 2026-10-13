@@ -8,7 +8,7 @@ for the same event run, so profiles always read up-to-date state.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
@@ -18,6 +18,7 @@ from .decoding import (
     bool_value,
     decode_empty,
     int_value,
+    map_value,
     non_empty_string_value,
     optional_string_value,
     require_keys,
@@ -37,6 +38,7 @@ KEYBOARD_PERMISSION_REQUIRED = "keyboard.permission_required"
 KEYBOARD_RESET = "keyboard.reset"
 PROCESS_EXITED = "process.exited"
 WINDOW_STATE_CHANGED = "window.state_changed"
+DISPLAY_CONFIGURATION_CHANGED = "display.configuration_changed"
 NODE_GEOMETRY_CHANGED = "node.geometry_changed"
 
 KEYBOARD_DOWN = "keyboard.down"
@@ -89,10 +91,27 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
                     "minimized": _boolean(),
                     "position": _record(x=_integer(), y=_integer()),
                     "size": _record(width=_integer(), height=_integer()),
+                    "content_size": _record(width=_integer(), height=_integer()),
                 }
             )
         ),
         {},
+    ),
+    ("screens",): Variable(
+        ListOf(
+            Record(
+                {
+                    "name": _string(),
+                    "primary": _boolean(),
+                    "x": _integer(),
+                    "y": _integer(),
+                    "width": _integer(),
+                    "height": _integer(),
+                    "available": _record(x=_integer(), y=_integer(), width=_integer(), height=_integer()),
+                }
+            )
+        ),
+        [],
     ),
     ("nodes",): Variable(
         MapOf(
@@ -142,6 +161,15 @@ class WindowStateArguments:
     y: int
     width: int
     height: int
+    content_width: int
+    content_height: int
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayConfigurationArguments:
+    """Every connected screen, as ``display_configuration_changed`` describes it."""
+
+    screens: tuple[DataMap, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,8 +282,14 @@ def window_state_changed(
     y: int,
     width: int,
     height: int,
+    content_width: int,
+    content_height: int,
 ) -> RuntimeEvent:
-    """Report what a window looks like on screen; ``x`` and ``y`` are its top-left corner in screen coordinates."""
+    """Report what a window looks like on screen; ``x`` and ``y`` are its top-left corner in screen coordinates.
+
+    ``content_width`` and ``content_height`` are the smallest size that holds
+    its content, the size ``fit_content`` keeps it at.
+    """
 
     return validated_event(
         WINDOW_STATE_CHANGED,
@@ -267,6 +301,8 @@ def window_state_changed(
             "y": y,
             "width": width,
             "height": height,
+            "content_width": content_width,
+            "content_height": content_height,
         },
         decode_window_state,
     )
@@ -306,7 +342,7 @@ def decode_process_exited(arguments: DataMap) -> ProcessExitedArguments:
 
 
 def decode_window_state(arguments: DataMap) -> WindowStateArguments:
-    require_keys(arguments, ("window", "visible", "minimized", "x", "y", "width", "height"))
+    require_keys(arguments, ("window", "visible", "minimized", "x", "y", "width", "height", "content_width", "content_height"))
     return WindowStateArguments(
         window_id=non_empty_string_value(arguments, "window"),
         visible=bool_value(arguments, "visible"),
@@ -315,7 +351,45 @@ def decode_window_state(arguments: DataMap) -> WindowStateArguments:
         y=int_value(arguments, "y"),
         width=int_value(arguments, "width"),
         height=int_value(arguments, "height"),
+        content_width=int_value(arguments, "content_width"),
+        content_height=int_value(arguments, "content_height"),
     )
+
+
+def display_configuration_changed(screens: Sequence[DataMap]) -> RuntimeEvent:
+    """Report the connected screens once Qt has finished changing them.
+
+    Each screen is ``{name, primary, x, y, width, height, available}`` in
+    screen coordinates, where ``available`` is the ``{x, y, width, height}``
+    that panels and docks leave free.
+    """
+
+    return validated_event(
+        DISPLAY_CONFIGURATION_CHANGED, {"screens": [dict(screen) for screen in screens]}, decode_display_configuration
+    )
+
+
+def decode_display_configuration(arguments: DataMap) -> DisplayConfigurationArguments:
+    require_keys(arguments, ("screens",))
+    screens = arguments["screens"]
+    if not isinstance(screens, list):
+        raise ValueError("screens must be a list")
+    return DisplayConfigurationArguments(screens=tuple(_decode_screen(screen) for screen in screens))
+
+
+def _decode_screen(screen: object) -> DataMap:
+    if not isinstance(screen, dict):
+        raise ValueError("each screen must be a map")
+    require_keys(screen, ("name", "primary", "x", "y", "width", "height", "available"))
+    available = map_value(screen, "available")
+    require_keys(available, ("x", "y", "width", "height"))
+    area = ("x", "y", "width", "height")
+    return {
+        "name": string_value(screen, "name"),
+        "primary": bool_value(screen, "primary"),
+        **{key: int_value(screen, key) for key in area},
+        "available": {key: int_value(available, key) for key in area},
+    }
 
 
 def node_geometry_changed(node_id: str, x: int, y: int, width: int, height: int) -> RuntimeEvent:
@@ -388,6 +462,7 @@ def register_engine_events(dispatcher: Dispatcher) -> None:
     dispatcher.register_event(KEYBOARD_RESET, decode_empty)
     dispatcher.register_event(PROCESS_EXITED, decode_process_exited)
     dispatcher.register_event(WINDOW_STATE_CHANGED, decode_window_state)
+    dispatcher.register_event(DISPLAY_CONFIGURATION_CHANGED, decode_display_configuration)
     dispatcher.register_event(NODE_GEOMETRY_CHANGED, decode_node_geometry)
 
 
@@ -425,11 +500,15 @@ def install_engine_handlers(
             "minimized": event.minimized,
             "position": {"x": event.x, "y": event.y},
             "size": {"width": event.width, "height": event.height},
+            "content_size": {"width": event.content_width, "height": event.content_height},
         }
         messages: MessageResult = []
         for name, value in observed.items():
             messages.extend(profile_runtime.set_observed(("windows", event.window_id, name), value))
         return messages
+
+    def record_screens(event: DisplayConfigurationArguments) -> MessageResult:
+        return profile_runtime.set_observed(("screens",), list(event.screens))
 
     def record_node_geometry(event: NodeGeometryArguments) -> MessageResult:
         messages = profile_runtime.set_observed(("nodes", event.node, "position"), {"x": event.x, "y": event.y})
@@ -468,6 +547,7 @@ def install_engine_handlers(
     dispatcher.add_event_handler(KEYBOARD_STATUS_CHANGED, record_keyboard_status)
     dispatcher.add_event_handler(WINDOW_STATE_CHANGED, record_window_state)
     dispatcher.add_event_handler(NODE_GEOMETRY_CHANGED, record_node_geometry)
+    dispatcher.add_event_handler(DISPLAY_CONFIGURATION_CHANGED, record_screens)
     dispatcher.register_action(KEYBOARD_DOWN, decode_keyboard_down, press)
     dispatcher.register_action(KEYBOARD_UP, decode_keyboard_key, release)
     dispatcher.register_action(KEYBOARD_TAP, decode_keyboard_tap, tap)

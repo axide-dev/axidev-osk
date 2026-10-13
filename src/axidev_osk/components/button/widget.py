@@ -28,15 +28,17 @@ _SAMPLE_SIZE = 32
 
 from ..mouse_buttons import MOUSE_BUTTONS, mouse_button_name
 
-_PRESSING = tuple(button for button in MOUSE_BUTTONS if button != Qt.MouseButton.LeftButton)
-"""Every other named mouse button presses the widget as the left button does; ``pressed_with`` still names it."""
+_LEFT = Qt.MouseButton.LeftButton
+_NOT_LEFT = ~Qt.MouseButton.LeftButton
+"""Every mouse button but the left one; each presses the widget as the left one does, and ``pressed_with`` still names it."""
 
 
 class Button(QPushButton):
-    """Application button that every named mouse button presses: left, right, middle, back, and forward.
+    """Application button that every mouse button presses.
 
     It decides nothing about what each mouse button means: ``pressed_with``
-    names the one behind the current press, the node reports it with
+    names the one behind the current press, or ``other`` for a mouse button
+    with no name, the node reports it with
     ``button.pressed`` and ``button.released``, and the profile decides. The
     widget keeps no other interaction state than that and whether the pointer
     is over it, so ``entered`` and ``left`` always alternate. Profiles render
@@ -278,14 +280,14 @@ class Button(QPushButton):
             self.left.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Press with any of the pressing buttons, remembering which one."""
+        """Press with any mouse button, remembering which one."""
 
         if not self.isDown():
             self._pressed_with = mouse_button_name(event.button())
         self._forward_mouse_event(event, super().mousePressEvent)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Preserve left-button drag semantics while another pressing button is held."""
+        """Preserve left-button drag semantics while another mouse button is held."""
 
         self._forward_mouse_event(event, super().mouseMoveEvent)
 
@@ -308,13 +310,10 @@ class Button(QPushButton):
 
     @staticmethod
     def _left_mouse_event(event: QMouseEvent) -> QMouseEvent:
-        button = event.button()
+        button = _LEFT if event.button() & _NOT_LEFT else event.button()
         buttons = event.buttons()
-        if button in _PRESSING:
-            button = Qt.MouseButton.LeftButton
-        for pressing in _PRESSING:
-            if buttons & pressing:
-                buttons = (buttons & ~pressing) | Qt.MouseButton.LeftButton
+        if buttons & _NOT_LEFT:
+            buttons = (buttons & _LEFT) | _LEFT
         return QMouseEvent(
             event.type(),
             event.position(),
@@ -329,7 +328,7 @@ class Button(QPushButton):
         event: QMouseEvent,
         handler: Callable[[QMouseEvent], None],
     ) -> None:
-        if event.button() not in _PRESSING and not any(event.buttons() & pressing for pressing in _PRESSING):
+        if not event.button() & _NOT_LEFT and not event.buttons() & _NOT_LEFT:
             handler(event)
             return
         left_event = self._left_mouse_event(event)

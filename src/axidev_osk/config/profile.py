@@ -158,6 +158,9 @@ class WindowValues:
     turns it off for a window whose close it handles itself.
     ``input_blocked`` ignores clicks except on nodes with ``passes_input_block``.
     ``close_label`` is the text of the engine-drawn close button.
+    ``fit_content`` resizes the window to the smallest size that holds its
+    content whenever that size changes, such as when a panel opens or closes;
+    without it the window only grows when its content needs more room.
     """
 
     title: str
@@ -167,15 +170,22 @@ class WindowValues:
     input_blocked: bool
     style: StyleConfig
     close_label: str
+    fit_content: bool
 
 
 @dataclass(frozen=True, slots=True)
 class WindowConfig:
-    """One decoded window: fixed identity, platform surface, and content, plus its values."""
+    """One decoded window: fixed identity, platform surface, and content, plus its values.
+
+    ``keep_position`` builds the window, when a profile switch shows it, where
+    a window with the same ID last was; without it the window starts where
+    its overlay places it, and a profile may move it with ``window.move_to``.
+    """
 
     id: str
     content: NodeConfig
     show_on_start: bool
+    keep_position: bool
     overlay: OverlayConfig
     chrome: ChromeConfig
     values: Live[WindowValues]
@@ -380,6 +390,7 @@ class ConfigDecoder:
             id=reader.string("id"),
             content=self._decode_node(reader.child("content"), None, resolver),
             show_on_start=reader.boolean("show_on_start", False),
+            keep_position=reader.boolean("keep_position", True),
             overlay=overlay,
             chrome=chrome,
             values=_live(reader, resolver, _decode_window_values),
@@ -472,6 +483,7 @@ def _decode_window_values(reader: ConfigReader) -> WindowValues:
         input_blocked=reader.boolean("input_blocked", False),
         style=_decode_style(reader),
         close_label=reader.string("close_label", "x"),
+        fit_content=reader.boolean("fit_content", True),
     )
 
 

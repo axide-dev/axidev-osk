@@ -1,14 +1,15 @@
-"""Observe Qt display changes and report them through the runtime dispatcher."""
+"""Observe Qt display changes and report the connected screens through the runtime dispatcher."""
 
 from __future__ import annotations
 
 from typing import cast
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QRect, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 
-from ..runtime.app_messages import display_configuration_changed
+from ..messages import DataMap
 from ..runtime.dispatcher import Dispatcher
+from ..runtime.engine_messages import display_configuration_changed
 
 
 class DisplayService(QObject):
@@ -67,5 +68,24 @@ class DisplayService(QObject):
         self._timer.start(0)
 
     def _notify(self) -> None:
-        if self._dispatcher is not None:
-            self._dispatcher.dispatch(display_configuration_changed())
+        if self._dispatcher is None:
+            return
+        app = cast(QGuiApplication, QGuiApplication.instance())
+        primary = app.primaryScreen()
+        screens = [_describe(screen, primary=screen is primary) for screen in app.screens()]
+        self._dispatcher.dispatch(display_configuration_changed(screens))
+
+
+def _area(rect: QRect) -> DataMap:
+    return {"x": rect.x(), "y": rect.y(), "width": rect.width(), "height": rect.height()}
+
+
+def _describe(screen: QScreen, *, primary: bool) -> DataMap:
+    """One screen as ``display.configuration_changed`` reports it."""
+
+    return {
+        "name": screen.name(),
+        "primary": primary,
+        **_area(screen.geometry()),
+        "available": _area(screen.availableGeometry()),
+    }

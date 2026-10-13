@@ -188,6 +188,16 @@ class _Window:
         return action("window.resize_by", window=window, dx=dx, dy=dy)
 
     @staticmethod
+    def move_to(window: str, x: int, y: int) -> Map:
+        """Put ``window``'s top-left corner at the screen point ``(x, y)``."""
+
+        return action("window.move_to", window=window, x=x, y=y)
+
+    @staticmethod
+    def resize_to(window: str, width: int, height: int) -> Map:
+        return action("window.resize_to", window=window, width=width, height=height)
+
+    @staticmethod
     def click(window: str, x: int, y: int, button: str = "left") -> Map:
         """Click whatever is under the screen point ``(x, y)`` in ``window`` with the mouse ``button``."""
 
