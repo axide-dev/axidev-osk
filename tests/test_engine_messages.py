@@ -56,7 +56,7 @@ class Harness:
                 }
             },
         }
-        self.engine.profile.start(decoder.decode_root(root))
+        self.engine.profile.start(decoder.decode_config(root).active)
 
     def act(self, name: str, **arguments: object) -> None:
         self.dispatcher.dispatch(RuntimeAction(name, arguments))  # type: ignore[arg-type]

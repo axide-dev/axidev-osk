@@ -28,7 +28,7 @@ from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_IN
 from .pointer import HoverReporter, PointerReporter, WheelReporter
 
 if TYPE_CHECKING:
-    from ..runtime.dispatcher import Dispatcher
+    from ..runtime.dispatcher import Dispatcher, Unsubscribe
     from ..runtime.profile_runtime import BindingTracker
 
 NodeBuild = Callable[[NodeConfig, "NodeBuilder"], QWidget]
@@ -115,8 +115,35 @@ class NodeBuilder:
         self._kinds = kinds
         self._dispatcher = dispatcher
         self._bindings = bindings
+        self._unbinds: list[Unsubscribe] | None = None
+
+    def build_tree(self, node: NodeConfig) -> tuple[QWidget, list[Unsubscribe]]:
+        """Build ``node`` and its children, returning the widget and every binding they made.
+
+        The caller owns the bindings and drops them when it closes, so they
+        never decode against another profile's state. When building fails,
+        the bindings made so far are dropped before the error is raised.
+        """
+
+        unbinds: list[Unsubscribe] = []
+        outer = self._unbinds
+        self._unbinds = unbinds
+        try:
+            widget = self.build(node)
+        except BaseException:
+            for unbind in unbinds:
+                unbind()
+            raise
+        finally:
+            self._unbinds = outer
+        return widget, unbinds
 
     def build(self, node: NodeConfig) -> QWidget:
+        """Build one node inside ``build_tree``; node kinds call it for their children."""
+
+        unbinds = self._unbinds
+        if unbinds is None:
+            raise RuntimeError("Nodes are built through build_tree, which owns their bindings")
         kind = self._kinds[node.kind]
         widget = kind.build(node, self)
         widget.setProperty(COMPONENT_TYPE, node.kind)
@@ -137,8 +164,7 @@ class NodeBuilder:
             apply_style(widget, values.style, previous.style if previous is not None else None)
             kind.apply(widget, values.options, previous.options if previous is not None else None)
 
-        unbind = self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial)
-        widget.destroyed.connect(lambda _object=None: unbind())
+        unbinds.append(self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial))
         return widget
 
     def emit(self, event_name: str, node_id: str, **fields: DataValue) -> None:

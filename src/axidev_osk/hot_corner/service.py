@@ -32,6 +32,13 @@ class HotCornerService:
         if self._dispatcher is not None:
             self._restart()
 
+    def clear(self) -> None:
+        """Forget the profile's settings and stop the sensors, for a profile without hot corners."""
+
+        self._settings = None
+        self._corners = None
+        self._stop_controller()
+
     def start(self, dispatcher: Dispatcher) -> None:
         """Start corner sensors when the profile configured a hot_corners attachment, and follow display changes."""
 

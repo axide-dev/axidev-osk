@@ -99,7 +99,7 @@ class LayoutParityTests(unittest.TestCase):
     def test_every_key_glows_the_original_locator_color(self) -> None:
         harness = DefaultProfileHarness(self)
         harness.window.show()
-        buttons = [widget for widget in harness.nodes.values() if isinstance(widget, QPushButton)]
+        buttons = [harness.nodes[node_id] for node_id in EXPECTED_LOCATOR_COLORS]
 
         wait_until(lambda: all(button.property("locatorColor") for button in buttons))
 
@@ -124,7 +124,7 @@ class LayoutParityTests(unittest.TestCase):
 
 class ConfigParityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
+        self.profile = make_test_engine(RecordingBackend()).decoder().decode_config(build_default_config()).active
 
     def _attachment(self, attachment_id: str) -> tuple[str | None, object]:
         attachment = next(attachment for attachment in self.profile.attachments if attachment.id == attachment_id)
@@ -251,6 +251,24 @@ class BehaviorParityTests(unittest.TestCase):
 
         self.assertIs(harness.engine.profile.state.get(enabled), False)
         self.assertFalse(harness.nodes["dwell"].property("latched"))
+
+    def test_settings_strip_drives_opacity_and_the_dwell_attachment(self) -> None:
+        harness = self.harness
+
+        self.assertTrue(harness.nodes["keyboard:strip:controls"].isHidden())
+        harness.tap("keyboard:strip:toggle")
+        self.assertFalse(harness.nodes["keyboard:strip:controls"].isHidden())
+
+        harness.tap("keyboard:opacity:down")
+        self.assertAlmostEqual(harness.window.windowOpacity(), KEYBOARD_OPACITY - 0.05, delta=0.005)
+
+        harness.tap("keyboard:dwell-menu")
+        self.assertFalse(harness.nodes["keyboard:dwell-menu:panel"].isHidden())
+        harness.tap("keyboard:dwell-enabled")
+        dwell = harness.attachments.for_window("keyboard").dwell
+        assert dwell is not None
+        self.assertTrue(dwell.enabled)
+        self.assertTrue(harness.nodes["dwell"].property("latched"))
 
     def test_hot_corner_toggles_the_keyboard(self) -> None:
         harness = self.harness

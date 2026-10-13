@@ -256,6 +256,34 @@ class OverlayWindowControllerTests(unittest.TestCase):
 
         self.assertEqual(window.moves, [(12, 34)])
 
+    def test_x11_move_by_keeps_the_window_on_screen(self) -> None:
+        window = FakeWindow()
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.X11_UTILITY,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+
+        with patch.object(controller, "_current_screen_geometry", return_value=QRect(0, 0, 800, 600)):
+            controller.move_by(900, -50)
+
+        self.assertEqual((window.x(), window.y()), (700, 0))
+
+    def test_x11_restored_position_is_kept_on_screen(self) -> None:
+        window = FakeWindow()
+        with patch.object(
+            AlwaysOnTopWindowController,
+            "_detect_backend",
+            return_value=OverlayBackend.X11_UTILITY,
+        ):
+            controller = AlwaysOnTopWindowController(window)
+
+        with patch.object(controller, "_current_screen_geometry", return_value=QRect(0, 0, 800, 600)):
+            controller.restore_position(2000, 590)
+
+        self.assertEqual((window.x(), window.y()), (700, 540))
+
     def test_floating_window_starts_at_its_anchor(self) -> None:
         cases = {
             "top-right": (1000 - 100 - 16, 16),
@@ -303,7 +331,9 @@ class OverlayWindowControllerTests(unittest.TestCase):
                     window, config=AlwaysOnTopWindowConfig(keep_on_screen=keep_on_screen)
                 )
                 controller.move_by(-50, 0)
+                self.assertEqual(window.moves[-1], expected)
 
+                controller.restore_position(-50, 0)
                 self.assertEqual(window.moves[-1], expected)
 
     def test_wayland_layer_shell_manual_move_persists_across_show(self) -> None:

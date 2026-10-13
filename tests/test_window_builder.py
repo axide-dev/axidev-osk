@@ -517,6 +517,41 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         self.assertGreaterEqual(window.minimumHeight(), 320)
         self.assertEqual(window.size(), window.minimumSize())
 
+    def test_window_grows_for_a_shown_panel_and_shrinks_back_when_it_hides(self) -> None:
+        harness = WindowHarness(
+            state={"open": axidev_osk.var("boolean", False)},
+            content=axidev_osk.box(
+                id="pad:root",
+                children=[
+                    axidev_osk.button(id="pad:a", label="a", min_width=200, min_height=100),
+                    axidev_osk.box(
+                        id="pad:panel",
+                        visible=lambda state: state.open,
+                        children=[axidev_osk.button(id="pad:b", label="b", min_height=100)],
+                    ),
+                ],
+            ),
+        )
+        window = harness.build()
+        self.addCleanup(window.deleteLater)
+        window.show()
+        app = qt_app()
+        app.processEvents()
+        closed_size = window.size()
+
+        def settle() -> None:
+            # Qt passes a layout change up through each nested box in its own event round.
+            for _round in range(5):
+                app.processEvents()
+
+        harness.engine.dispatcher.dispatch(state_set("open", True))
+        settle()
+        self.assertGreaterEqual(window.height(), closed_size.height() + 100)
+
+        harness.engine.dispatcher.dispatch(state_set("open", False))
+        settle()
+        self.assertEqual(window.size(), closed_size)
+
     def test_window_installs_pointer_locator_from_its_attachment(self) -> None:
         harness = WindowHarness([axidev_osk.pointer_locator(id="glow", window="pad", gap_color="#242424")], windows=("pad", "other"))
         window = harness.build("pad")

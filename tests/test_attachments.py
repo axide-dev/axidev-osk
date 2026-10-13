@@ -52,9 +52,14 @@ class RecordingWindow:
 class RecordingHotCorners:
     def __init__(self) -> None:
         self.configured: list[tuple[Any, frozenset[str]]] = []
+        self.active: tuple[Any, frozenset[str]] | None = None
 
     def configure(self, settings: Any, corners: frozenset[str]) -> None:
         self.configured.append((settings, corners))
+        self.active = (settings, corners)
+
+    def clear(self) -> None:
+        self.active = None
 
 
 def _root(attachments: list[axidev_osk.Map], windows: tuple[str, ...] = ("pad",), state: axidev_osk.Map | None = None) -> axidev_osk.Map:
@@ -92,7 +97,7 @@ class AttachmentHarness:
             window_lookup=self.windows.get,
             hot_corners=self.hot_corners if hot_corner_service else None,
         )
-        self.profile = self.engine.decoder().decode_root(_root(attachments, windows, state))
+        self.profile = self.engine.decoder().decode_config(_root(attachments, windows, state)).active
         self.engine.profile.start(self.profile)
         self.failures: list[DataMap] = []
         self.engine.dispatcher.add_raw_event_handler(CALLBACK_FAILED, lambda event: self.failures.append(event) or [])
@@ -115,7 +120,7 @@ class DecodeTests(unittest.TestCase):
         }
         for message, attachment in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
-                engine.decoder().decode_root(_root([attachment]))
+                engine.decoder().decode_config(_root([attachment])).active
 
 
     def test_references_and_limits_are_checked_at_load_in_every_profile(self) -> None:
@@ -137,14 +142,14 @@ class DecodeTests(unittest.TestCase):
             spare = _root(attachments)["profiles"]["p"]
             root = axidev_osk.config(active_profile="ok", profiles={"ok": _root([])["profiles"]["p"], "spare": spare})
             with self.subTest(message), self.assertRaisesRegex(ConfigError, rf"config.profiles.spare.attachments\[\d\].*{message}"):
-                engine.decoder().decode_root(root)
+                engine.decoder().decode_config(root).active
 
     def test_pointer_locators_have_no_limit(self) -> None:
         qt_app()
         engine = make_test_engine(RecordingBackend())
         locators = [axidev_osk.pointer_locator(id=name, window="pad", gap_color="#242424") for name in ("a", "b")]
 
-        self.assertEqual(len(engine.decoder().decode_root(_root(locators)).attachments), 2)
+        self.assertEqual(len(engine.decoder().decode_config(_root(locators)).active.attachments), 2)
 
 
 class AttachmentRuntimeTests(unittest.TestCase):
@@ -203,6 +208,23 @@ class AttachmentRuntimeTests(unittest.TestCase):
 
         self.assertIn("'hc' does nothing", logs.output[0])
         self.assertEqual([config.delay_ms for config in harness.windows["pad"].dwell], [250])
+
+    def test_starting_while_attachments_still_run_raises(self) -> None:
+        harness = AttachmentHarness([axidev_osk.dwell(id="d", window="pad")])
+        harness.start()
+
+        with self.assertRaisesRegex(RuntimeError, "still running"):
+            harness.runtime.start(harness.profile)
+
+    def test_stopping_turns_hot_corners_off_until_a_profile_with_them_starts(self) -> None:
+        harness = AttachmentHarness([axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS)])
+        harness.start()
+        self.assertIsNotNone(harness.hot_corners.active)
+
+        harness.runtime.stop()
+        harness.runtime.start(harness.engine.decoder().decode_config(_root([])).active)
+
+        self.assertIsNone(harness.hot_corners.active)
 
 
 class HotCornerFilterTests(unittest.TestCase):

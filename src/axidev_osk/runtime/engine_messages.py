@@ -82,6 +82,7 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         needs_permission_setup=_boolean(),
         permission_setup_text=_string(),
     ),
+    ("app",): _record(profile=_string(), profiles=Variable(ListOf(Scalar("string")), [])),
     ("windows",): Variable(
         MapOf(
             Record(
@@ -124,8 +125,8 @@ OBSERVED_VARIABLES: dict[StatePath, Variable] = {
         {},
     ),
 }
-"""What the engine observes: keys and locks, keyboard output status, each built window, and each node built
-with ``report_geometry``."""
+"""What the engine observes: keys and locks, keyboard output status, the running and available profiles, each built
+window, and each node built with ``report_geometry``."""
 
 
 @dataclass(frozen=True, slots=True)

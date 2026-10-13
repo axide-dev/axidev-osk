@@ -263,7 +263,7 @@ class ConfigDecoderTests(unittest.TestCase):
         def pressed(ctx: CallbackContext, event: DataMap) -> None:
             del ctx, event
 
-        profile = self.decoder.decode_root(
+        profile = self.decoder.decode_config(
             _root(
                 {"opacity": var("number", 0.85)},
                 state={"shift": var("boolean", False)},
@@ -280,7 +280,7 @@ class ConfigDecoderTests(unittest.TestCase):
                     opacity=lambda state: state.opacity,
                 ),
             )
-        )
+        ).active
 
         child = profile.window("pad").content.children[0]
         self.assertEqual(profile.state, declared({"shift": var("boolean", False)}))
@@ -305,7 +305,7 @@ class ConfigDecoderTests(unittest.TestCase):
         }
         for message, node in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
-                self.decoder.decode_root(_root(windows=_pad({"kind": "probe", "id": "root", "children": [node]})))
+                self.decoder.decode_config(_root(windows=_pad({"kind": "probe", "id": "root", "children": [node]}))).active
 
     def test_state_declaration_errors_name_the_config_path(self) -> None:
         cases = {
@@ -317,7 +317,7 @@ class ConfigDecoderTests(unittest.TestCase):
         }
         for message, state in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
-                self.decoder.decode_root(_root(state=state))
+                self.decoder.decode_config(_root(state=state)).active
 
     def test_declarations_overlapping_engine_or_shared_state_are_rejected(self) -> None:
         cases = {
@@ -326,15 +326,15 @@ class ConfigDecoderTests(unittest.TestCase):
         }
         for name, root in cases.items():
             with self.subTest(name), self.assertRaisesRegex(ConfigError, r"\.state: State variable .* overlaps"):
-                self.decoder.decode_root(root)
+                self.decoder.decode_config(root).active
 
     def test_keys_set_to_none_count_as_absent(self) -> None:
-        profile = self.decoder.decode_root(
+        profile = self.decoder.decode_config(
             _root(
                 theme=None,
                 windows=_pad({"kind": "probe", "id": "root", "size": None, "label": None}, opacity=None),
             )
-        )
+        ).active
 
         window = profile.window("pad")
         self.assertEqual((window.values.initial.opacity, window.content.values.initial.options), (1.0, {"size": 1, "label": None, "latched": False}))
@@ -343,28 +343,28 @@ class ConfigDecoderTests(unittest.TestCase):
         root = _with_spare_profile({"windows": [], "colour": "red"})
 
         with self.assertRaisesRegex(ConfigError, "config.profiles.spare has unknown keys: colour"):
-            self.decoder.decode_root(root)
+            self.decoder.decode_config(root).active
 
     def test_nil_entries_are_skipped_and_only_lists_count_as_lists(self) -> None:
-        profile = self.decoder.decode_root(
+        profile = self.decoder.decode_config(
             _root(
                 on={"hot_corner.triggered": None},
                 windows=_pad({"kind": "probe", "id": "root", "children": [None]}),
             )
-        )
+        ).active
         self.assertEqual((dict(profile.on), profile.window("pad").content.children), ({}, ()))
 
         with self.assertRaisesRegex(ConfigError, "children must be a list"):
-            self.decoder.decode_root(_root(windows=_pad({"kind": "probe", "id": "root", "children": ()})))
+            self.decoder.decode_config(_root(windows=_pad({"kind": "probe", "id": "root", "children": ()}))).active
 
     def test_duplicate_node_ids_fail(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Duplicate IDs"):
-            self.decoder.decode_root(
+            self.decoder.decode_config(
                 _root(windows=_pad({
                     "kind": "probe", "id": "root",
                     "children": [{"kind": "probe", "id": "a"}, {"kind": "probe", "id": "a"}],
                 }))
-            )
+            ).active
 
 
 class ProfileRuntimeTests(unittest.TestCase):
@@ -404,7 +404,7 @@ class ProfileRuntimeTests(unittest.TestCase):
             check_profile=self.profile_runtime.check,
             load_state=self.profile_runtime.load_state,
         )
-        return decoder.decode_root(root)
+        return decoder.decode_config(root).active
 
     def _start(self, shared: dict[str, object] | None = None, **profile: object) -> None:
         self.profile_runtime.start(self._decode(_root(shared, **profile)))

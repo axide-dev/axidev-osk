@@ -145,6 +145,12 @@ class FakeOverlay:
     def move_by(self, dx: int, dy: int) -> None:
         del dx, dy
 
+    def restore_position(self, x: int, y: int) -> None:
+        del x, y
+
+    def keep_on_screen(self) -> None:
+        return None
+
     def resize_by(self, dx: int, dy: int) -> None:
         del dx, dy
 
@@ -248,7 +254,7 @@ def make_keyboard_test_engine(keyboard_backend: Any) -> tuple[Engine, KeyboardSe
 def start_test_profile(engine: Engine, root_config: Mapping[str, Any]) -> ProfileConfig:
     """Decode ``root_config`` with ``engine`` and start its active profile."""
 
-    profile = engine.decoder().decode_root(root_config)
+    profile = engine.decoder().decode_config(root_config).active
     engine.profile.start(profile)
     return profile
 

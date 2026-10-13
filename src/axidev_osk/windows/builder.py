@@ -90,7 +90,7 @@ class RuntimeWindow(QMainWindow):
         overlay: OverlayConfig,
         chrome: ChromeConfig,
         values: Live[WindowValues],
-        build_content: Callable[[], QWidget],
+        build_content: Callable[[], tuple[QWidget, list[Callable[[], None]]]],
         engine: Engine,
         dwell: DwellClickConfig | None = None,
     ) -> None:
@@ -112,6 +112,7 @@ class RuntimeWindow(QMainWindow):
         self._chrome_widgets: OverlayChromeWidgets | None = None
         self._dwell_click: DwellClickController | None = None
         self._pointer_locators: dict[str, PointerLocator] = {}
+        self._unbinds: list[Callable[[], None]] = []
         self.setProperty(COMPONENT_TYPE, "window")
         self.setProperty(COMPONENT_ID, window_id)
         self.setWindowTitle(values.initial.title)
@@ -121,7 +122,8 @@ class RuntimeWindow(QMainWindow):
         else:
             self._overlay = configure_plain_window(self)
         try:
-            central = build_content()
+            central, node_unbinds = build_content()
+            self._unbinds.extend(node_unbinds)
             if chrome.enabled and getattr(self._overlay, "uses_custom_chrome", False):
                 central_layout = central.layout()
                 if isinstance(central_layout, QVBoxLayout):
@@ -157,7 +159,10 @@ class RuntimeWindow(QMainWindow):
                 )
             self._opacity = WindowOpacityController(self)
             unbind = engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
-            self.destroyed.connect(lambda _object=None: unbind())
+            self._unbinds.append(unbind)
+            # A window Qt deletes without closing it first drops its bindings too.
+            unbinds = self._unbinds
+            self.destroyed.connect(lambda _object=None: [drop() for drop in unbinds])
             self.apply_startup_size(minimum_size=self._minimum_size)
         except Exception:
             self.release_platform_resources()
@@ -209,6 +214,7 @@ class RuntimeWindow(QMainWindow):
         self._fit_content = values.fit_content
         if refit_now:
             self.resize(self._fitted_size(self._minimum_size))
+            self._overlay.keep_on_screen()
         if previous is not None and values.minimum_size != previous.minimum_size:
             self._refit()
 
@@ -287,9 +293,21 @@ class RuntimeWindow(QMainWindow):
         if self._chrome_widgets is not None:
             self._chrome_widgets.title_bar.set_close_enabled(enabled)
 
-    def release_platform_resources(self) -> None:
-        """Release native resources and the input block before Qt destroys this window."""
+    def restore_position(self, x: int, y: int) -> None:
+        """Place the window's top-left corner at ``(x, y)`` through its overlay backend, before it shows."""
 
+        self._overlay.restore_position(x, y)
+
+    def release_platform_resources(self) -> None:
+        """Release native resources, the input block, and every binding before Qt destroys this window.
+
+        Bindings are dropped here rather than when Qt deletes the widgets
+        later, so a closed window never follows state again.
+        """
+
+        for unbind in self._unbinds:
+            unbind()
+        self._unbinds.clear()
         self._remove_input_blocker()
         release = getattr(self._overlay, "release_resources", None)
         if release is not None:
@@ -329,6 +347,14 @@ class RuntimeWindow(QMainWindow):
             resolved_minimum_size.setHeight(max(resolved_minimum_size.height(), needed_height))
         return resolved_minimum_size
 
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        """Refit the window when its content needs a different size, such as a panel that shows or hides."""
+
+        handled = super().event(event)
+        if event.type() == QEvent.Type.LayoutRequest and self.centralWidget() is not None:
+            self._refit()
+        return handled
+
     def _refit(self) -> None:
         """Follow a change in the smallest size that holds the content.
 
@@ -343,6 +369,7 @@ class RuntimeWindow(QMainWindow):
         self.setMinimumSize(fitted)
         if self._fit_content:
             self.resize(fitted)
+            self._overlay.keep_on_screen()
         self._report_state()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
@@ -426,7 +453,7 @@ def build_profile_window(
 
     installed = attachments or WindowAttachments()
 
-    def build_content() -> QWidget:
+    def build_content() -> tuple[QWidget, list[Callable[[], None]]]:
         surface = RootSurface()
         surface.setObjectName("rootSurface")
         surface.setProperty(COMPONENT_TYPE, "surface")
@@ -435,8 +462,9 @@ def build_profile_window(
         layout = QVBoxLayout(surface)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(engine.node_builder.build(config.content))
-        return surface
+        content, unbinds = engine.node_builder.build_tree(config.content)
+        layout.addWidget(content)
+        return surface, unbinds
 
     window = RuntimeWindow(
         window_id=config.id,

@@ -134,7 +134,7 @@ class DwellClickControllerTests(unittest.TestCase):
         )
         window = {"id": "pad", "title": "Pad", "content": {"kind": "label", "id": "text"}}
         root = {"active_profile": "p", "profiles": {"p": {"windows": [window], "attachments": [dwell]}}}
-        config = engine.decoder().decode_root(root).attachments[0].values.initial
+        config = engine.decoder().decode_config(root).active.attachments[0].values.initial
         assert isinstance(config, DwellClickConfig)
 
         self.controller.set_config(config)

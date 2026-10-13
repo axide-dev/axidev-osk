@@ -18,7 +18,7 @@ def _decode(theme: axidev_osk.Map) -> object:
         active_profile="p",
         profiles={"p": axidev_osk.profile(theme=theme, windows=[axidev_osk.window(id="w", title="w", content=axidev_osk.box(id="r"))])},
     )
-    return make_test_engine(RecordingBackend()).decoder().decode_root(root)
+    return make_test_engine(RecordingBackend()).decoder().decode_config(root).active
 
 
 class ThemeTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ThemeTests(unittest.TestCase):
         app = qt_app()
         previous = (app.styleSheet(), app.palette(), app.font())
         self.addCleanup(lambda: (app.setStyleSheet(previous[0]), app.setPalette(previous[1]), app.setFont(previous[2])))
-        profile = make_test_engine(RecordingBackend()).decoder().decode_root(build_default_config())
+        profile = make_test_engine(RecordingBackend()).decoder().decode_config(build_default_config()).active
 
         apply_theme(app, profile.theme.initial, base_palette=previous[1], base_font=previous[2])
 

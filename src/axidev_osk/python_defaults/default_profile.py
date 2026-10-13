@@ -1,17 +1,18 @@
-"""Default profile: the bundled US ISO keyboard, written like a Lua config.
+"""Default config: the bundled US ISO keyboard and a small social profile, written like a Lua config.
 
 Everything here is profile knowledge: the layout table, the grid math that
-places keys, which keys latch, the prompts, and how corners and quit requests
-behave. The engine knows none of it.
+places keys, which keys latch, the settings strip, the prompts, and how
+corners and quit requests behave. The engine knows none of it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from . import axidev_osk
 from .axidev_osk import std
-from .axidev_osk.std import keys, prompts, windows
+from .axidev_osk.std import controls, keys, prompts, windows
 from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR, POINTER_LOCATOR
 
 KEYBOARD = "keyboard"
@@ -180,6 +181,130 @@ def _key_nodes() -> list[axidev_osk.Map]:
     return [_key_node(entry, cell) for entry, cell in zip(LAYOUT, _cells(), strict=True)]
 
 
+STRIP_STYLE = {"object_name": "settingsStrip"}
+
+# Dwell option, caption, minimum, maximum, step, unit. Each range holds the
+# default and stays inside the dwell validation; the full speed and stop speed
+# bounds follow each other so the two never cross.
+DWELL_STEPPERS: list[tuple[str, str, Any, Any, Any, str]] = [
+    ("delay_ms", "Delay", 50, 2000, 50, " ms"),
+    ("dead_zone_px", "Dead zone", 0, 50, 2, " px"),
+    (
+        "full_speed_px_s",
+        "Full speed",
+        0,
+        lambda state: min(200, axidev_osk.read(state, "settings.dwell.stop_speed_px_s") - 5),
+        5,
+        " px/s",
+    ),
+    (
+        "stop_speed_px_s",
+        "Stop speed",
+        lambda state: axidev_osk.read(state, "settings.dwell.full_speed_px_s") + 5,
+        1000,
+        20,
+        " px/s",
+    ),
+    ("maximum_progress_rate", "Max progress rate", 1.0, 4.0, 0.25, ""),
+    ("indicator_start_progress", "Indicator start", 0.0, 1.0, 0.05, ""),
+    ("direction_reversal_progress_factor", "Reversal factor", 0.0, 1.0, 0.05, ""),
+    ("movement_penalty_px", "Movement penalty", 1, 100, 1, " px"),
+    ("distance_curve_full_px", "Distance curve", 10, 1000, 10, " px"),
+    ("velocity_release_ms", "Velocity release", 10, 1000, 10, " ms"),
+]
+
+
+def _with_unit(unit: str) -> Any:
+    def show(value: float) -> str:
+        text = f"{value:.2f}" if isinstance(value, float) and not value.is_integer() else f"{value:g}"
+        return f"{text}{unit}"
+
+    return show
+
+
+def _profile_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map]:
+    return controls.dropdown(
+        f"{window}:profile-menu",
+        [(name, caption) for name, caption, _build in PROFILES],
+        value=lambda state: axidev_osk.read(state, "app.profile"),
+        on_select=lambda ctx, profile: [axidev_osk.profile.switch(profile)],
+        label="Profile",
+        group=group,
+        panel_opts={"direction": "horizontal"},
+    )
+
+
+def _dwell_menu(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map]:
+    items: list[axidev_osk.Map] = [
+        controls.checkbox(
+            f"{window}:dwell-enabled",
+            "Dwell enabled",
+            "settings.dwell.enabled",
+            {"cell": {"row": 0, "column": 0}},
+        )
+    ]
+    for index, (name, caption, minimum, maximum, step, unit) in enumerate(DWELL_STEPPERS, start=1):
+        items.append(
+            controls.stepper(
+                f"{window}:dwell-{name}",
+                f"settings.dwell.{name}",
+                minimum=minimum,
+                maximum=maximum,
+                step=step,
+                label=caption,
+                format=_with_unit(unit),
+                opts={"cell": {"row": index // 2, "column": index % 2}},
+            )
+        )
+    # The panel is a two-column grid rather than the default column of controls.
+    return controls.menu(
+        f"{window}:dwell-menu",
+        "Dwell settings",
+        items,
+        group=group,
+        panel_opts={"kind": "grid", "spacing": 6},
+    )
+
+
+def settings_strip(window: str) -> axidev_osk.Map:
+    """The collapsed settings strip every window carries: profile, keyboard opacity, and dwell settings."""
+
+    strip_id = f"{window}:strip"
+    group = controls.strip_group(strip_id)
+    profile_button, profile_panel = _profile_dropdown(window, group)
+    dwell_button, dwell_panel = _dwell_menu(window, group)
+    return controls.strip(
+        strip_id,
+        [
+            profile_button,
+            controls.stepper(
+                f"{window}:opacity",
+                "settings.opacity",
+                minimum=0.3,
+                maximum=1.0,
+                step=0.05,
+                label="Opacity",
+                format=lambda value: f"{value:.2f}",
+            ),
+            dwell_button,
+        ],
+        panels=[profile_panel, dwell_panel],
+        opts={"margins": [10, 0, 10, 2], "style": STRIP_STYLE},
+    )
+
+
+def _with_settings(windows: list[axidev_osk.Map]) -> list[axidev_osk.Map]:
+    """Give every window the settings strip, which takes the place of its content's bottom margin."""
+
+    framed = []
+    for window in windows:
+        content = window["content"]
+        left, top, right, _bottom = content.get("margins", [0, 0, 0, 0])
+        window = axidev_osk.merge(window, {"content": axidev_osk.merge(content, {"margins": [left, top, right, 0]})})
+        framed.append(controls.with_strip(window, settings_strip(window["id"])))
+    return framed
+
+
 def keyboard_window() -> axidev_osk.Map:
     return axidev_osk.window(
         id=KEYBOARD,
@@ -228,23 +353,27 @@ def _notice(window: str, title: str, message: str | axidev_osk.Binding) -> axide
     )
 
 
+def _quit_prompt(hint: str | None) -> axidev_osk.Map:
+    return prompts.prompt_window(
+        QUIT_PROMPT,
+        title="Close axidev-osk?",
+        message="Do you want to close axidev-osk? This will stop OSK input.",
+        danger=True,
+        hint=hint,
+        opts=PROMPT_OPTS,
+        buttons=[
+            prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [axidev_osk.app.quit()], accept=True),
+            prompts.prompt_button(f"{QUIT_PROMPT}:no", "No", _hide(QUIT_PROMPT), accept=False),
+        ],
+    )
+
+
 def prompt_windows() -> list[axidev_osk.Map]:
     return [
-        prompts.prompt_window(
-            QUIT_PROMPT,
-            title="Close axidev-osk?",
-            message="Do you want to close axidev-osk? This will stop OSK input.",
-            danger=True,
-            hint=(
-                "Tip: if you only want to hide OSK, move your cursor into "
-                "the screen corner; the hot-corner sensor will hide it without "
-                "shutting the app down."
-            ),
-            opts=PROMPT_OPTS,
-            buttons=[
-                prompts.prompt_button(f"{QUIT_PROMPT}:yes", "Yes", lambda ctx, event: [axidev_osk.app.quit()], accept=True),
-                prompts.prompt_button(f"{QUIT_PROMPT}:no", "No", _hide(QUIT_PROMPT), accept=False),
-            ],
+        _quit_prompt(
+            "Tip: if you only want to hide OSK, move your cursor into "
+            "the screen corner; the hot-corner sensor will hide it without "
+            "shutting the app down."
         ),
         prompts.prompt_window(
             PERMISSION_PROMPT,
@@ -314,49 +443,130 @@ def _on_permission_setup_opened(ctx: Any, event: Any) -> list[axidev_osk.Map]:
     return [axidev_osk.window.show(TERMINAL_NOTICE if event["opened"] else NO_TERMINAL_NOTICE)]
 
 
+SOCIAL_KEYS = [("↑", "Up"), ("↓", "Down"), ("L", "L"), ("K", "K")]
+
+
+def _social_keys() -> list[axidev_osk.Map]:
+    return [
+        keys.key(label, output, {"min_width": KEY_UNIT_PX * 2, "min_height": KEY_UNIT_PX * 2})
+        for label, output in SOCIAL_KEYS
+    ]
+
+
+def social_window() -> axidev_osk.Map:
+    """A small keyboard for scrolling a feed, opening where the main keyboard was."""
+
+    return axidev_osk.window(
+        id=KEYBOARD,
+        title="axidev OSK: social",
+        opacity=_setting("opacity"),
+        show_on_start=True,
+        default_close=False,
+        overlay=OVERLAY,
+        chrome={"enabled": True},
+        content=axidev_osk.box(
+            id="social-surface",
+            margins=[10, 10, 10, 10],
+            spacing=8,
+            children=[
+                axidev_osk.box(
+                    id="social-keys",
+                    direction="horizontal",
+                    spacing=GRID_GAP_PX,
+                    children=std.locator.colored(_social_keys()),
+                ),
+                axidev_osk.label(
+                    id="keyboard-status",
+                    text=lambda state: axidev_osk.read(state, "keyboard.status") or "",
+                    visible=lambda state: not axidev_osk.read(state, "keyboard.ready"),
+                    word_wrap=True,
+                    style={"object_name": "statusLabel"},
+                ),
+            ],
+        ),
+    )
+
+
+def social_profile() -> axidev_osk.Map:
+    return axidev_osk.profile(
+        state=std.with_state(),
+        theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
+        windows=_with_settings([social_window(), _quit_prompt(None)]),
+        attachments=[
+            axidev_osk.pointer_locator(
+                id="keyboard-locator",
+                window=KEYBOARD,
+                radius_percent=30,
+                maximum_opacity_percent=60,
+                radius_standard_deviations=3,
+                **POINTER_LOCATOR,
+            ),
+        ],
+        on=std.with_handlers(
+            {
+                "window.close_requested": _on_close_requested,
+                "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
+                "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
+            },
+            also=[std.locator.on(_social_keys())],
+        ),
+    )
+
+
+def keyboard_profile() -> axidev_osk.Map:
+    """The keyboard the app starts with."""
+
+    return axidev_osk.profile(
+        state=std.with_state(),
+        theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
+        windows=_with_settings([keyboard_window(), *prompt_windows()]),
+        attachments=[
+            axidev_osk.dwell(
+                id=DWELL,
+                window=KEYBOARD,
+                **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
+            ),
+            axidev_osk.pointer_locator(
+                id="keyboard-locator",
+                window=KEYBOARD,
+                radius_percent=30,
+                maximum_opacity_percent=60,
+                radius_standard_deviations=3,
+                **POINTER_LOCATOR,
+            ),
+            axidev_osk.hot_corners(
+                id="hot-corners",
+                corners=["top_left", "top_right", "bottom_left", "bottom_right"],
+                **HOT_CORNER_INDICATOR,
+            ),
+            axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
+        ],
+        on=std.with_handlers(
+            {
+                "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
+                "window.close_requested": _on_close_requested,
+                "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
+                "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
+                "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
+                "linux.permission_setup_opened": _on_permission_setup_opened,
+            },
+            also=[std.locator.on(_key_nodes())],
+        ),
+    )
+
+
+PROFILES: list[tuple[str, str, Callable[[], axidev_osk.Map]]] = [
+    ("default", "Default", keyboard_profile),
+    ("social", "Social", social_profile),
+]
+"""Every bundled profile: its name, its caption in the profile menu, and how it is built."""
+
+
 def build_default_config() -> axidev_osk.Map:
-    """Return the root config of the bundled keyboard, the profile the app runs."""
+    """Return the bundled root config: the keyboard the app starts with, and the social profile."""
 
     return axidev_osk.config(
         active_profile="default",
         state=SHARED_STATE,
-        profiles={
-            "default": axidev_osk.profile(
-                state=std.with_state(),
-                theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
-                windows=[keyboard_window(), *prompt_windows()],
-                attachments=[
-                    axidev_osk.dwell(
-                        id=DWELL,
-                        window=KEYBOARD,
-                        **{name: _setting("dwell", name) for name in DWELL_SETTINGS},
-                    ),
-                    axidev_osk.pointer_locator(
-                        id="keyboard-locator",
-                        window=KEYBOARD,
-                        radius_percent=30,
-                        maximum_opacity_percent=60,
-                        radius_standard_deviations=3,
-                        **POINTER_LOCATOR,
-                    ),
-                    axidev_osk.hot_corners(
-                        id="hot-corners",
-                        corners=["top_left", "top_right", "bottom_left", "bottom_right"],
-                        **HOT_CORNER_INDICATOR,
-                    ),
-                    axidev_osk.secure_input_panel(id="lock-screen-panel", window=KEYBOARD),
-                ],
-                on=std.with_handlers(
-                    {
-                        "hot_corner.triggered": lambda ctx, event: windows.corner_toggle(ctx.state, KEYBOARD),
-                        "window.close_requested": _on_close_requested,
-                        "app.quit_requested": lambda ctx, event: [axidev_osk.window.show(QUIT_PROMPT)],
-                        "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
-                        "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
-                        "linux.permission_setup_opened": _on_permission_setup_opened,
-                    },
-                    also=[std.locator.on(_key_nodes())],
-                ),
-            )
-        },
+        profiles={name: build() for name, _caption, build in PROFILES},
     )

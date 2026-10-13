@@ -48,9 +48,14 @@ class AttachmentRuntime:
         return self._secure_input_panel_window
 
     def start(self, profile: ProfileConfig) -> None:
-        """Attach and bind every attachment of ``profile``; the config decoder already checked their references."""
+        """Attach and bind every attachment of ``profile``; the config decoder already checked their references.
 
-        self.stop()
+        Raises when another profile's attachments are still running: the
+        caller stops them first.
+        """
+
+        if self._unbinds:
+            raise RuntimeError("Attachments are still running; stop them before starting a profile's")
         for attachment in profile.attachments:
             try:
                 apply = self._kinds[attachment.kind].attach(self, attachment.target)
@@ -73,6 +78,8 @@ class AttachmentRuntime:
         self._dwell.clear()
         self._locators.clear()
         self._secure_input_panel_window = None
+        if self._hot_corners is not None:
+            self._hot_corners.clear()
 
     def for_window(self, window_id: str) -> WindowAttachments:
         """Return the attachments a window installs, with their current options."""
