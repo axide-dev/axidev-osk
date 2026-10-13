@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from axidev_osk.config.models import DwellClickConfig
 from axidev_osk.windows.dwell_click import DwellClickController
-from support import qt_app
+from axidev_osk.python_defaults import axidev_osk
+from support import RecordingBackend, make_test_engine, qt_app
 
 
 def _wait_until(condition: Callable[[], object], timeout_ms: int = 2000) -> None:
@@ -89,6 +90,17 @@ class DwellClickConfigTests(unittest.TestCase):
                     "at least 1 millisecond",
                 ):
                     DwellClickConfig(velocity_release_ms=release)
+        for sizes in (
+            {"indicator_size_px": 0, "indicator_min_dot_px": 0, "indicator_max_dot_px": 0},
+            {"indicator_max_dot_px": 31},
+            {"indicator_min_dot_px": 25},
+            {"indicator_min_dot_px": -1},
+        ):
+            with self.subTest(**sizes):
+                with self.assertRaisesRegex(ValueError, "Dwell click indicator"):
+                    DwellClickConfig(**sizes)
+        with self.assertRaisesRegex(ValueError, "indicator fade"):
+            DwellClickConfig(indicator_fade_ms=-1)
 
 
 class DwellClickControllerTests(unittest.TestCase):
@@ -122,6 +134,26 @@ class DwellClickControllerTests(unittest.TestCase):
             ),
         )
         self.addCleanup(self.window.close)
+
+    def test_the_indicator_takes_its_size_from_the_profile_options(self) -> None:
+        engine = make_test_engine(RecordingBackend())
+        dwell = axidev_osk.dwell(
+            id="d", window="pad", indicator_size_px=60, indicator_min_dot_px=10, indicator_max_dot_px=50
+        )
+        window = {"id": "pad", "title": "Pad", "content": {"kind": "label", "id": "text"}}
+        root = {"active_profile": "p", "profiles": {"p": {"windows": [window], "attachments": [dwell]}}}
+        config = engine.decoder().decode_config(root).active.attachments[0].values.initial
+        assert isinstance(config, DwellClickConfig)
+
+        self.controller.set_config(config)
+        indicator = self.controller.indicator
+        indicator.show_progress(self.window.mapToGlobal(QPoint(120, 50)), 1.0)
+
+        sizes = {widget.size().toTuple() for widget in (indicator, indicator.cancel_feedback, indicator.complete_feedback)}
+        self.assertEqual(sizes, {(60, 60)})
+        image = indicator.grab().toImage()
+        painted = [x for x in range(image.width()) if image.pixelColor(x, image.height() // 2).alpha() > 0]
+        self.assertAlmostEqual(len(painted), 50, delta=2)
 
     def test_activates_exact_key_under_current_pointer(self) -> None:
         clicks: list[str] = []
