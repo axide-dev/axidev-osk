@@ -170,11 +170,17 @@ class WindowValues:
 
 @dataclass(frozen=True, slots=True)
 class WindowConfig:
-    """One decoded window: fixed identity, platform surface, and content, plus its values."""
+    """One decoded window: fixed identity, platform surface, and content, plus its values.
+
+    ``keep_position`` builds the window, when a profile switch shows it, where
+    a window with the same ID last was; without it the window starts where
+    its overlay places it, and a profile may move it with ``window.move_to``.
+    """
 
     id: str
     content: NodeConfig
     show_on_start: bool
+    keep_position: bool
     overlay: OverlayConfig
     chrome: ChromeConfig
     values: Live[WindowValues]
@@ -379,6 +385,7 @@ class ConfigDecoder:
             id=reader.string("id"),
             content=self._decode_node(reader.child("content"), None, resolver),
             show_on_start=reader.boolean("show_on_start", False),
+            keep_position=reader.boolean("keep_position", True),
             overlay=overlay,
             chrome=chrome,
             values=_live(reader, resolver, _decode_window_values),

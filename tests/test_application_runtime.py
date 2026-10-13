@@ -529,13 +529,23 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         self.assertEqual(runtime._window_manager.all_windows(), [])
 
 
-def _switch_root(on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, panel: bool = False) -> axidev_osk.Map:
+def _switch_root(
+    on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, panel: bool = False, keep_position: bool = True
+) -> axidev_osk.Map:
     """Two profiles, ``a`` and ``b``, each showing a ``pad`` window and recording ``app.activated``."""
 
     def profile(name: str, children: list[axidev_osk.Map]) -> axidev_osk.Map:
         return axidev_osk.profile(
             state={"count": axidev_osk.var("integer", 0), "activated": axidev_osk.var(axidev_osk.list_of("string"))},
-            windows=[axidev_osk.window(id="pad", title=name, show_on_start=True, content=axidev_osk.box(id=f"{name}:root", children=children))],
+            windows=[
+                axidev_osk.window(
+                    id="pad",
+                    title=name,
+                    show_on_start=True,
+                    keep_position=keep_position,
+                    content=axidev_osk.box(id=f"{name}:root", children=children),
+                )
+            ],
             attachments=[axidev_osk.secure_input_panel(id="panel", window="pad")] if panel and name == "a" else [],
             on={"app.activated": lambda ctx, event: [axidev_osk.state.set("activated", [*ctx.state.activated, name])]},
         )
@@ -609,6 +619,19 @@ class ProfileSwitchTests(unittest.TestCase):
         moved = runtime._window_manager.get("pad")
         assert moved is not None
         self.assertEqual((moved.x(), moved.y()), (120, 80))
+
+    def test_a_window_without_keep_position_starts_where_it_is_built(self) -> None:
+        runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")], keep_position=False))
+        window = runtime._window_manager.get("pad")
+        assert window is not None
+        built_at = (window.x(), window.y())
+        window.move(120, 80)
+
+        self._release(runtime, "a:go")
+
+        moved = runtime._window_manager.get("pad")
+        assert moved is not None
+        self.assertEqual((moved.x(), moved.y()), built_at)
 
     def test_a_profile_that_fails_to_build_brings_the_previous_one_back(self) -> None:
         broken = axidev_osk.profile(
