@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 APP_ACTIVATED = "app.activated"
 APP_QUIT_REQUESTED = "app.quit_requested"
 DWELL_COMPLETED = "dwell.completed"
-DISPLAY_CONFIGURATION_CHANGED = "display.configuration_changed"
 HOT_CORNER_ENTERED = "hot_corner.entered"
 HOT_CORNER_LEFT = "hot_corner.left"
 HOT_CORNER_TRIGGERED = "hot_corner.triggered"
@@ -45,6 +44,8 @@ WINDOW_DRAG_ENDED = "window.drag_ended"
 WINDOW_DRAG_STARTED = "window.drag_started"
 WINDOW_DRAGGED = "window.dragged"
 WINDOW_RESIZE_DRAGGED = "window.resize_dragged"
+WINDOW_RESIZE_DRAG_ENDED = "window.resize_drag_ended"
+WINDOW_RESIZE_DRAG_STARTED = "window.resize_drag_started"
 
 APP_QUIT = "app.quit"
 LINUX_OPEN_PERMISSION_SETUP = "linux.open_permission_setup"
@@ -54,7 +55,9 @@ WINDOW_CLICK = "window.click"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
 WINDOW_MOVE_BY = "window.move_by"
+WINDOW_MOVE_TO = "window.move_to"
 WINDOW_RESIZE_BY = "window.resize_by"
+WINDOW_RESIZE_TO = "window.resize_to"
 WINDOW_SHOW = "window.show"
 
 
@@ -87,6 +90,15 @@ class AppQuitArguments:
 @dataclass(frozen=True, slots=True)
 class WindowArguments:
     window_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class WindowSizeArguments:
+    """A window and a size in pixels."""
+
+    window_id: str
+    width: int
+    height: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,10 +162,6 @@ def app_quit_requested(reason: str) -> RuntimeEvent:
     return validated_event(APP_QUIT_REQUESTED, {"reason": reason}, decode_quit_requested)
 
 
-def display_configuration_changed() -> RuntimeEvent:
-    return validated_event(DISPLAY_CONFIGURATION_CHANGED, {}, decode_empty)
-
-
 def hot_corner_entered(corner: str) -> RuntimeEvent:
     return validated_event(HOT_CORNER_ENTERED, {"corner": corner}, decode_hot_corner_triggered)
 
@@ -202,6 +210,14 @@ def window_resize_dragged(window_id: str, dx: int, dy: int, button: str) -> Runt
     return validated_event(WINDOW_RESIZE_DRAGGED, arguments, decode_window_drag)
 
 
+def window_resize_drag_started(window_id: str, button: str) -> RuntimeEvent:
+    return validated_event(WINDOW_RESIZE_DRAG_STARTED, {"window": window_id, "button": button}, decode_window_button)
+
+
+def window_resize_drag_ended(window_id: str) -> RuntimeEvent:
+    return validated_event(WINDOW_RESIZE_DRAG_ENDED, {"window": window_id}, decode_window)
+
+
 def dwell_completed(window_id: str, x: int, y: int) -> RuntimeEvent:
     return validated_event(DWELL_COMPLETED, {"window": window_id, "x": x, "y": y}, decode_window_point)
 
@@ -232,6 +248,20 @@ def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
 
 def window_resize_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
     return validated_action(WINDOW_RESIZE_BY, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+
+
+def window_move_to(window_id: str, x: int, y: int) -> RuntimeAction:
+    """Ask to put a window's top-left corner at the screen point ``(x, y)``."""
+
+    return validated_action(WINDOW_MOVE_TO, {"window": window_id, "x": x, "y": y}, decode_window_point)
+
+
+def window_resize_to(window_id: str, width: int, height: int) -> RuntimeAction:
+    """Ask to give a window this size, never below its minimum size."""
+
+    return validated_action(
+        WINDOW_RESIZE_TO, {"window": window_id, "width": width, "height": height}, decode_window_size
+    )
 
 
 def window_click(window_id: str, x: int, y: int, button: str = "left") -> RuntimeAction:
@@ -285,6 +315,14 @@ def decode_window_delta(arguments: DataMap) -> WindowDeltaArguments:
     )
 
 
+def decode_window_size(arguments: DataMap) -> WindowSizeArguments:
+    require_keys(arguments, ("window", "width", "height"))
+    width, height = int_value(arguments, "width"), int_value(arguments, "height")
+    if width < 0 or height < 0:
+        raise ValueError("width and height must be at least 0")
+    return WindowSizeArguments(window_id=non_empty_string_value(arguments, "window"), width=width, height=height)
+
+
 def decode_window_drag(arguments: DataMap) -> WindowDragArguments:
     require_keys(arguments, ("window", "dx", "dy", "button"))
     return WindowDragArguments(
@@ -336,7 +374,6 @@ def register_app_events(dispatcher: "Dispatcher") -> None:
 
     dispatcher.register_event(APP_ACTIVATED, decode_empty)
     dispatcher.register_event(APP_QUIT_REQUESTED, decode_quit_requested)
-    dispatcher.register_event(DISPLAY_CONFIGURATION_CHANGED, decode_empty)
     dispatcher.register_event(DWELL_COMPLETED, decode_window_point)
     dispatcher.register_event(HOT_CORNER_ENTERED, decode_hot_corner_triggered)
     dispatcher.register_event(HOT_CORNER_LEFT, decode_hot_corner_triggered)
@@ -350,3 +387,5 @@ def register_app_events(dispatcher: "Dispatcher") -> None:
     dispatcher.register_event(WINDOW_DRAG_STARTED, decode_window_button)
     dispatcher.register_event(WINDOW_DRAGGED, decode_window_drag)
     dispatcher.register_event(WINDOW_RESIZE_DRAGGED, decode_window_drag)
+    dispatcher.register_event(WINDOW_RESIZE_DRAG_ENDED, decode_window)
+    dispatcher.register_event(WINDOW_RESIZE_DRAG_STARTED, decode_window_button)

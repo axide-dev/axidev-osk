@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..messages import MessageResult
 from .app_messages import (
-    DISPLAY_CONFIGURATION_CHANGED,
     POINTER_MOTION_OBSERVED,
     WINDOW_CLICK,
     WINDOW_CLOSE,
@@ -19,19 +18,25 @@ from .app_messages import (
     WINDOW_DRAG_STARTED,
     WINDOW_HIDE,
     WINDOW_MOVE_BY,
+    WINDOW_MOVE_TO,
     WINDOW_RESIZE_BY,
+    WINDOW_RESIZE_TO,
     WINDOW_SHOW,
     PointerMotionObservedArguments,
     WindowArguments,
     WindowButtonArguments,
     WindowClickArguments,
     WindowDeltaArguments,
+    WindowPointArguments,
+    WindowSizeArguments,
     decode_window,
     decode_window_click,
     decode_window_delta,
+    decode_window_point,
+    decode_window_size,
     window_dragged,
 )
-from .decoding import EmptyArguments
+from .engine_messages import DISPLAY_CONFIGURATION_CHANGED, DisplayConfigurationArguments
 from .dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
@@ -71,6 +76,19 @@ def register_window_actions(
             relative_pointer.commit_surface(int(window.winId()))
         return []
 
+    def move_to(arguments: WindowPointArguments) -> MessageResult:
+        window = windows.get(arguments.window_id)
+        if window is None:
+            return []
+        windows.move_to(arguments.window_id, arguments.x, arguments.y)
+        if relative_pointer is not None:
+            relative_pointer.commit_surface(int(window.winId()))
+        return []
+
+    def resize_to(arguments: WindowSizeArguments) -> MessageResult:
+        windows.resize_to(arguments.window_id, arguments.width, arguments.height)
+        return []
+
     dispatcher.register_action(WINDOW_SHOW, decode_window, show)
     dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
     dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
@@ -84,13 +102,15 @@ def register_window_actions(
 
     dispatcher.register_action(WINDOW_MOVE_BY, decode_window_delta, move_by)
     dispatcher.register_action(WINDOW_RESIZE_BY, decode_window_delta, resize_by)
+    dispatcher.register_action(WINDOW_MOVE_TO, decode_window_point, move_to)
+    dispatcher.register_action(WINDOW_RESIZE_TO, decode_window_size, resize_to)
     dispatcher.register_action(WINDOW_CLICK, decode_window_click, click)
 
 
 def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:
     """Recover windows after connected outputs change; services follow the same event themselves."""
 
-    def recover(event: EmptyArguments) -> MessageResult:
+    def recover(event: DisplayConfigurationArguments) -> MessageResult:
         del event
         windows.refresh_screen_configuration()
         return []
@@ -111,9 +131,11 @@ class RelativePointer(Protocol):
 class PointerDragRouter:
     """Own one layer-shell title-bar drag and report raw pointer motion as ``window.dragged``.
 
-    The profile decides what a drag does; the standard library moves the
-    window with ``window.move_by``. A failing move of the dragged window ends
-    the drag.
+    Only a window whose title bar leaves movement to raw pointer motion
+    starts collection; every other window reports its own deltas. The
+    profile decides what a drag does; the standard library moves the window
+    with ``window.move_by``. A failing move of the dragged window ends the
+    drag.
     """
 
     def __init__(self, windows: "WindowManager", relative_pointer: RelativePointer | None) -> None:
@@ -136,6 +158,9 @@ class PointerDragRouter:
         dispatcher.add_event_handler(ACTION_FAILED, self._action_failed)
 
     def _drag_started(self, event: WindowButtonArguments) -> MessageResult:
+        window = self._windows.get(event.window_id)
+        if window is None or not window.uses_runtime_drag_motion:
+            return []
         if self._window_id is not None:
             self._set_dragging(False)
         self._window_id = event.window_id

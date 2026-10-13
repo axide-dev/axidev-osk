@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -564,6 +565,24 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertEqual(clicks, [])
         self.assertIs(self.controller._target, self.key)
         self.assertEqual(self.controller._progress, 0)
+
+    def test_a_held_mouse_button_keeps_the_dwell_without_pause_while_pressed(self) -> None:
+        self.controller.set_config(replace(self.controller._config, pause_while_pressed=False))
+        position = self.key.mapToGlobal(QPoint(20, 20))
+
+        with (
+            patch("axidev_osk.windows.dwell_click.QApplication.mouseButtons", return_value=Qt.MouseButton.LeftButton),
+            patch("axidev_osk.windows.dwell_click.QApplication.widgetAt", return_value=self.key),
+            patch("axidev_osk.windows.dwell_click.QCursor.pos", return_value=position),
+            patch("axidev_osk.windows.dwell_click.monotonic", return_value=1.0),
+        ):
+            self.controller._progress = 0.5
+            self.controller._target = self.key
+            self.controller._last_sample_time = 1.0
+            self.controller._poll_cursor()
+
+        self.assertIs(self.controller._target, self.key)
+        self.assertEqual(self.controller._progress, 0.5)
 
     def test_does_not_activate_a_key_from_another_window(self) -> None:
         other_window = QWidget()

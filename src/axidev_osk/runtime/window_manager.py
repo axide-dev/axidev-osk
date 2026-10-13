@@ -78,6 +78,16 @@ class WindowManager:
         if window is not None:
             window.resize_by(dx, dy)
 
+    def move_to(self, window_id: str, x: int, y: int) -> None:
+        window = self._built(window_id)
+        if window is not None:
+            window.move_to(x, y)
+
+    def resize_to(self, window_id: str, width: int, height: int) -> None:
+        window = self._built(window_id)
+        if window is not None:
+            window.resize_to(width, height)
+
     def click(self, window_id: str, x: int, y: int, button: str) -> None:
         window = self._built(window_id)
         if window is not None:

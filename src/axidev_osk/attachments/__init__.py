@@ -140,6 +140,7 @@ def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
             ),
             acceleration_exponent_far=reader.number("acceleration_exponent_far", defaults["acceleration_exponent_far"]),
             poll_interval_ms=reader.integer("poll_interval_ms", defaults["poll_interval_ms"]),
+            pause_while_pressed=reader.boolean("pause_while_pressed", defaults["pause_while_pressed"]),
             movement_penalty_px=reader.number("movement_penalty_px", defaults["movement_penalty_px"]),
             distance_curve_full_px=reader.number("distance_curve_full_px", defaults["distance_curve_full_px"]),
             velocity_release_ms=reader.integer("velocity_release_ms", defaults["velocity_release_ms"]),

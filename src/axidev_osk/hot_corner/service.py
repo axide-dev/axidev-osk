@@ -6,8 +6,7 @@ from PySide6.QtCore import QObject
 
 from ..config.models import HotCornerConfig
 from ..messages import MessageResult
-from ..runtime.app_messages import DISPLAY_CONFIGURATION_CHANGED
-from ..runtime.decoding import EmptyArguments
+from ..runtime.engine_messages import DISPLAY_CONFIGURATION_CHANGED, DisplayConfigurationArguments
 from ..runtime.dispatcher import Dispatcher, Unsubscribe
 from .controller import HotCornerWindowToggleController
 
@@ -49,7 +48,7 @@ class HotCornerService:
             self._unsubscribe = None
         self._stop_controller()
 
-    def _display_changed(self, event: EmptyArguments) -> MessageResult:
+    def _display_changed(self, event: DisplayConfigurationArguments) -> MessageResult:
         del event
         if self._controller is not None:
             self._controller.refresh_screen_configuration()

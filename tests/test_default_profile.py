@@ -38,7 +38,9 @@ _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission
 def _keyboard_shown() -> RuntimeEvent:
     """What the engine reports once the keyboard window is on screen."""
 
-    return window_state_changed("keyboard", visible=True, minimized=False, x=0, y=0, width=900, height=320)
+    return window_state_changed(
+        "keyboard", visible=True, minimized=False, x=0, y=0, width=900, height=320, content_width=900, content_height=320
+    )
 
 
 class DefaultProfileHarness:

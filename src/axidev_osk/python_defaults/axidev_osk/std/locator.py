@@ -25,14 +25,13 @@ from typing import Any
 
 from ... import axidev_osk
 
-NEARBY_SIZES = 2.25
-"""Keys closer than this many typical key sizes count as nearby and get different hues."""
+PALETTE = {"warm": [330.0, 90.0], "cool": [150.0, 120.0], "nearby_sizes": 2.25}
+"""The pattern's defaults, which the ``opts`` of ``on`` and ``palette`` override field by field.
 
-WARM = (330.0, 90.0)
-"""The warm hues: where they start on the hue wheel, in degrees, and how far they span."""
-
-COOL = (150.0, 120.0)
-"""The cool hues: where they start on the hue wheel, in degrees, and how far they span."""
+``warm`` and ``cool`` give where each temperature's hues start on the hue
+wheel and how far they span, in degrees. Keys closer than ``nearby_sizes``
+typical key sizes count as nearby and get different hues.
+"""
 
 TIMER = "std.locator"
 """The timer that gathers one layout's geometry reports into one coloring."""
@@ -41,17 +40,23 @@ STATE = {"locator": axidev_osk.var(axidev_osk.map_of("string"))}
 """The library's locator variables, merged under ``std`` by ``std.with_state``."""
 
 
-def colored(nodes: Sequence[Mapping[str, Any]]) -> list[axidev_osk.Map]:
-    """Return ``nodes`` reporting their geometry, each glowing the color ``on`` gives it."""
+def colored(nodes: Sequence[Mapping[str, Any]], opts: Mapping[str, Any] | None = None) -> list[axidev_osk.Map]:
+    """Return ``nodes`` reporting their geometry, each glowing the color ``on`` gives it.
+
+    ``opts`` fields replace the fields this sets on every node.
+    """
 
     return [
-        axidev_osk.merge(dict(node), {"report_geometry": True, "locator_color": _color_of(node["id"])})
+        axidev_osk.merge({**node, "report_geometry": True, "locator_color": _color_of(node["id"])}, opts)
         for node in nodes
     ]
 
 
-def on(nodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """The handlers that color ``nodes`` from their reported geometry; pass them to ``std.with_handlers``."""
+def on(nodes: Sequence[Mapping[str, Any]], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The handlers that color ``nodes`` from their reported geometry; pass them to ``std.with_handlers``.
+
+    ``opts`` overrides fields of ``PALETTE``.
+    """
 
     ids = [node["id"] for node in nodes]
     members = frozenset(ids)
@@ -74,13 +79,15 @@ def on(nodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 continue
             placed.append(node_id)
             rects.append({"x": position["x"], "y": position["y"], "width": size["width"], "height": size["height"]})
-        return [axidev_osk.state.set(["std", "locator"], dict(zip(placed, palette(rects), strict=True)))]
+        return [axidev_osk.state.set(["std", "locator"], dict(zip(placed, palette(rects, opts), strict=True)))]
 
     return {"node.geometry_changed": on_geometry_changed, "timer.fired": on_timer_fired}
 
 
-def palette(rects: Sequence[Mapping[str, Any]]) -> list[str]:
+def palette(rects: Sequence[Mapping[str, Any]], opts: Mapping[str, Any] | None = None) -> list[str]:
     """One ``#RRGGBB`` color for each rectangle (``x``, ``y``, ``width``, ``height``, in whole pixels).
+
+    ``opts`` overrides fields of ``PALETTE``.
 
     Rectangles alternate between warm and cool hues by row and position in
     their row; within each temperature, nearby rectangles get different hues.
@@ -91,15 +98,16 @@ def palette(rects: Sequence[Mapping[str, Any]]) -> list[str]:
 
     if not rects:
         return []
+    options = axidev_osk.merge(PALETTE, opts)
     given = [(int(r["x"]), int(r["y"]), int(r["width"]), int(r["height"])) for r in rects]
     # Colored from the top left, so the colors do not depend on the order the rectangles come in.
     order = sorted(range(len(given)), key=lambda index: (_center(given[index])[1], _center(given[index])[0], index))
     boxes = [given[index] for index in order]
     typical = statistics.median(min(width, height) for _x, _y, width, height in boxes)
-    graph = _nearby(boxes, typical)
+    graph = _nearby(boxes, typical * options["nearby_sizes"])
     parities = _checkerboard(boxes, typical)
     colors = [""] * len(boxes)
-    for parity, (start, span) in enumerate((WARM, COOL)):
+    for parity, (start, span) in enumerate((options["warm"], options["cool"])):
         members = [index for index, value in enumerate(parities) if value == parity]
         lookup = {member: position for position, member in enumerate(members)}
         subgraph = [{lookup[n] for n in graph[member] if n in lookup} for member in members]
@@ -121,8 +129,8 @@ def _center(box: tuple[int, int, int, int]) -> tuple[int, int]:
     return (2 * x + width - 1) // 2, (2 * y + height - 1) // 2
 
 
-def _nearby(boxes: list[tuple[int, int, int, int]], typical: float) -> list[set[int]]:
-    limit = (typical * NEARBY_SIZES) ** 2
+def _nearby(boxes: list[tuple[int, int, int, int]], distance: float) -> list[set[int]]:
+    limit = distance**2
     neighbors: list[set[int]] = [set() for _ in boxes]
     for index, (x, y, width, height) in enumerate(boxes):
         for other, (ox, oy, owidth, oheight) in enumerate(boxes[:index]):

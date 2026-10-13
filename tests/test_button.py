@@ -33,6 +33,19 @@ class ButtonTests(unittest.TestCase):
         self.assertEqual(left_events, ["pressed", "released", ("clicked", False)])
         self.assertEqual(events, left_events)
 
+    def test_a_mouse_button_with_no_name_presses_and_is_reported_as_other(self) -> None:
+        qt_app()
+        button = Button("Test")
+        self.addCleanup(button.close)
+        button.show()
+        events: list[object] = []
+        button.pressed.connect(lambda: events.append(("pressed", button.pressed_with)))
+        button.clicked.connect(lambda checked: events.append("clicked"))
+
+        QTest.mouseClick(button, Qt.MouseButton.ExtraButton5)
+
+        self.assertEqual(events, [("pressed", "other"), "clicked"])
+
     def test_context_menu_event_is_suppressed(self) -> None:
         qt_app()
         button = Button("Test")

@@ -345,7 +345,7 @@ class DwellClickController(QObject):
         if not self._window.isVisible():
             self.stop()
             return
-        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+        if self._config.pause_while_pressed and QApplication.mouseButtons() != Qt.MouseButton.NoButton:
             self._reset()
             return
         self.update_from_global_position(QCursor.pos(), now=monotonic())
