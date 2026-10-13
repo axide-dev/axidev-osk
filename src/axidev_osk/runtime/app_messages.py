@@ -27,7 +27,7 @@ from .decoding import (
     validated_action,
     validated_event,
 )
-from .event_fields import one_of, profile_window, stand_in
+from .event_fields import profile_window, samples
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -55,6 +55,7 @@ WINDOW_HIDE = "window.hide"
 WINDOW_MOVE_BY = "window.move_by"
 WINDOW_SHOW = "window.show"
 
+
 class ScreenCorner(str, Enum):
     """The screen corners a ``hot_corners`` attachment watches and ``hot_corner.triggered`` names."""
 
@@ -80,18 +81,18 @@ QUIT_REASONS = tuple(reason.value for reason in QuitReason)
 
 @dataclass(frozen=True, slots=True)
 class HotCornerTriggeredArguments:
-    corner: str = one_of(*HOT_CORNERS)
+    corner: str = samples(*HOT_CORNERS)
 
 
 @dataclass(frozen=True, slots=True)
 class PointerMotionObservedArguments:
-    dx: float = stand_in(0.0)
-    dy: float = stand_in(0.0)
+    dx: float = samples(0.0)
+    dy: float = samples(0.0)
 
 
 @dataclass(frozen=True, slots=True)
 class QuitRequestedArguments:
-    reason: str = one_of(*QUIT_REASONS)
+    reason: str = samples(*QUIT_REASONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +248,8 @@ def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:
     )
 
 
+# The application's actions and their decoders, listed once: the application registers them from here and
+# ``axidev-osk check`` decodes the actions callbacks return with them.
 APP_ACTION_DECODERS: dict[str, Callable[[DataMap], Any]] = {
     APP_QUIT: decode_app_quit,
     LINUX_OPEN_PERMISSION_SETUP: decode_empty,

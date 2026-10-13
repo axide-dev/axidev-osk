@@ -2,8 +2,8 @@
 
 An event's argument record marks each field that is not a plain boolean:
 ``profile_window`` for a window the profile defines, ``profile_node`` for one of its
-nodes, ``one_of`` for a closed set of values, and ``stand_in`` for an open set
-(free text, numbers, key names) that a few representative values stand in for.
+nodes, and ``samples`` for every value of a closed set, or a few representative
+values that stand in for an open set (free text, numbers, key names).
 A field typed ``X | None`` also takes ``None``. ``key`` names the argument when
 the record's field name differs from it, as ``window_id`` reads ``window``.
 
@@ -42,14 +42,11 @@ def profile_node(*, key: str | None = None) -> Any:
     return field(metadata={_VALUES: _NODE, _KEY: key})
 
 
-def one_of(*values: DataValue, key: str | None = None) -> Any:
-    """A field holding one of exactly these values."""
+def samples(*values: DataValue, key: str | None = None) -> Any:
+    """A field the check fills with these values.
 
-    return field(metadata={_VALUES: tuple(values), _KEY: key})
-
-
-def stand_in(*values: DataValue, key: str | None = None) -> Any:
-    """A field from an open set of values, which these representative values stand in for."""
+    They are every value of a closed set, or a few that stand in for an open one.
+    """
 
     return field(metadata={_VALUES: tuple(values), _KEY: key})
 

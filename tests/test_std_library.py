@@ -15,7 +15,7 @@ from axidev_osk.python_defaults.axidev_osk.std import controls, failures, keys, 
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.dispatcher import ACTION_FAILED
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset, window_state_changed
-from axidev_osk.runtime.hints import CHECK_HINT
+from axidev_osk.runtime.dispatcher import CHECK_HINT
 from axidev_osk.runtime.profile_runtime import callback_failed, state_set
 from axidev_osk.runtime.state import StateTree
 from support import RecordingBackend, build_window, find_node, make_test_engine, nodes_by_id, qt_app, record_app_actions, start_test_profile

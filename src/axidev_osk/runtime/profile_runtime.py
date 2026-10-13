@@ -27,10 +27,9 @@ from .decoding import (
     validated_action,
     validated_event,
 )
-from .dispatcher import Dispatcher, Unsubscribe
-from .event_fields import one_of, stand_in
+from .dispatcher import CHECK_HINT, Dispatcher, Unsubscribe
+from .event_fields import samples
 from .functions import call_callback, evaluate_binding
-from .hints import CHECK_HINT
 from .state import ReadRecorder, StatePath, StateTree, parse_state_path, path_text, paths_overlap
 
 T = TypeVar("T")
@@ -61,17 +60,17 @@ class StateAppendArguments:
 
 @dataclass(frozen=True, slots=True)
 class StateChangedArguments:
-    path: StatePath = stand_in(["app", "profile"])
+    path: StatePath = samples(["app", "profile"])
 
 
 @dataclass(frozen=True, slots=True)
 class CallbackFailedArguments:
-    function: str | None = stand_in("fn:1")
-    kind: str = one_of("callback", "binding")
-    source: str = stand_in("example")
-    exception_type: str = stand_in("ValueError")
-    message: str = stand_in("example failure")
-    hint: str = stand_in(CHECK_HINT)
+    function: str | None = samples("fn:1")
+    kind: str = samples("callback", "binding")
+    source: str = samples("example")
+    exception_type: str = samples("ValueError")
+    message: str = samples("example failure")
+    hint: str = samples(CHECK_HINT)
 
 
 def state_set(path: str | list[str], value: DataValue) -> RuntimeAction:

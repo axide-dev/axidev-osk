@@ -11,8 +11,7 @@ from typing import Generic, TypeVar, cast
 
 from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage, copy_data_map
 from .decoding import map_value, require_keys, string_value
-from .event_fields import one_of, stand_in
-from .hints import CHECK_HINT
+from .event_fields import samples
 
 
 DecodedT = TypeVar("DecodedT")
@@ -24,6 +23,9 @@ Wake = Callable[[], None]
 _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
 
+CHECK_HINT = "Run `axidev-osk check` to find configuration problems before they happen."
+"""Carried as ``hint`` by every ``action.failed`` and ``callback.failed``, and added to their log lines."""
+
 ACTION_FAILED = "action.failed"
 
 
@@ -31,12 +33,12 @@ ACTION_FAILED = "action.failed"
 class ActionFailedArguments:
     """What the dispatcher reports when an action cannot be looked up, decoded, or run."""
 
-    action: str = stand_in("window.show")
-    arguments: DataMap = stand_in({})
-    stage: str = one_of("lookup", "decode", "execute")
-    exception_type: str = stand_in("ValueError")
-    message: str = stand_in("example failure")
-    hint: str = stand_in(CHECK_HINT)
+    action: str = samples("window.show")
+    arguments: DataMap = samples({})
+    stage: str = samples("lookup", "decode", "execute")
+    exception_type: str = samples("ValueError")
+    message: str = samples("example failure")
+    hint: str = samples(CHECK_HINT)
 
 
 def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
