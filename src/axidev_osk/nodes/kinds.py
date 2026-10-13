@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
 from ..components.button.widget import Button
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
+from ..messages import DataMap
+from ..runtime.decoding import non_empty_string_value, require_keys
 from ..widget_properties import COMPONENT_ID
 from .registry import NodeBuilder, NodeKind, NodeKindRegistry
 
@@ -32,6 +34,22 @@ BUTTON_PRESSED = "button.pressed"
 BUTTON_RELEASED = "button.released"
 BUTTON_ENTERED = "button.entered"
 BUTTON_LEFT = "button.left"
+
+
+@dataclass(frozen=True, slots=True)
+class ButtonPressArguments:
+    """A press or release, with the mouse button behind it (``left``, ``right``, ``middle``, ...)."""
+
+    node: str
+    button: str
+
+
+def decode_button_press(arguments: DataMap) -> ButtonPressArguments:
+    require_keys(arguments, ("node", "button"))
+    return ButtonPressArguments(
+        node=non_empty_string_value(arguments, "node"),
+        button=non_empty_string_value(arguments, "button"),
+    )
 
 
 _QT_MAX_SIZE = 16_777_215
@@ -130,6 +148,7 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
                 "on_enter": BUTTON_ENTERED,
                 "on_leave": BUTTON_LEFT,
             },
+            event_decoders={BUTTON_PRESSED: decode_button_press, BUTTON_RELEASED: decode_button_press},
         )
     )
     registry.register(NodeKind(name="label", build=_build_label, apply=_apply_label, decode_options=_decode_label))
@@ -263,8 +282,8 @@ def _build_button(node: NodeConfig, builder: NodeBuilder) -> QWidget:
     button = Button()
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    button.pressed.connect(lambda: builder.emit(BUTTON_PRESSED, node.id))
-    button.released.connect(lambda: builder.emit(BUTTON_RELEASED, node.id))
+    button.pressed.connect(lambda: builder.emit(BUTTON_PRESSED, node.id, button=button.pressed_with))
+    button.released.connect(lambda: builder.emit(BUTTON_RELEASED, node.id, button=button.pressed_with))
     button.entered.connect(lambda: builder.emit(BUTTON_ENTERED, node.id))
     button.left.connect(lambda: builder.emit(BUTTON_LEFT, node.id))
     return button

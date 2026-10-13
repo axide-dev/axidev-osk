@@ -1,8 +1,13 @@
-"""Pointer dwell activation for configured windows."""
+"""Pointer dwell for configured windows: finding where the pointer comes to rest.
+
+A finished dwell is reported, never acted on here; ``click_at`` is the click a
+profile asks for with ``window.click``.
+"""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from time import monotonic
 
 from PySide6.QtCore import (
@@ -25,6 +30,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
 
+from ..components.button import Button
+from ..components.mouse_buttons import BUTTONS_BY_NAME
 from ..config.models import DwellClickConfig
 from ..widget_properties import COMPONENT_TYPE
 
@@ -237,15 +244,22 @@ class DwellClickIndicator(QWidget):
 
 
 class DwellClickController(QObject):
-    """Activate the key exactly under a pointer that has come to rest."""
+    """Report where a pointer came to rest on a widget of its window.
+
+    It calls ``on_complete`` with the screen point and clicks nothing itself:
+    the window posts ``dwell.completed``, and the profile decides what a dwell
+    does, for example a ``window.click`` there.
+    """
 
     def __init__(
         self,
         window: QWidget,
         surface: QWidget,
         config: DwellClickConfig,
+        on_complete: Callable[[QPoint], None],
     ) -> None:
         super().__init__(window)
+        self._on_complete = on_complete
         self._window = window
         self._config = config
         self._enabled = config.enabled
@@ -396,7 +410,7 @@ class DwellClickController(QObject):
         ):
             return
         self._progress = 1.0
-        self._click_at(position, target)
+        self._on_complete(position)
         self._clicked_position = position
         self._target = None
         self._travel_distance_since_click = 0.0
@@ -553,31 +567,33 @@ class DwellClickController(QObject):
             return None
         return target
 
-    def _click_at(self, position: QPoint, target: QWidget) -> None:
-        if isinstance(target, QAbstractButton):
-            target.animateClick()
-            return
 
-        local_position = QPointF(target.mapFromGlobal(position))
-        window_position = QPointF(self._window.mapFromGlobal(position))
-        global_position = QPointF(position)
-        press = QMouseEvent(
-            QEvent.Type.MouseButtonPress,
-            local_position,
-            window_position,
-            global_position,
-            Qt.MouseButton.LeftButton,
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
+def click_at(window: QWidget, position: QPoint, button: str = "left") -> None:
+    """Click the widget of ``window`` under the screen point ``position`` with the mouse ``button``.
+
+    An engine button presses as it would under the pointer, reporting
+    ``button``; another widget gets that button's press and release. A point
+    outside ``window`` does nothing.
+    """
+
+    target = QApplication.widgetAt(position)
+    if target is None or target.window() is not window:
+        return
+    if isinstance(target, Button):
+        target.press_with(button)
+        return
+    qt_button = BUTTONS_BY_NAME.get(button, Qt.MouseButton.LeftButton)
+    if isinstance(target, QAbstractButton) and qt_button == Qt.MouseButton.LeftButton:
+        target.animateClick()
+        return
+    local_position = QPointF(target.mapFromGlobal(position))
+    window_position = QPointF(window.mapFromGlobal(position))
+    global_position = QPointF(position)
+    for event_type, held in (
+        (QEvent.Type.MouseButtonPress, qt_button),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        event = QMouseEvent(
+            event_type, local_position, window_position, global_position, qt_button, held, Qt.KeyboardModifier.NoModifier
         )
-        release = QMouseEvent(
-            QEvent.Type.MouseButtonRelease,
-            local_position,
-            window_position,
-            global_position,
-            Qt.MouseButton.LeftButton,
-            Qt.MouseButton.NoButton,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        QApplication.sendEvent(target, press)
-        QApplication.sendEvent(target, release)
+        QApplication.sendEvent(target, event)

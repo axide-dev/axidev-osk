@@ -59,7 +59,7 @@ class DwellClickConfig:
     """Pointer dwell activation policy for one window.
 
     Attributes:
-        enabled: Whether resting the pointer clicks inside the window.
+        enabled: Whether resting the pointer inside the window reports ``dwell.completed``.
         delay_ms: Base time required to activate the current target.
         dead_zone_px: Movement required to rearm after activation.
         full_speed_px_s: Highest speed that advances at the maximum rate.

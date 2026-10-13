@@ -82,7 +82,9 @@ class ButtonTests(unittest.TestCase):
         self.assertEqual(events, [])
         engine.dispatcher.process_pending()
 
-        self.assertEqual(events, [(BUTTON_PRESSED, {"node": "moo"}), (BUTTON_RELEASED, {"node": "moo"})])
+        self.assertEqual(
+            events, [(BUTTON_PRESSED, {"node": "moo", "button": "right"}), (BUTTON_RELEASED, {"node": "moo", "button": "right"})]
+        )
 
     def test_title_bar_close_control_uses_the_shared_button(self) -> None:
         qt_app()

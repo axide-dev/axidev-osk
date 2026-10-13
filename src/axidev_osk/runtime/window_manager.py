@@ -73,6 +73,16 @@ class WindowManager:
         if window is not None:
             window.move_by(dx, dy)
 
+    def resize_by(self, window_id: str, dx: int, dy: int) -> None:
+        window = self._built(window_id)
+        if window is not None:
+            window.resize_by(dx, dy)
+
+    def click(self, window_id: str, x: int, y: int, button: str) -> None:
+        window = self._built(window_id)
+        if window is not None:
+            window.click_at(x, y, button)
+
     def close(self, window_id: str) -> None:
         """Release, hide, and delete a managed window without treating it as a quit request."""
 

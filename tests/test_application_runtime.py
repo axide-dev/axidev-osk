@@ -105,6 +105,7 @@ def _record_raw_events(runtime: ApplicationRuntime, name: str) -> list[DataMap]:
 class ApplicationRuntimePointerDragTests(unittest.TestCase):
     def test_compositor_pointer_motion_moves_only_active_drag(self) -> None:
         runtime = _runtime_without_platform_services()
+        _start(self, runtime)
         window = Mock()
         window.isVisible.return_value = True
         window.winId.return_value = 123
@@ -210,6 +211,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime = ApplicationRuntime(
             qt_app(), root_config=build_default_config(), services=services, show_startup_windows=False
         )
+        _start(self, runtime)
         window = Mock()
         window.isVisible.return_value = True
         window.winId.return_value = 123

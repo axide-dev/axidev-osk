@@ -1,28 +1,17 @@
 from __future__ import annotations
 
 import unittest
-from collections.abc import Callable
 from unittest.mock import patch
 
-from PySide6.QtCore import QDeadlineTimer, QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from axidev_osk.config.models import DwellClickConfig
-from axidev_osk.windows.dwell_click import DwellClickController
+from axidev_osk.windows.dwell_click import DwellClickController, click_at
 from axidev_osk.python_defaults import axidev_osk
-from support import RecordingBackend, make_test_engine, qt_app
-
-
-def _wait_until(condition: Callable[[], object], timeout_ms: int = 2000) -> None:
-    """Process Qt events until ``condition`` holds; a fixed wait loses a click whose timer fires late on a busy machine."""
-
-    deadline = QDeadlineTimer(timeout_ms)
-    while not condition():
-        if deadline.hasExpired():
-            raise AssertionError(f"condition not met within {timeout_ms} ms")
-        QTest.qWait(10)
+from support import RecordingBackend, make_test_engine, qt_app, wait_until
 
 
 class _MouseEventRecorder(QWidget):
@@ -132,6 +121,8 @@ class DwellClickControllerTests(unittest.TestCase):
                 distance_curve_full_px=200,
                 velocity_release_ms=100,
             ),
+            # The app posts dwell.completed, and the default config clicks there with window.click.
+            lambda point: click_at(self.window, point),
         )
         self.addCleanup(self.window.close)
 
@@ -180,7 +171,7 @@ class DwellClickControllerTests(unittest.TestCase):
             )
 
         self.assertTrue(self.other_key.isDown())
-        _wait_until(lambda: clicks)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, ["B"])
         self.assertFalse(self.other_key.isDown())
         self.assertFalse(self.other_key.isChecked())
@@ -383,7 +374,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
 
-        _wait_until(lambda: clicks)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, [True])
 
     def test_movement_on_same_target_does_not_restart_progress(self) -> None:
@@ -415,7 +406,7 @@ class DwellClickControllerTests(unittest.TestCase):
                 now=1.32,
             )
 
-        _wait_until(lambda: clicks)
+        wait_until(lambda: clicks)
         self.assertEqual(len(clicks), 1)
 
     def test_entering_another_target_restarts_progress(self) -> None:
@@ -434,7 +425,7 @@ class DwellClickControllerTests(unittest.TestCase):
         self.assertFalse(self.controller.indicator.isVisible())
         feedback = self.controller.indicator.cancel_feedback
         self.assertTrue(feedback.isVisible())
-        _wait_until(lambda: not feedback.isVisible())
+        wait_until(lambda: not feedback.isVisible())
         self.assertFalse(feedback.isVisible())
 
     def test_completion_feedback_fades_in_accent_color(self) -> None:
@@ -453,7 +444,7 @@ class DwellClickControllerTests(unittest.TestCase):
         )
         self.assertTrue(feedback.isVisible())
         self.assertEqual(feedback.feedback_color.name(), expected_color.name())
-        _wait_until(lambda: not feedback.isVisible())
+        wait_until(lambda: not feedback.isVisible())
         self.assertFalse(feedback.isVisible())
 
     def test_requires_dead_zone_exit_before_another_click(self) -> None:
@@ -467,7 +458,7 @@ class DwellClickControllerTests(unittest.TestCase):
         ):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
-            _wait_until(lambda: len(clicks) == 1)
+            wait_until(lambda: len(clicks) == 1)
             self.controller.update_from_global_position(position, now=2.0)
             moved_position = position + QPoint(11, 0)
             self.controller.update_from_global_position(
@@ -479,7 +470,7 @@ class DwellClickControllerTests(unittest.TestCase):
                 now=2.31,
             )
 
-        _wait_until(lambda: len(clicks) == 2)
+        wait_until(lambda: len(clicks) == 2)
         self.assertEqual(len(clicks), 2)
         self.assertFalse(self.controller.indicator.isVisible())
 
@@ -496,7 +487,7 @@ class DwellClickControllerTests(unittest.TestCase):
             self.controller.update_from_global_position(position, now=1.0)
             self.controller.update_from_global_position(position, now=1.2)
 
-        _wait_until(lambda: clicks)
+        wait_until(lambda: clicks)
         self.assertEqual(clicks, [True])
 
     def test_sends_mouse_click_to_plain_window_content(self) -> None:

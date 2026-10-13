@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt
 from PySide6.QtGui import QCloseEvent, QHideEvent, QMoveEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
@@ -14,11 +14,18 @@ from ..components.pointer_locator import PointerLocator, install_pointer_locator
 from ..config.models import ChromeConfig, DwellClickConfig, OverlayConfig, PointerLocatorConfig
 from ..config.profile import Live, WindowConfig, WindowValues
 from ..nodes import apply_style
-from ..runtime.app_messages import window_close_requested, window_drag_ended, window_drag_started
+from ..runtime.app_messages import (
+    dwell_completed,
+    window_close_requested,
+    window_drag_ended,
+    window_drag_started,
+    window_dragged,
+    window_resize_dragged,
+)
 from ..runtime.engine_messages import window_state_changed
 from ..widget_properties import COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 from .chrome import OverlayChromeWidgets, install_overlay_chrome
-from .dwell_click import DwellClickController
+from .dwell_click import DwellClickController, click_at
 from .opacity import WindowOpacityController
 from .overlay import configure_always_on_top_window, configure_plain_window
 from .surface import RootSurface
@@ -119,8 +126,8 @@ class RuntimeWindow(QMainWindow):
                         central_layout,
                         title=self.windowTitle(),
                         parent=central,
-                        on_move=self.move_by,
-                        on_resize=self._overlay.resize_by,
+                        on_move=lambda dx, dy: engine.dispatcher.post(window_dragged(window_id, dx, dy)),
+                        on_resize=lambda dx, dy: engine.dispatcher.post(window_resize_dragged(window_id, dx, dy)),
                         use_runtime_drag_motion=use_runtime_drag_motion,
                         on_drag_started=(
                             lambda: engine.dispatcher.post(window_drag_started(window_id))
@@ -135,7 +142,12 @@ class RuntimeWindow(QMainWindow):
                     )
             self.setCentralWidget(central)
             if dwell is not None:
-                self._dwell_click = DwellClickController(self, central, dwell)
+                self._dwell_click = DwellClickController(
+                    self,
+                    central,
+                    dwell,
+                    lambda point: engine.dispatcher.post(dwell_completed(window_id, point.x(), point.y())),
+                )
             self._opacity = WindowOpacityController(self)
             unbind = engine.bindings.bind(values.decode, f"window:{window_id}", self._apply_values, fallback=values.initial)
             self.destroyed.connect(lambda _object=None: unbind())
@@ -218,6 +230,17 @@ class RuntimeWindow(QMainWindow):
 
         self._overlay.move_by(dx, dy)
         self._report_state()
+
+    def resize_by(self, dx: int, dy: int) -> None:
+        """Resize this window through its selected overlay backend."""
+
+        self._overlay.resize_by(dx, dy)
+        self._report_state()
+
+    def click_at(self, x: int, y: int, button: str) -> None:
+        """Click the widget under the screen point ``(x, y)`` with the mouse ``button``."""
+
+        click_at(self, QPoint(x, y), button)
 
     def refresh_screen_configuration(self) -> None:
         """Apply display recovery through the selected overlay backend."""
