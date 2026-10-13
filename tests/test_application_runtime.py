@@ -107,6 +107,7 @@ def _record_raw_events(runtime: ApplicationRuntime, name: str) -> list[DataMap]:
 class ApplicationRuntimePointerDragTests(unittest.TestCase):
     def test_compositor_pointer_motion_moves_only_active_drag(self) -> None:
         runtime = _runtime_without_platform_services()
+        _start(self, runtime)
         window = Mock()
         window.isVisible.return_value = True
         window.winId.return_value = 123
@@ -212,6 +213,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime = ApplicationRuntime(
             qt_app(), root_config=build_default_config(), services=services, show_startup_windows=False
         )
+        _start(self, runtime)
         window = Mock()
         window.isVisible.return_value = True
         window.winId.return_value = 123
@@ -324,7 +326,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
         def pick(choice: int) -> None:
             for node in ("keyboard:strip:toggle", "keyboard:profile-menu", f"keyboard:profile-menu:choice:{choice}"):
-                dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node}))
+                dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node, "button": "left"}))
 
         pick(1)
         social = runtime._window_manager.get(_KEYBOARD_WINDOW)
@@ -562,7 +564,7 @@ class ProfileSwitchTests(unittest.TestCase):
         return runtime.engine.profile.state.get(path)
 
     def _release(self, runtime: ApplicationRuntime, node: str) -> None:
-        runtime.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node}))
+        runtime.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node, "button": "left"}))
 
     def test_a_switch_waits_for_queued_work_then_runs_the_other_profile(self) -> None:
         runtime = self._runtime(

@@ -103,13 +103,15 @@ class NodeTests(unittest.TestCase):
 
         self.assertEqual(seen, [("enter", "a"), ("leave", "a")])
 
-    def test_a_node_reporting_the_pointer_follows_a_swipe_across_its_children(self) -> None:
+    def test_a_node_reporting_the_pointer_follows_a_swipe_across_its_children_with_its_button(self) -> None:
         reports: list[tuple[str, str, float, float]] = []
+        buttons: list[object] = []
         pressed: list[str] = []
 
         def record(ctx: object, event: DataMap) -> list[object]:
             del ctx
             reports.append((str(event["name"]), str(event["node"]), float(event["x"]), float(event["y"])))  # type: ignore[arg-type]
+            buttons.append(event.get("button"))
             return []
 
         def on(name: str) -> object:
@@ -140,9 +142,9 @@ class NodeTests(unittest.TestCase):
         start = a.rect().center()
         end = b.mapTo(a, b.rect().center())
 
-        QTest.mousePress(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+        QTest.mousePress(a, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, start)
         QTest.mouseMove(a, end)
-        QTest.mouseRelease(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+        QTest.mouseRelease(a, Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier, end)
         QTest.qWait(10)
 
         in_grid = (a.mapTo(grid, start), a.mapTo(grid, end))
@@ -153,6 +155,7 @@ class NodeTests(unittest.TestCase):
         )
         self.assertEqual((reports[0][2], reports[0][3]), (in_grid[0].x(), in_grid[0].y()))
         self.assertEqual((reports[2][2], reports[2][3]), (in_grid[1].x(), in_grid[1].y()))
+        self.assertEqual(buttons, ["right", None, "right"])
 
     def test_button_labels_show_ampersands_as_written(self) -> None:
         profile = self._profile(
@@ -252,7 +255,7 @@ class NodeTests(unittest.TestCase):
         QTest.mouseClick(self._find(window, "quiet"), Qt.MouseButton.LeftButton)
         self.engine.dispatcher.process_pending()
 
-        self.assertEqual(self.pressed, [{"node": "cow"}, {"node": "cow"}])
+        self.assertEqual(self.pressed, [{"node": "cow", "button": "left"}, {"node": "cow", "button": "right"}])
         self.assertEqual(cow.text(), "Moo 2")  # type: ignore[attr-defined]
 
     def test_labels_stacks_and_style_hooks(self) -> None:

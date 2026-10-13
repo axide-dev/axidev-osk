@@ -46,8 +46,8 @@ class StdHarness:
         self.window = build_window(test, self.profile.window("pad"), self.engine)
 
     def tap(self, node_id: str) -> None:
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
 
     def observe(self, key: str, pressed: bool, modifiers: tuple[str, ...] = ()) -> None:
         self.engine.dispatcher.dispatch(input_key(key, None, modifiers, pressed))
@@ -110,9 +110,9 @@ class KeyTests(unittest.TestCase):
         dispatch = harness.engine.dispatcher.dispatch
 
         harness.tap("key:ShiftLeft")
-        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A"}))
+        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A", "button": "left"}))
         harness.tap("key:ShiftLeft")
-        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A"}))
+        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A", "button": "left"}))
 
         self.assertEqual(
             harness.backend.sent,
@@ -124,9 +124,9 @@ class KeyTests(unittest.TestCase):
         harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
         dispatch = harness.engine.dispatcher.dispatch
 
-        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A"}))
+        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A", "button": "left"}))
         harness.tap("key:ShiftLeft")
-        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A"}))
+        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A", "button": "left"}))
         harness.tap("key:A")
 
         self.assertEqual(
@@ -482,6 +482,24 @@ class WindowHelperTests(unittest.TestCase):
         self.assertIsNone(harness.window._input_blocker)
         self.assertEqual(harness.window_actions, [])
 
+    def test_drags_and_finished_dwells_get_their_usual_meaning(self) -> None:
+        harness = StdHarness(self, [keys.letter("a")])
+
+        harness.engine.dispatcher.dispatch(
+            RuntimeEvent("window.dragged", {"window": "pad", "dx": 3, "dy": -4}),
+            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 5, "dy": 6}),
+            RuntimeEvent("dwell.completed", {"window": "pad", "x": 70, "y": 80}),
+        )
+
+        self.assertEqual(
+            harness.window_actions,
+            [
+                ("window.move_by", {"window": "pad", "dx": 3, "dy": -4}),
+                ("window.resize_by", {"window": "pad", "dx": 5, "dy": 6}),
+                ("window.click", {"window": "pad", "x": 70, "y": 80, "button": "left"}),
+            ],
+        )
+
     def test_corner_toggle_brings_back_ghosted_and_minimized_windows(self) -> None:
         def run(**window: bool) -> list[str]:
             state = StateTree()
@@ -530,7 +548,7 @@ class PromptTests(unittest.TestCase):
         )
         profile = start_test_profile(engine, axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[prompt])}))
         window = build_window(self, profile.window("quit"), engine)
-        engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no"}))
+        engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no", "button": "left"}))
 
         widgets = nodes_by_id(window)
         self.assertEqual(widgets["quit:message"].text(), "Close it?")  # type: ignore[attr-defined]

@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 from unittest.mock import patch
 
+from PySide6.QtCore import QDeadlineTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from axidev_osk.attachments.runtime import WindowAttachments
@@ -16,13 +18,16 @@ from axidev_osk.messages import DataMap, MessageResult
 from axidev_osk.runtime.app_messages import (
     APP_QUIT,
     LINUX_OPEN_PERMISSION_SETUP,
+    WINDOW_CLICK,
     WINDOW_CLOSE,
     WINDOW_HIDE,
     WINDOW_MOVE_BY,
+    WINDOW_RESIZE_BY,
     WINDOW_SHOW,
     decode_app_quit,
     decode_window,
-    decode_window_move_by,
+    decode_window_click,
+    decode_window_delta,
 )
 from axidev_osk.runtime.decoding import decode_empty
 from axidev_osk.runtime.dispatcher import Dispatcher
@@ -36,7 +41,9 @@ _APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
     WINDOW_SHOW: decode_window,
     WINDOW_HIDE: decode_window,
     WINDOW_CLOSE: decode_window,
-    WINDOW_MOVE_BY: decode_window_move_by,
+    WINDOW_MOVE_BY: decode_window_delta,
+    WINDOW_RESIZE_BY: decode_window_delta,
+    WINDOW_CLICK: decode_window_click,
     APP_QUIT: decode_app_quit,
     LINUX_OPEN_PERMISSION_SETUP: decode_empty,
 }
@@ -53,6 +60,16 @@ HOT_CORNER_COLORS = {
 
 def hot_corner_config(**fields: int) -> HotCornerConfig:
     return HotCornerConfig(**HOT_CORNER_COLORS, **fields)
+
+
+def wait_until(condition: Callable[[], object], timeout_ms: int = 2000) -> None:
+    """Process Qt events until ``condition`` holds; a fixed wait loses a click whose timer fires late on a busy machine."""
+
+    deadline = QDeadlineTimer(timeout_ms)
+    while not condition():
+        if deadline.hasExpired():
+            raise AssertionError(f"condition not met within {timeout_ms} ms")
+        QTest.qWait(10)
 
 
 def qt_app() -> QApplication:

@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QWidget
 from ..config.profile import NodeConfig, NodeValues, StyleConfig
 from ..config.reader import ConfigReader
 from ..kind_registry import KindRegistry
-from ..messages import DataMap, RuntimeEvent, data_equal
+from ..messages import DataMap, DataValue, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
 from ..runtime.engine_messages import node_resized
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
@@ -45,10 +45,6 @@ class NodeEventArguments:
     node: str
 
 
-def node_event(name: str, node_id: str) -> RuntimeEvent:
-    return validated_event(name, {"node": node_id}, decode_node_event)
-
-
 def decode_node_event(arguments: DataMap) -> NodeEventArguments:
     require_keys(arguments, ("node",))
     return NodeEventArguments(node=non_empty_string_value(arguments, "node"))
@@ -67,6 +63,8 @@ class NodeKind:
     apply: NodeApply
     decode_options: Callable[[ConfigReader], object]
     callbacks: Mapping[str, str] = field(default_factory=dict)
+    event_decoders: Mapping[str, Callable[[DataMap], object]] = field(default_factory=dict)
+    """Decoders for events whose record carries more than ``node``; other events decode as ``{node}``."""
     has_children: bool = False
     decode_structure: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
@@ -95,10 +93,10 @@ class NodeKindRegistry(KindRegistry[NodeKind]):
     def __init__(self, dispatcher: "Dispatcher") -> None:
         super().__init__()
         self._dispatcher = dispatcher
-        self._events: set[str] = set()
+        self._events: dict[str, Callable[[DataMap], object]] = {}
 
     def register(self, kind: NodeKind) -> None:
-        """Add a kind and register its events; every node event shares the ``{node}`` shape."""
+        """Add a kind and register its events, each with its kind's decoder or the ``{node}`` one."""
 
         collisions = sorted(
             event for event in kind.events if event not in self._events and self._dispatcher.has_event(event)
@@ -108,8 +106,12 @@ class NodeKindRegistry(KindRegistry[NodeKind]):
         super().register(kind)
         for event in kind.events:
             if event not in self._events:
-                self._dispatcher.register_event(event, decode_node_event)
-                self._events.add(event)
+                decoder = kind.event_decoders.get(event, decode_node_event)
+                self._dispatcher.register_event(event, decoder)
+                self._events[event] = decoder
+
+    def event_decoder(self, event: str) -> Callable[[DataMap], object]:
+        return self._events[event]
 
 
 class NodeBuilder:
@@ -188,8 +190,11 @@ class NodeBuilder:
         unbinds.append(self._bindings.bind(node.values.decode, f"node:{node.id}", apply, fallback=node.values.initial))
         return widget
 
-    def emit(self, event_name: str, node_id: str) -> None:
-        self._dispatcher.post(node_event(event_name, node_id))
+    def emit(self, event_name: str, node_id: str, **fields: DataValue) -> None:
+        """Post a node event; ``fields`` are what its record carries besides ``node``."""
+
+        decoder = self._kinds.event_decoder(event_name)
+        self._dispatcher.post(validated_event(event_name, {"node": node_id, **fields}, decoder))
 
 
 class _SizeReporter(QObject):

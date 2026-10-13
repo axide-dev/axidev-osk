@@ -26,13 +26,21 @@ from PySide6.QtWidgets import QPushButton, QStyle, QStyleOptionButton, QWidget
 _TEXT_FLAGS = Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextShowMnemonic
 _SAMPLE_SIZE = 32
 
+from ..mouse_buttons import MOUSE_BUTTONS, mouse_button_name
+
+_PRESSING = (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton)
+"""Buttons that press the widget as the left button does; ``pressed_with`` still names them."""
+
 
 class Button(QPushButton):
-    """Application button that treats right clicks like left clicks.
+    """Application button that the left, right, and middle mouse buttons all press.
 
-    The widget keeps no interaction state of its own beyond whether the
-    pointer is over it, so ``entered`` and ``left`` always alternate. Profiles
-    render any lasting look, such as a latched key, through style properties.
+    It decides nothing about what each mouse button means: ``pressed_with``
+    names the one behind the current press, the node reports it with
+    ``button.pressed`` and ``button.released``, and the profile decides. The
+    widget keeps no other interaction state than that and whether the pointer
+    is over it, so ``entered`` and ``left`` always alternate. Profiles render
+    any lasting look, such as a latched key, through style properties.
 
     Its label is never cut: the font its style gives it is the largest size
     used, and a label that does not fit its content area, or its shape, is
@@ -63,6 +71,19 @@ class Button(QPushButton):
         self._outline: QPainterPath | None = None
         self._border_colors: dict[int, QColor] = {}
         self._hovered = False
+        self._pressed_with = "left"
+
+    @property
+    def pressed_with(self) -> str:
+        """The mouse button, such as ``left`` or ``right``, behind the current or last press."""
+
+        return self._pressed_with
+
+    def press_with(self, button: str) -> None:
+        """Click the button as ``button`` would, with Qt's short visible press."""
+
+        self._pressed_with = button if button in MOUSE_BUTTONS.values() else "left"
+        self.animateClick()
 
     def set_parts(self, parts: tuple[str, ...] | None) -> None:
         """Show ``parts`` spread over the button, or, given ``None``, the one label set with ``setText``."""
@@ -257,27 +278,31 @@ class Button(QPushButton):
             self.left.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Treat a right-button press as a left-button press."""
+        """Press with any of the pressing buttons, remembering which one."""
 
+        if not self.isDown():
+            self._pressed_with = mouse_button_name(event.button())
         self._forward_mouse_event(event, super().mousePressEvent)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """Preserve left-button drag semantics while the right button is held."""
+        """Preserve left-button drag semantics while another pressing button is held."""
 
         self._forward_mouse_event(event, super().mouseMoveEvent)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        """Treat a right-button release as a left-button release."""
+        """Release with the button that pressed."""
 
         self._forward_mouse_event(event, super().mouseReleaseEvent)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        """Treat a right-button double click as a left-button double click."""
+        """Treat a double click as a second press with the same button."""
 
+        if not self.isDown():
+            self._pressed_with = mouse_button_name(event.button())
         self._forward_mouse_event(event, super().mouseDoubleClickEvent)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
-        """Suppress the context-menu event produced by an activating right click."""
+        """Suppress the context menu a right click would open; the click is reported instead."""
 
         event.accept()
 
@@ -285,10 +310,11 @@ class Button(QPushButton):
     def _left_mouse_event(event: QMouseEvent) -> QMouseEvent:
         button = event.button()
         buttons = event.buttons()
-        if button == Qt.MouseButton.RightButton:
+        if button in _PRESSING:
             button = Qt.MouseButton.LeftButton
-        if buttons & Qt.MouseButton.RightButton:
-            buttons = (buttons & ~Qt.MouseButton.RightButton) | Qt.MouseButton.LeftButton
+        for pressing in _PRESSING:
+            if buttons & pressing:
+                buttons = (buttons & ~pressing) | Qt.MouseButton.LeftButton
         return QMouseEvent(
             event.type(),
             event.position(),
@@ -303,9 +329,7 @@ class Button(QPushButton):
         event: QMouseEvent,
         handler: Callable[[QMouseEvent], None],
     ) -> None:
-        if event.button() != Qt.MouseButton.RightButton and not (
-            event.buttons() & Qt.MouseButton.RightButton
-        ):
+        if event.button() not in _PRESSING and not any(event.buttons() & pressing for pressing in _PRESSING):
             handler(event)
             return
         left_event = self._left_mouse_event(event)
