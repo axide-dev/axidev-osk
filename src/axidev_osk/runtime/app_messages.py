@@ -1,7 +1,8 @@
 """Messages the application runtime handles or sends.
 
-These cover windows, title-bar drags, displays, hot corners, the lock-screen
-panel, profile switching, quit requests, second-launch activation, and Linux permission setup.
+These cover windows, title-bar and resize-grip drags, dwell clicks, displays,
+hot corners, the lock-screen panel, profile switching, quit requests,
+second-launch activation, and Linux permission setup.
 ``build_engine`` registers every event here, so profiles can handle them; the
 application registers the action handlers, because they need the objects it
 owns. Messages the engine itself handles (keyboard, processes, logging,
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
 APP_ACTIVATED = "app.activated"
 APP_QUIT_REQUESTED = "app.quit_requested"
+DWELL_COMPLETED = "dwell.completed"
 DISPLAY_CONFIGURATION_CHANGED = "display.configuration_changed"
 HOT_CORNER_TRIGGERED = "hot_corner.triggered"
 LINUX_PERMISSION_SETUP_OPENED = "linux.permission_setup_opened"
@@ -40,6 +42,8 @@ SECURE_INPUT_PANEL_RELEASED = "secure_input_panel.released"
 WINDOW_CLOSE_REQUESTED = "window.close_requested"
 WINDOW_DRAG_ENDED = "window.drag_ended"
 WINDOW_DRAG_STARTED = "window.drag_started"
+WINDOW_DRAGGED = "window.dragged"
+WINDOW_RESIZE_DRAGGED = "window.resize_dragged"
 
 APP_QUIT = "app.quit"
 PROFILE_SWITCH = "profile.switch"
@@ -47,9 +51,11 @@ PROFILE_START = "profile.start"
 LINUX_OPEN_PERMISSION_SETUP = "linux.open_permission_setup"
 SECURE_INPUT_PANEL_PREPARE = "secure_input_panel.prepare"
 SECURE_INPUT_PANEL_RELEASE = "secure_input_panel.release"
+WINDOW_CLICK = "window.click"
 WINDOW_CLOSE = "window.close"
 WINDOW_HIDE = "window.hide"
 WINDOW_MOVE_BY = "window.move_by"
+WINDOW_RESIZE_BY = "window.resize_by"
 WINDOW_SHOW = "window.show"
 
 
@@ -90,10 +96,29 @@ class WindowArguments:
 
 
 @dataclass(frozen=True, slots=True)
-class WindowMoveByArguments:
+class WindowDeltaArguments:
+    """A window and a distance in pixels: a drag, or how far to move or resize it."""
+
     window_id: str
     dx: int
     dy: int
+
+
+@dataclass(frozen=True, slots=True)
+class WindowPointArguments:
+    """A window and a point on the screen, in pixels."""
+
+    window_id: str
+    x: int
+    y: int
+
+
+@dataclass(frozen=True, slots=True)
+class WindowClickArguments:
+    window_id: str
+    x: int
+    y: int
+    button: str
 
 
 def app_activated() -> RuntimeEvent:
@@ -136,6 +161,18 @@ def window_drag_started(window_id: str) -> RuntimeEvent:
     return validated_event(WINDOW_DRAG_STARTED, {"window": window_id}, decode_window)
 
 
+def window_dragged(window_id: str, dx: int, dy: int) -> RuntimeEvent:
+    return validated_event(WINDOW_DRAGGED, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+
+
+def window_resize_dragged(window_id: str, dx: int, dy: int) -> RuntimeEvent:
+    return validated_event(WINDOW_RESIZE_DRAGGED, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+
+
+def dwell_completed(window_id: str, x: int, y: int) -> RuntimeEvent:
+    return validated_event(DWELL_COMPLETED, {"window": window_id, "x": x, "y": y}, decode_window_point)
+
+
 def window_drag_ended(window_id: str) -> RuntimeEvent:
     return validated_event(WINDOW_DRAG_ENDED, {"window": window_id}, decode_window)
 
@@ -167,7 +204,15 @@ def window_close(window_id: str) -> RuntimeAction:
 
 
 def window_move_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
-    return validated_action(WINDOW_MOVE_BY, {"window": window_id, "dx": dx, "dy": dy}, decode_window_move_by)
+    return validated_action(WINDOW_MOVE_BY, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+
+
+def window_resize_by(window_id: str, dx: int, dy: int) -> RuntimeAction:
+    return validated_action(WINDOW_RESIZE_BY, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+
+
+def window_click(window_id: str, x: int, y: int, button: str = "left") -> RuntimeAction:
+    return validated_action(WINDOW_CLICK, {"window": window_id, "x": x, "y": y, "button": button}, decode_window_click)
 
 
 def secure_input_panel_prepare() -> RuntimeAction:
@@ -213,12 +258,31 @@ def decode_window(arguments: DataMap) -> WindowArguments:
     return WindowArguments(window_id=non_empty_string_value(arguments, "window"))
 
 
-def decode_window_move_by(arguments: DataMap) -> WindowMoveByArguments:
+def decode_window_delta(arguments: DataMap) -> WindowDeltaArguments:
     require_keys(arguments, ("window", "dx", "dy"))
-    return WindowMoveByArguments(
+    return WindowDeltaArguments(
         window_id=non_empty_string_value(arguments, "window"),
         dx=int_value(arguments, "dx"),
         dy=int_value(arguments, "dy"),
+    )
+
+
+def decode_window_point(arguments: DataMap) -> WindowPointArguments:
+    require_keys(arguments, ("window", "x", "y"))
+    return WindowPointArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        x=int_value(arguments, "x"),
+        y=int_value(arguments, "y"),
+    )
+
+
+def decode_window_click(arguments: DataMap) -> WindowClickArguments:
+    require_keys(arguments, ("window", "x", "y"), optional=("button",))
+    return WindowClickArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        x=int_value(arguments, "x"),
+        y=int_value(arguments, "y"),
+        button=non_empty_string_value(arguments, "button") if "button" in arguments else "left",
     )
 
 
@@ -228,6 +292,7 @@ def register_app_events(dispatcher: "Dispatcher") -> None:
     dispatcher.register_event(APP_ACTIVATED, decode_empty)
     dispatcher.register_event(APP_QUIT_REQUESTED, decode_quit_requested)
     dispatcher.register_event(DISPLAY_CONFIGURATION_CHANGED, decode_empty)
+    dispatcher.register_event(DWELL_COMPLETED, decode_window_point)
     dispatcher.register_event(HOT_CORNER_TRIGGERED, decode_hot_corner_triggered)
     dispatcher.register_event(LINUX_PERMISSION_SETUP_OPENED, decode_permission_setup_opened)
     dispatcher.register_event(POINTER_MOTION_OBSERVED, decode_pointer_motion_observed)
@@ -236,3 +301,5 @@ def register_app_events(dispatcher: "Dispatcher") -> None:
     dispatcher.register_event(WINDOW_CLOSE_REQUESTED, decode_window)
     dispatcher.register_event(WINDOW_DRAG_ENDED, decode_window)
     dispatcher.register_event(WINDOW_DRAG_STARTED, decode_window)
+    dispatcher.register_event(WINDOW_DRAGGED, decode_window_delta)
+    dispatcher.register_event(WINDOW_RESIZE_DRAGGED, decode_window_delta)

@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCloseEvent, QMouseEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from axidev_osk.attachments.runtime import AttachmentRuntime
@@ -13,10 +14,15 @@ from axidev_osk.components.pointer_locator import PointerLocator
 from axidev_osk.config.models import ChromeConfig, OverlayConfig
 from axidev_osk.config.profile import Live, ProfileConfig, StyleConfig, WindowValues
 from axidev_osk.python_defaults import axidev_osk
+from axidev_osk.messages import DataMap
+from axidev_osk.nodes import BUTTON_PRESSED
 from axidev_osk.runtime.app_messages import (
+    DWELL_COMPLETED,
     WINDOW_CLOSE_REQUESTED,
     WINDOW_DRAG_ENDED,
     WINDOW_DRAG_STARTED,
+    WINDOW_DRAGGED,
+    WINDOW_RESIZE_DRAGGED,
     WindowArguments,
 )
 from axidev_osk.runtime.engine import Engine
@@ -24,7 +30,7 @@ from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
 from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
-from support import FakeOverlay, RecordingBackend, make_test_engine, qt_app, start_test_profile
+from support import FakeOverlay, RecordingBackend, make_test_engine, qt_app, start_test_profile, wait_until
 
 _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
 
@@ -186,6 +192,45 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
             with self.subTest(window=window):
                 self.assertIsNone(window.findChild(OverlayTitleBar))
                 self.assertEqual(window.centralWidget().layout().count(), 1)
+
+    def test_title_bar_and_grip_drags_are_reported_without_moving_the_window(self) -> None:
+        harness = WindowHarness()
+        overlay = Mock(wraps=FakeOverlay(uses_custom_chrome=True))
+        overlay.uses_custom_chrome = True
+        overlay.uses_runtime_pointer_drag = False
+        window = harness.build(overlay=overlay)
+        self.addCleanup(window.deleteLater)
+        events: list[tuple[str, DataMap]] = []
+        for name in (WINDOW_DRAGGED, WINDOW_RESIZE_DRAGGED):
+            harness.engine.dispatcher.add_raw_event_handler(name, lambda event, name=name: events.append((name, event)) or [])
+
+        title_bar = window.findChild(OverlayTitleBar)
+        grip = window.findChild(OverlayResizeHandle)
+        assert title_bar is not None and grip is not None
+        title_bar.dragDelta.emit(3, -4)
+        grip.resizeDelta.emit(5, 6)
+        harness.engine.dispatcher.process_pending()
+
+        self.assertEqual(
+            events,
+            [(WINDOW_DRAGGED, {"window": "pad", "dx": 3, "dy": -4}), (WINDOW_RESIZE_DRAGGED, {"window": "pad", "dx": 5, "dy": 6})],
+        )
+        overlay.move_by.assert_not_called()
+        overlay.resize_by.assert_not_called()
+
+    def test_a_click_presses_the_button_under_the_point_with_the_mouse_button_asked_for(self) -> None:
+        harness = WindowHarness()
+        window = harness.build()
+        self.addCleanup(window.deleteLater)
+        window.show()
+        presses: list[DataMap] = []
+        harness.engine.dispatcher.add_raw_event_handler(BUTTON_PRESSED, lambda event: presses.append(event) or [])
+        key = next(button for button in window.findChildren(QPushButton) if button.property("componentId") == "pad:a")
+
+        window.click_at(*key.mapToGlobal(key.rect().center()).toTuple(), "right")
+        wait_until(lambda: presses)
+
+        self.assertEqual(presses, [{"node": "pad:a", "button": "right"}])
 
     def test_runtime_pointer_drag_reports_drag_events_for_the_window(self) -> None:
         harness = WindowHarness()
@@ -581,6 +626,29 @@ class RuntimeWindowDwellTests(unittest.TestCase):
         self.assertIsNotNone(pad._dwell_click)
         self.assertTrue(pad._dwell_click.enabled)
         self.assertIsNone(other._dwell_click)
+
+    def test_a_finished_dwell_is_reported_instead_of_clicking(self) -> None:
+        harness = WindowHarness([axidev_osk.dwell(id="d", window="pad", enabled=True)])
+        window = harness.build()
+        self.addCleanup(window.deleteLater)
+        window.show()
+        completed: list[DataMap] = []
+        presses: list[DataMap] = []
+        harness.engine.dispatcher.add_raw_event_handler(DWELL_COMPLETED, lambda event: completed.append(event) or [])
+        harness.engine.dispatcher.add_raw_event_handler(BUTTON_PRESSED, lambda event: presses.append(event) or [])
+        key = next(button for button in window.findChildren(QPushButton) if button.property("componentId") == "pad:a")
+        point = key.mapToGlobal(key.rect().center())
+        dwell = window._dwell_click
+        assert dwell is not None
+
+        with patch("axidev_osk.windows.dwell_click.QApplication.widgetAt", return_value=key):
+            dwell.update_from_global_position(point, now=1.0)
+            dwell.update_from_global_position(point, now=1.5)
+        wait_until(lambda: completed)
+        QTest.qWait(150)
+
+        self.assertEqual(completed, [{"window": "pad", "x": point.x(), "y": point.y()}])
+        self.assertEqual(presses, [])
 
     def test_bound_dwell_options_reach_the_built_window(self) -> None:
         harness = WindowHarness(

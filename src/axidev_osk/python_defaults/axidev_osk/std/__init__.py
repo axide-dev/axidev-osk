@@ -24,11 +24,17 @@ def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:
 def with_handlers(on: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return a profile ``on`` table with the event handlers the library needs added.
 
-    The library clears its latches on ``keyboard.reset``. A profile handler for
-    the same event runs after the library's.
+    The library clears its latches on ``keyboard.reset``, moves and resizes a
+    window its title bar or resize grip drags, and left-clicks where a dwell
+    completes. A profile handler for the same event runs after the library's.
     """
 
-    library = {"keyboard.reset": keys.on_reset}
+    library = {
+        "keyboard.reset": keys.on_reset,
+        "window.dragged": windows.on_dragged,
+        "window.resize_dragged": windows.on_resize_dragged,
+        "dwell.completed": windows.on_dwell_completed,
+    }
     merged: dict[str, Any] = dict(on or {})
     for event, handler in library.items():
         existing = merged.get(event)

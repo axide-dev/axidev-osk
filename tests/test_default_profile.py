@@ -45,10 +45,10 @@ class DefaultProfileHarness:
         self.nodes = nodes_by_id(self.window)
 
     def press(self, node_id: str) -> None:
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
 
     def release(self, node_id: str) -> None:
-        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
 
     def tap(self, node_id: str) -> None:
         self.press(node_id)

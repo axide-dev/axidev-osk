@@ -3,7 +3,9 @@
 These widgets are shared by frameless overlay surfaces. They emit
 ``dragDelta`` / ``resizeDelta`` signals and stay decoupled from any
 specific window class so multiple surface implementations can install
-the same chrome via ``install_overlay_chrome``.
+the same chrome via ``install_overlay_chrome``. The window posts those
+deltas as ``window.dragged`` and ``window.resize_dragged`` and moves or resizes
+only when a profile asks.
 
 The engine owns this chrome instead of letting profiles build their own.
 On the Linux overlay backends (layer shell, input panel, X11 utility
