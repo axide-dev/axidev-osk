@@ -51,13 +51,15 @@ When you add something, ask whether a profile author should be able to change it
 
 ## How To Add Things
 
-A node kind. Register a `NodeKind` in `nodes/kinds.py` with its build and apply functions and its callback fields mapped to event names. Read bindable values in `decode_options`, fixed fields in `decode_structure`, the fields its children are placed with in `decode_child_placement`, and checks against its children in `check_options`. The builder emits events through `builder.emit` and never decides what a press means. Add the `axidev_osk` builder and a test next to `tests/test_nodes.py`.
+A node kind. Register a `NodeKind` in `nodes/kinds.py` with its build and apply functions and its callback fields mapped to event names. Read bindable values in `decode_options`, fixed fields in `decode_structure`, the fields its children are placed with in `decode_child_placement`, child placement that may follow state in `decode_live_placement`, and checks against its children in `check_options`. The builder emits events through `builder.emit` and never decides what a press means. Add the `axidev_osk` builder and a test next to `tests/test_nodes.py`.
 
 An attachment. Add its options record, with its defaults, and its decoder in `attachments/__init__.py`, and register it in `register_builtin_attachments` with its `attach` step. Its options are values a profile may bind, so it owns no state and needs no setter action. Set its `limit` when at most one fits a window or a profile. Add the `axidev_osk` builder and a test in `tests/test_attachments.py`.
 
 An action or event. Write an arguments record, a decoder, and a constructor where Python code sends it, and register the name where the owning subsystem registers its messages. An event that reports an observation writes its observed variables with `set_observed`. Add the `axidev_osk` action builder if profiles should send it.
 
 A standard-library helper. Write it in `python_defaults/axidev_osk/std/` using only `axidev_osk` builders and actions. Take an `opts` map and merge it last with `axidev_osk.merge`, so any field can be overridden. Declare library state in the module's `STATE`; react to events through `std.with_handlers`. Test it in `tests/test_std_library.py`.
+
+A layout. Write a table from `std.board` positions to `std.layouts` entries, each sending a literal key name, and add it to the layouts the profile passes to `keys.at` and `wheel.wheel`.
 
 A profile change. Edit `python_defaults/default_profile.py`. If you change the default keyboard on purpose, update the expected data in `tests/test_default_profile.py` in the same change and say so in the PR.
 
