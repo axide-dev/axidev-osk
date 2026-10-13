@@ -1,12 +1,14 @@
-"""Built-in node kinds: button, label, spacer, grid, box, and stack.
+"""Built-in node kinds: button, label, spacer, grid, box, stack, and canvas.
 
 Every value a kind reads from its options may be a binding. Fixed fields (a
 box's direction, a grid child's cell, a box child's stretch) are read
-separately and never change while the widget lives.
+separately and never change while the widget lives. A canvas child's place,
+its ``shape`` and ``anchor``, is a value like any other, so it may follow state.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..components.button.widget import Button
+from ..components.canvas import Canvas
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
 from ..messages import DataMap
@@ -77,12 +80,15 @@ class SizeOptions:
 
 @dataclass(frozen=True, slots=True)
 class ButtonOptions:
-    label: str = ""
+    label: str | tuple[str, ...] = ""
+    """One label, or several parts the button spreads over its shape."""
     enabled: bool = True
     visible: bool = True
     size: SizeOptions = SizeOptions()
     locator_color: str | None = None
     """The color a ``pointer_locator`` glows over the button; without one it glows the gap color."""
+    label_min_px: int = 1
+    """The smallest pixel size the label shrinks to when it does not fit; below it the label is cut."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +132,20 @@ class GridOptions(LayoutOptions):
 class StackOptions:
     current: str | None = None
     visible: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasOptions:
+    visible: bool = True
+    size: SizeOptions = SizeOptions()
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasPlacement:
+    """Where a canvas child sits: its ``shape`` corners and the optional ``anchor`` its box centers on, in pixels."""
+
+    shape: tuple[tuple[float, float], ...]
+    anchor: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +220,17 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             check_options=_check_stack,
         )
     )
+    registry.register(
+        NodeKind(
+            name="canvas",
+            build=_build_canvas,
+            apply=_apply_canvas,
+            decode_options=_decode_canvas,
+            has_children=True,
+            decode_live_placement=_decode_canvas_placement,
+            place_child=_place_on_canvas,
+        )
+    )
 
 
 def _decode_size(reader: ConfigReader) -> SizeOptions:
@@ -216,12 +247,18 @@ def _visible(reader: ConfigReader) -> bool:
 
 
 def _decode_button(reader: ConfigReader) -> ButtonOptions:
+    label = reader.raw("label", "")
+    if isinstance(label, list) and all(isinstance(part, str) for part in label):
+        label = tuple(label)
+    elif not isinstance(label, str):
+        raise ConfigError(f"{reader.field_path('label')} must be a string or a list of strings")
     return ButtonOptions(
-        label=reader.optional_string("label") or "",
+        label=label,
         enabled=reader.boolean("enabled", True),
         visible=_visible(reader),
         size=_decode_size(reader),
         locator_color=reader.optional_color("locator_color"),
+        label_min_px=reader.integer("label_min_px", 1, minimum=1),
     )
 
 
@@ -262,6 +299,34 @@ def _decode_grid(reader: ConfigReader) -> GridOptions:
 
 def _decode_stack(reader: ConfigReader) -> StackOptions:
     return StackOptions(current=reader.optional_string("current"), visible=_visible(reader))
+
+
+def _decode_canvas(reader: ConfigReader) -> CanvasOptions:
+    return CanvasOptions(visible=_visible(reader), size=_decode_size(reader))
+
+
+def _decode_canvas_placement(reader: ConfigReader) -> CanvasPlacement:
+    """Read a canvas child's ``shape``, at least three ``[x, y]`` corners, and its optional ``anchor`` point."""
+
+    shape = reader.raw("shape")
+    corners = [_point(corner) for corner in shape] if isinstance(shape, list) else []
+    if len(corners) < 3 or None in corners:
+        raise ConfigError(f"{reader.field_path('shape')} must be a list of at least three [x, y] corners in pixels")
+    anchor = reader.raw("anchor", None)
+    point = _point(anchor) if anchor is not None else None
+    if anchor is not None and point is None:
+        raise ConfigError(f"{reader.field_path('anchor')} must be an [x, y] point in pixels")
+    return CanvasPlacement(shape=tuple(corner for corner in corners if corner is not None), anchor=point)
+
+
+def _point(value: object) -> tuple[float, float] | None:
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in value)
+    ):
+        return (float(value[0]), float(value[1]))
+    return None
 
 
 def _decode_box_structure(reader: ConfigReader) -> BoxStructure:
@@ -323,8 +388,14 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
     if old is None or options.size != old.size:
         options.size.apply(widget)
     if old is None or options.label != old.label:
-        # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
-        widget.setText(options.label.replace("&", "&&"))
+        if isinstance(options.label, tuple):
+            widget.set_parts(options.label)
+        else:
+            widget.set_parts(None)
+            # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
+            widget.setText(options.label.replace("&", "&&"))
+    if old is None or options.label_min_px != old.label_min_px:
+        widget.set_label_min_px(options.label_min_px)
     if old is None or options.enabled != old.enabled:
         widget.setEnabled(options.enabled)
     if old is None or options.visible != old.visible:
@@ -455,5 +526,26 @@ def _apply_stack(widget: QWidget, options: object, previous: object | None) -> N
             if page is not None and page.property(COMPONENT_ID) == options.current:
                 widget.setCurrentWidget(page)
                 break
+    if old is None or options.visible != old.visible:
+        _apply_visible(widget, options.visible)
+
+
+def _build_canvas(node: NodeConfig, builder: NodeBuilder) -> QWidget:
+    canvas = Canvas()
+    for child in node.children:
+        builder.build(child, into=canvas)
+    return canvas
+
+
+def _place_on_canvas(parent: QWidget, child: QWidget, placement: object) -> None:
+    assert isinstance(parent, Canvas) and isinstance(placement, CanvasPlacement)
+    parent.place(child, placement.shape, placement.anchor)
+
+
+def _apply_canvas(widget: QWidget, options: object, previous: object | None) -> None:
+    assert isinstance(widget, Canvas) and isinstance(options, CanvasOptions)
+    old = previous if isinstance(previous, CanvasOptions) else None
+    if old is None or options.size != old.size:
+        options.size.apply(widget)
     if old is None or options.visible != old.visible:
         _apply_visible(widget, options.visible)

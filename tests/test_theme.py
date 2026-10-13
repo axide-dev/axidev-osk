@@ -67,20 +67,22 @@ class ThemeTests(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 _decode(theme)
 
-    def test_every_name_and_property_the_default_stylesheet_targets_exists_on_the_keyboard(self) -> None:
+    def test_every_name_and_property_the_default_stylesheet_targets_exists_on_a_keyboard(self) -> None:
         qt_app()
-        engine = make_test_engine(RecordingBackend())
-        attachments = AttachmentRuntime(engine.bindings, engine.attachments, window_lookup=lambda _id: None)
-        profile = start_test_profile(engine, build_default_config())
-        attachments.start(profile)
-        window = build_window(
-            self,
-            profile.window("keyboard"),
-            engine,
-            attachments=attachments.for_window("keyboard"),
-            overlay=FakeOverlay(uses_custom_chrome=True),
-        )
-        widgets = [window, *window.findChildren(QWidget)]
+        widgets: list[QWidget] = []
+        for profile_name in ("default", "wheel"):
+            engine = make_test_engine(RecordingBackend())
+            attachments = AttachmentRuntime(engine.bindings, engine.attachments, window_lookup=lambda _id: None)
+            profile = start_test_profile(engine, {**build_default_config(), "active_profile": profile_name})
+            attachments.start(profile)
+            window = build_window(
+                self,
+                profile.window("keyboard"),
+                engine,
+                attachments=attachments.for_window("keyboard"),
+                overlay=FakeOverlay(uses_custom_chrome=True),
+            )
+            widgets += [window, *window.findChildren(QWidget)]
         object_names = {widget.objectName() for widget in widgets}
         properties = {bytes(name.data()).decode() for widget in widgets for name in widget.dynamicPropertyNames()}
         selectors = "".join(re.findall(r"([^{}]+)\{", DEFAULT_QSS))

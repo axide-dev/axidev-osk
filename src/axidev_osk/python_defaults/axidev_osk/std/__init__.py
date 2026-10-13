@@ -5,10 +5,23 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from . import controls, keys, locator, prompts, styles, windows
+from . import board, controls, keys, layouts, locator, prompts, styles, wheel, windows
 from .styles import lit
 
-__all__ = ["controls", "keys", "lit", "locator", "prompts", "styles", "windows", "with_handlers", "with_state"]
+__all__ = [
+    "board",
+    "controls",
+    "keys",
+    "layouts",
+    "lit",
+    "locator",
+    "prompts",
+    "styles",
+    "wheel",
+    "windows",
+    "with_handlers",
+    "with_state",
+]
 
 
 def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -17,7 +30,7 @@ def with_state(state: Mapping[str, Any] | None = None) -> dict[str, Any]:
     merged: dict[str, Any] = dict(state or {})
     if "std" in merged:
         raise ValueError("Profile state cannot declare std; the library declares it")
-    merged["std"] = {**keys.STATE, **windows.STATE, **controls.STATE, **locator.STATE}
+    merged["std"] = {**keys.STATE, **windows.STATE, **controls.STATE, **wheel.STATE, **locator.STATE}
     return merged
 
 

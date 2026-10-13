@@ -3,6 +3,8 @@
 ``EXPECTED_GRID`` and ``EXPECTED_OUTPUTS`` were measured from the original
 engine-built keyboard widget before it was deleted. Each grid row is
 (row, column, row span, column span, minimum width, minimum height, legend).
+The minimum sizes were later scaled down on purpose to a 32 px key unit;
+the cells, legends, and outputs are still the original measurements.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from axidev_osk.python_defaults.default_profile import KEYBOARD_OPACITY, build_d
 from axidev_osk.python_defaults.axidev_osk.std.windows import GHOST_OPACITY
 from axidev_osk.runtime.app_messages import window_close_requested
 from axidev_osk.runtime.engine_messages import input_key, keyboard_status_changed, window_state_changed
+from axidev_osk.runtime.profile_runtime import state_set
 from support import (
     RecordingBackend,
     build_window,
@@ -31,7 +34,7 @@ from support import (
     wait_until,
 )
 
-_MODIFIERS = {"ShiftLeft", "ShiftRight", "CtrlLeft", "CtrlRight", "SuperLeft", "SuperRight", "AltLeft", "AltRight"}
+_MODIFIERS = {"LFSH", "RTSH", "LCTL", "RCTL", "LWIN", "RWIN", "LALT", "RALT"}
 _PROMPTS = ("quit-prompt", "permission-prompt", "permission-logout", "permission-terminal-opened", "permission-no-terminal")
 
 
@@ -181,27 +184,27 @@ class BehaviorParityTests(unittest.TestCase):
 
     def test_modifiers_hold_their_key_until_tapped_again_and_legends_follow(self) -> None:
         harness = self.harness
-        harness.tap("key:ShiftLeft")
+        harness.tap("key:LFSH")
         harness.emit(input_key("ShiftLeft", None, ("Shift",), True))
 
         self.assertEqual(harness.backend.sent, [("down", "ShiftLeft", (), True)])
-        self.assertTrue(harness.nodes["key:ShiftLeft"].property("latched"))
-        self.assertEqual(harness.nodes["key:A"].text(), "A")  # type: ignore[attr-defined]
-        self.assertEqual(harness.nodes["key:1"].text(), "!")  # type: ignore[attr-defined]
+        self.assertTrue(harness.nodes["key:LFSH"].property("latched"))
+        self.assertEqual(harness.nodes["key:AC01"].text(), "A")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AE01"].text(), "!")  # type: ignore[attr-defined]
 
-        harness.tap("key:ShiftLeft")
+        harness.tap("key:LFSH")
         harness.emit(input_key("ShiftLeft", None, (), False))
 
         self.assertEqual(harness.backend.sent[-1], ("up", "ShiftLeft"))
-        self.assertEqual(harness.nodes["key:A"].text(), "a")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AC01"].text(), "a")  # type: ignore[attr-defined]
 
     def test_paired_modifiers_share_a_latch_like_the_original(self) -> None:
         harness = self.harness
-        harness.tap("key:ShiftLeft")
-        self.assertTrue(harness.nodes["key:ShiftRight"].property("latched"))
-        harness.tap("key:ShiftRight")
-        harness.tap("key:AltLeft")
-        harness.tap("key:AltRight")
+        harness.tap("key:LFSH")
+        self.assertTrue(harness.nodes["key:RTSH"].property("latched"))
+        harness.tap("key:RTSH")
+        harness.tap("key:LALT")
+        harness.tap("key:RALT")
 
         self.assertEqual(
             harness.backend.sent,
@@ -217,9 +220,9 @@ class BehaviorParityTests(unittest.TestCase):
         harness = self.harness
         harness.emit(input_key("CapsLock", None, ("CapsLock",), True))
 
-        self.assertTrue(harness.nodes["key:CapsLock"].property("latched"))
-        self.assertEqual(harness.nodes["key:Q"].text(), "Q")  # type: ignore[attr-defined]
-        self.assertEqual(harness.nodes["key:1"].text(), "1")  # type: ignore[attr-defined]
+        self.assertTrue(harness.nodes["key:CAPS"].property("latched"))
+        self.assertEqual(harness.nodes["key:AD01"].text(), "Q")  # type: ignore[attr-defined]
+        self.assertEqual(harness.nodes["key:AE01"].text(), "1")  # type: ignore[attr-defined]
 
     def test_ghost_fades_and_restores_the_keyboard(self) -> None:
         harness = self.harness
@@ -230,7 +233,7 @@ class BehaviorParityTests(unittest.TestCase):
         self.assertAlmostEqual(harness.window.windowOpacity(), GHOST_OPACITY, delta=0.005)
         blocker = harness.window._input_blocker
         assert blocker is not None
-        self.assertTrue(blocker.eventFilter(harness.nodes["key:A"], press))
+        self.assertTrue(blocker.eventFilter(harness.nodes["key:AC01"], press))
         self.assertFalse(blocker.eventFilter(harness.nodes["ghost"], press))
         self.assertFalse(harness.nodes["ghost"].property("latched"))
 
@@ -339,191 +342,214 @@ class BehaviorParityTests(unittest.TestCase):
         self.assertTrue(status.isHidden())
 
 
+class LayoutSwitchTests(unittest.TestCase):
+    def test_both_keyboards_follow_the_layout_setting_to_dvorak(self) -> None:
+        for profile_name, node_id in (("default", "key:AD01"), ("wheel", "wheel:slice:9")):
+            with self.subTest(profile_name):
+                qt_app()
+                backend = RecordingBackend()
+                engine = make_test_engine(backend)
+                config = build_default_config()
+                config["active_profile"] = profile_name
+                window = build_window(self, start_test_profile(engine, config).window("keyboard"), engine)
+                engine.dispatcher.dispatch(state_set("settings.layout", "dvorak"))
+                if profile_name == "wheel":
+                    # Slice 9 opens the top letter row; its first key sits on the left, slice 7.
+                    engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
+                    node_id = "wheel:slice:7"
+                key = nodes_by_id(window)[node_id]
+
+                self.assertEqual(key.text(), "'")  # type: ignore[attr-defined]
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
+                engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
+                self.assertEqual(backend.sent, [("down", "'", (), True), ("up", "'")])
+
+
 EXPECTED_GRID = [
-    (0, 0, 1, 4, 48, 48, 'Esc'),
-    (0, 4, 1, 4, 48, 48, 'F1'),
-    (0, 8, 1, 4, 48, 48, 'F2'),
-    (0, 12, 1, 4, 48, 48, 'F3'),
-    (0, 16, 1, 4, 48, 48, 'F4'),
-    (0, 20, 1, 4, 48, 48, 'F5'),
-    (0, 24, 1, 4, 48, 48, 'F6'),
-    (0, 28, 1, 4, 48, 48, 'F7'),
-    (0, 32, 1, 4, 48, 48, 'F8'),
-    (0, 36, 1, 4, 48, 48, 'F9'),
-    (0, 40, 1, 4, 48, 48, 'F10'),
-    (0, 44, 1, 4, 48, 48, 'F11'),
-    (0, 48, 1, 4, 48, 48, 'F12'),
-    (0, 52, 1, 4, 48, 48, 'Dwell'),
-    (0, 60, 1, 4, 48, 48, 'PrtSc'),
-    (0, 64, 1, 4, 48, 48, 'ScrLk'),
-    (0, 68, 1, 4, 48, 48, 'Pause'),
-    (1, 0, 1, 4, 48, 48, '`'),
-    (1, 4, 1, 4, 48, 48, '1'),
-    (1, 8, 1, 4, 48, 48, '2'),
-    (1, 12, 1, 4, 48, 48, '3'),
-    (1, 16, 1, 4, 48, 48, '4'),
-    (1, 20, 1, 4, 48, 48, '5'),
-    (1, 24, 1, 4, 48, 48, '6'),
-    (1, 28, 1, 4, 48, 48, '7'),
-    (1, 32, 1, 4, 48, 48, '8'),
-    (1, 36, 1, 4, 48, 48, '9'),
-    (1, 40, 1, 4, 48, 48, '0'),
-    (1, 44, 1, 4, 48, 48, '-'),
-    (1, 48, 1, 4, 48, 48, '='),
-    (1, 52, 1, 8, 96, 48, 'Backspace'),
-    (1, 60, 1, 4, 48, 48, 'Ins'),
-    (1, 64, 1, 4, 48, 48, 'Home'),
-    (1, 68, 1, 4, 48, 48, 'PgUp'),
-    (2, 0, 1, 6, 72, 48, 'Tab'),
-    (2, 6, 1, 4, 48, 48, 'q'),
-    (2, 10, 1, 4, 48, 48, 'w'),
-    (2, 14, 1, 4, 48, 48, 'e'),
-    (2, 18, 1, 4, 48, 48, 'r'),
-    (2, 22, 1, 4, 48, 48, 't'),
-    (2, 26, 1, 4, 48, 48, 'y'),
-    (2, 30, 1, 4, 48, 48, 'u'),
-    (2, 34, 1, 4, 48, 48, 'i'),
-    (2, 38, 1, 4, 48, 48, 'o'),
-    (2, 42, 1, 4, 48, 48, 'p'),
-    (2, 46, 1, 4, 48, 48, '['),
-    (2, 50, 1, 4, 48, 48, ']'),
-    (2, 54, 1, 4, 48, 48, 'Ghost'),
-    (2, 60, 1, 4, 48, 48, 'Del'),
-    (2, 64, 1, 4, 48, 48, 'End'),
-    (2, 68, 1, 4, 48, 48, 'PgDn'),
-    (3, 0, 1, 7, 84, 48, 'Caps'),
-    (3, 7, 1, 4, 48, 48, 'a'),
-    (3, 11, 1, 4, 48, 48, 's'),
-    (3, 15, 1, 4, 48, 48, 'd'),
-    (3, 19, 1, 4, 48, 48, 'f'),
-    (3, 23, 1, 4, 48, 48, 'g'),
-    (3, 27, 1, 4, 48, 48, 'h'),
-    (3, 31, 1, 4, 48, 48, 'j'),
-    (3, 35, 1, 4, 48, 48, 'k'),
-    (3, 39, 1, 4, 48, 48, 'l'),
-    (3, 43, 1, 4, 48, 48, ';'),
-    (3, 47, 1, 4, 48, 48, "'"),
-    (3, 51, 1, 9, 108, 48, 'Enter'),
-    (4, 0, 1, 5, 60, 48, 'Shift'),
-    (4, 5, 1, 4, 48, 48, '\\'),
-    (4, 9, 1, 4, 48, 48, 'z'),
-    (4, 13, 1, 4, 48, 48, 'x'),
-    (4, 17, 1, 4, 48, 48, 'c'),
-    (4, 21, 1, 4, 48, 48, 'v'),
-    (4, 25, 1, 4, 48, 48, 'b'),
-    (4, 29, 1, 4, 48, 48, 'n'),
-    (4, 33, 1, 4, 48, 48, 'm'),
-    (4, 37, 1, 4, 48, 48, ','),
-    (4, 41, 1, 4, 48, 48, '.'),
-    (4, 45, 1, 4, 48, 48, '/'),
-    (4, 49, 1, 11, 132, 48, 'Shift'),
-    (4, 64, 1, 4, 48, 48, '↑'),
-    (5, 0, 1, 5, 60, 48, 'Ctrl'),
-    (5, 5, 1, 5, 60, 48, 'Super'),
-    (5, 10, 1, 5, 60, 48, 'Alt'),
-    (5, 15, 1, 25, 300, 48, 'Space'),
-    (5, 40, 1, 5, 60, 48, 'AltGr'),
-    (5, 45, 1, 5, 60, 48, 'Super'),
-    (5, 50, 1, 5, 60, 48, 'Menu'),
-    (5, 55, 1, 5, 60, 48, 'Ctrl'),
-    (5, 60, 1, 4, 48, 48, '←'),
-    (5, 64, 1, 4, 48, 48, '↓'),
-    (5, 68, 1, 4, 48, 48, '→'),
+    (0, 0, 1, 4, 32, 32, 'Esc'),
+    (0, 4, 1, 4, 32, 32, 'F1'),
+    (0, 8, 1, 4, 32, 32, 'F2'),
+    (0, 12, 1, 4, 32, 32, 'F3'),
+    (0, 16, 1, 4, 32, 32, 'F4'),
+    (0, 20, 1, 4, 32, 32, 'F5'),
+    (0, 24, 1, 4, 32, 32, 'F6'),
+    (0, 28, 1, 4, 32, 32, 'F7'),
+    (0, 32, 1, 4, 32, 32, 'F8'),
+    (0, 36, 1, 4, 32, 32, 'F9'),
+    (0, 40, 1, 4, 32, 32, 'F10'),
+    (0, 44, 1, 4, 32, 32, 'F11'),
+    (0, 48, 1, 4, 32, 32, 'F12'),
+    (0, 52, 1, 4, 32, 32, 'Dwell'),
+    (0, 60, 1, 4, 32, 32, 'PrtSc'),
+    (0, 64, 1, 4, 32, 32, 'ScrLk'),
+    (0, 68, 1, 4, 32, 32, 'Pause'),
+    (1, 0, 1, 4, 32, 32, '`'),
+    (1, 4, 1, 4, 32, 32, '1'),
+    (1, 8, 1, 4, 32, 32, '2'),
+    (1, 12, 1, 4, 32, 32, '3'),
+    (1, 16, 1, 4, 32, 32, '4'),
+    (1, 20, 1, 4, 32, 32, '5'),
+    (1, 24, 1, 4, 32, 32, '6'),
+    (1, 28, 1, 4, 32, 32, '7'),
+    (1, 32, 1, 4, 32, 32, '8'),
+    (1, 36, 1, 4, 32, 32, '9'),
+    (1, 40, 1, 4, 32, 32, '0'),
+    (1, 44, 1, 4, 32, 32, '-'),
+    (1, 48, 1, 4, 32, 32, '='),
+    (1, 52, 1, 8, 64, 32, 'Backspace'),
+    (1, 60, 1, 4, 32, 32, 'Ins'),
+    (1, 64, 1, 4, 32, 32, 'Home'),
+    (1, 68, 1, 4, 32, 32, 'PgUp'),
+    (2, 0, 1, 6, 48, 32, 'Tab'),
+    (2, 6, 1, 4, 32, 32, 'q'),
+    (2, 10, 1, 4, 32, 32, 'w'),
+    (2, 14, 1, 4, 32, 32, 'e'),
+    (2, 18, 1, 4, 32, 32, 'r'),
+    (2, 22, 1, 4, 32, 32, 't'),
+    (2, 26, 1, 4, 32, 32, 'y'),
+    (2, 30, 1, 4, 32, 32, 'u'),
+    (2, 34, 1, 4, 32, 32, 'i'),
+    (2, 38, 1, 4, 32, 32, 'o'),
+    (2, 42, 1, 4, 32, 32, 'p'),
+    (2, 46, 1, 4, 32, 32, '['),
+    (2, 50, 1, 4, 32, 32, ']'),
+    (2, 54, 1, 4, 32, 32, 'Ghost'),
+    (2, 60, 1, 4, 32, 32, 'Del'),
+    (2, 64, 1, 4, 32, 32, 'End'),
+    (2, 68, 1, 4, 32, 32, 'PgDn'),
+    (3, 0, 1, 7, 56, 32, 'Caps'),
+    (3, 7, 1, 4, 32, 32, 'a'),
+    (3, 11, 1, 4, 32, 32, 's'),
+    (3, 15, 1, 4, 32, 32, 'd'),
+    (3, 19, 1, 4, 32, 32, 'f'),
+    (3, 23, 1, 4, 32, 32, 'g'),
+    (3, 27, 1, 4, 32, 32, 'h'),
+    (3, 31, 1, 4, 32, 32, 'j'),
+    (3, 35, 1, 4, 32, 32, 'k'),
+    (3, 39, 1, 4, 32, 32, 'l'),
+    (3, 43, 1, 4, 32, 32, ';'),
+    (3, 47, 1, 4, 32, 32, "'"),
+    (3, 51, 1, 9, 72, 32, 'Enter'),
+    (4, 0, 1, 5, 40, 32, 'Shift'),
+    (4, 5, 1, 4, 32, 32, '\\'),
+    (4, 9, 1, 4, 32, 32, 'z'),
+    (4, 13, 1, 4, 32, 32, 'x'),
+    (4, 17, 1, 4, 32, 32, 'c'),
+    (4, 21, 1, 4, 32, 32, 'v'),
+    (4, 25, 1, 4, 32, 32, 'b'),
+    (4, 29, 1, 4, 32, 32, 'n'),
+    (4, 33, 1, 4, 32, 32, 'm'),
+    (4, 37, 1, 4, 32, 32, ','),
+    (4, 41, 1, 4, 32, 32, '.'),
+    (4, 45, 1, 4, 32, 32, '/'),
+    (4, 49, 1, 11, 88, 32, 'Shift'),
+    (4, 64, 1, 4, 32, 32, '↑'),
+    (5, 0, 1, 5, 40, 32, 'Ctrl'),
+    (5, 5, 1, 5, 40, 32, 'Super'),
+    (5, 10, 1, 5, 40, 32, 'Alt'),
+    (5, 15, 1, 25, 200, 32, 'Space'),
+    (5, 40, 1, 5, 40, 32, 'AltGr'),
+    (5, 45, 1, 5, 40, 32, 'Super'),
+    (5, 50, 1, 5, 40, 32, 'Menu'),
+    (5, 55, 1, 5, 40, 32, 'Ctrl'),
+    (5, 60, 1, 4, 32, 32, '←'),
+    (5, 64, 1, 4, 32, 32, '↓'),
+    (5, 68, 1, 4, 32, 32, '→'),
 ]
 
 EXPECTED_OUTPUTS = ['Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'PrintScreen', 'ScrollLock', 'Pause', '`', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Backspace', 'Insert', 'Home', 'PageUp', 'Tab', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']', 'Delete', 'End', 'PageDown', 'CapsLock', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'", 'Enter', 'ShiftLeft', '\\', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', 'ShiftRight', 'Up', 'CtrlLeft', 'SuperLeft', 'AltLeft', 'Space', 'AltRight', 'SuperRight', 'Menu', 'CtrlRight', 'Left', 'Down', 'Right']
 
 
 EXPECTED_LOCATOR_COLORS = {
-    'key:Escape': '#b32d00',
-    'key:F1': '#0059b3',
-    'key:F2': '#ff0000',
-    'key:F3': '#00d4ff',
-    'key:F4': '#b32d00',
-    'key:F5': '#0059b3',
-    'key:F6': '#ff0000',
-    'key:F7': '#002bff',
-    'key:F8': '#ff8000',
-    'key:F9': '#1e00b3',
-    'key:F10': '#b38600',
-    'key:F11': '#002bff',
-    'key:F12': '#ff8000',
+    'key:ESC': '#b32d00',
+    'key:FK01': '#0059b3',
+    'key:FK02': '#ff0000',
+    'key:FK03': '#00d4ff',
+    'key:FK04': '#b32d00',
+    'key:FK05': '#0059b3',
+    'key:FK06': '#ff0000',
+    'key:FK07': '#002bff',
+    'key:FK08': '#ff8000',
+    'key:FK09': '#1e00b3',
+    'key:FK10': '#b38600',
+    'key:FK11': '#002bff',
+    'key:FK12': '#ff8000',
     'dwell': '#00d4ff',
-    'key:PrintScreen': '#b3002d',
-    'key:ScrollLock': '#0059b3',
-    'key:Pause': '#ff0000',
-    'key:`': '#00ff80',
-    'key:1': '#ff8000',
-    'key:2': '#1e00b3',
-    'key:3': '#b38600',
-    'key:4': '#002bff',
-    'key:5': '#ff8000',
-    'key:6': '#00d4ff',
-    'key:7': '#b38600',
-    'key:8': '#0059b3',
-    'key:9': '#b32d00',
-    'key:0': '#00d4ff',
-    'key:-': '#ff0000',
-    'key:=': '#0059b3',
-    'key:Backspace': '#b32d00',
-    'key:Insert': '#00ff80',
-    'key:Home': '#ff0080',
-    'key:PageUp': '#00b395',
-    'key:Tab': '#ff0080',
-    'key:Q': '#00b395',
-    'key:W': '#b3002d',
-    'key:E': '#00ff80',
-    'key:R': '#ff0080',
-    'key:T': '#00b395',
-    'key:Y': '#b3002d',
-    'key:U': '#00ff80',
-    'key:I': '#ff0080',
-    'key:O': '#00b395',
-    'key:P': '#b3002d',
-    'key:[': '#00ff80',
-    'key:]': '#ff0080',
+    'key:PRSC': '#ff0080',
+    'key:SCLK': '#0059b3',
+    'key:PAUS': '#b32d00',
+    'key:TLDE': '#00ff80',
+    'key:AE01': '#ff8000',
+    'key:AE02': '#1e00b3',
+    'key:AE03': '#b38600',
+    'key:AE04': '#002bff',
+    'key:AE05': '#ff8000',
+    'key:AE06': '#00d4ff',
+    'key:AE07': '#b38600',
+    'key:AE08': '#0059b3',
+    'key:AE09': '#b32d00',
+    'key:AE10': '#00d4ff',
+    'key:AE11': '#ff0000',
+    'key:AE12': '#0059b3',
+    'key:BKSP': '#b32d00',
+    'key:INS': '#00ff80',
+    'key:HOME': '#ff0000',
+    'key:PGUP': '#00b395',
+    'key:TAB': '#ff0080',
+    'key:AD01': '#00b395',
+    'key:AD02': '#b3002d',
+    'key:AD03': '#00ff80',
+    'key:AD04': '#ff0080',
+    'key:AD05': '#00b395',
+    'key:AD06': '#b3002d',
+    'key:AD07': '#00ff80',
+    'key:AD08': '#ff0080',
+    'key:AD09': '#00b395',
+    'key:AD10': '#b3002d',
+    'key:AD11': '#00ff80',
+    'key:AD12': '#ff0080',
     'ghost': '#00b395',
-    'key:Delete': '#ff8000',
-    'key:End': '#00d4ff',
-    'key:PageDown': '#b32d00',
-    'key:CapsLock': '#0059b3',
-    'key:A': '#b32d00',
-    'key:S': '#00d4ff',
-    'key:D': '#ff0000',
-    'key:F': '#0059b3',
-    'key:G': '#b32d00',
-    'key:H': '#002bff',
-    'key:J': '#ff0000',
-    'key:K': '#1e00b3',
-    'key:L': '#b38600',
-    'key:;': '#002bff',
-    "key:'": '#ff8000',
-    'key:Enter': '#1e00b3',
-    'key:ShiftLeft': '#ff0000',
-    'key:\\': '#1e00b3',
-    'key:Z': '#b38600',
-    'key:X': '#002bff',
-    'key:C': '#ff8000',
-    'key:V': '#1e00b3',
-    'key:B': '#b38600',
-    'key:N': '#00d4ff',
-    'key:M': '#ff8000',
-    'key:,': '#0059b3',
-    'key:.': '#b32d00',
-    'key:/': '#00d4ff',
-    'key:ShiftRight': '#ff0000',
-    'key:Up': '#00ff80',
-    'key:CtrlLeft': '#00b395',
-    'key:SuperLeft': '#b3002d',
-    'key:AltLeft': '#00ff80',
-    'key:Space': '#ff0080',
-    'key:AltRight': '#00ff80',
-    'key:SuperRight': '#b3002d',
-    'key:Menu': '#00b395',
-    'key:CtrlRight': '#ff0080',
-    'key:Left': '#00d4ff',
-    'key:Down': '#b3002d',
-    'key:Right': '#00b395',
+    'key:DELE': '#b3002d',
+    'key:END': '#00d4ff',
+    'key:PGDN': '#ff8000',
+    'key:CAPS': '#0059b3',
+    'key:AC01': '#b32d00',
+    'key:AC02': '#00d4ff',
+    'key:AC03': '#ff0000',
+    'key:AC04': '#0059b3',
+    'key:AC05': '#b32d00',
+    'key:AC06': '#002bff',
+    'key:AC07': '#ff0000',
+    'key:AC08': '#1e00b3',
+    'key:AC09': '#b38600',
+    'key:AC10': '#002bff',
+    "key:AC11": '#ff8000',
+    'key:RTRN': '#1e00b3',
+    'key:LFSH': '#ff0000',
+    'key:LSGT': '#1e00b3',
+    'key:AB01': '#b38600',
+    'key:AB02': '#002bff',
+    'key:AB03': '#ff8000',
+    'key:AB04': '#1e00b3',
+    'key:AB05': '#b38600',
+    'key:AB06': '#00d4ff',
+    'key:AB07': '#ff8000',
+    'key:AB08': '#0059b3',
+    'key:AB09': '#b32d00',
+    'key:AB10': '#00d4ff',
+    'key:RTSH': '#ff0000',
+    'key:UP': '#00ff80',
+    'key:LCTL': '#00b395',
+    'key:LWIN': '#b3002d',
+    'key:LALT': '#00ff80',
+    'key:SPCE': '#ff0080',
+    'key:RALT': '#00ff80',
+    'key:RWIN': '#b3002d',
+    'key:MENU': '#00b395',
+    'key:RCTL': '#ff0080',
+    'key:LEFT': '#00d4ff',
+    'key:DOWN': '#b3002d',
+    'key:RGHT': '#00b395',
 }
 """Each button's glow color, measured from the original keyboard's engine-computed pattern."""
 

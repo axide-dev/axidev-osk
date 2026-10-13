@@ -11,9 +11,10 @@ from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.axidev_osk import std
-from axidev_osk.python_defaults.axidev_osk.std import controls, keys, locator, prompts, windows
+from axidev_osk.python_defaults.axidev_osk.std import controls, keys, layouts, locator, prompts, wheel, windows
 from axidev_osk.config.variables import decode_state
 from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
+from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.state import StateTree
 from support import (
     RecordingBackend,
@@ -250,6 +251,109 @@ class KeyTests(unittest.TestCase):
         self.assertEqual((node["id"], node["on_release"], node["cell"]), ("cow", custom, {"row": 0, "column": 0}))
 
 
+class LayoutTests(unittest.TestCase):
+    def test_a_layout_missing_a_position_is_rejected_when_built(self) -> None:
+        tables = {"one": {"AD01": layouts.letter("q")}, "two": {}}
+
+        with self.assertRaisesRegex(ValueError, "Layout 'two' has no entry for AD01"):
+            keys.at("AD01", tables, lambda state: "one")
+
+    def test_a_position_key_shows_and_sends_whatever_the_active_layout_puts_there(self) -> None:
+        tables = {"one": {"AD01": layouts.letter("q")}, "two": {"AD01": layouts.shifted("&", "1", "&")}}
+        harness = StdHarness(
+            self,
+            [keys.at("AD01", tables, lambda state: axidev_osk.read(state, "layout"))],
+            state={"layout": axidev_osk.var("string", "one")},
+        )
+        key = harness.widget("key:AD01")
+
+        harness.tap("key:AD01")
+        self.assertEqual(key.text(), "q")  # type: ignore[attr-defined]
+
+        harness.engine.dispatcher.dispatch(state_set("layout", "two"))
+        harness.tap("key:AD01")
+        harness.observe("ShiftLeft", True)
+
+        self.assertEqual(key.text(), "1")  # type: ignore[attr-defined]
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "Q", (), True), ("up", "Q"), ("down", "&", (), True), ("up", "&")],
+        )
+
+
+class WheelTests(unittest.TestCase):
+    def _harness(self) -> StdHarness:
+        return StdHarness(self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us")])
+
+    def test_picking_slices_opens_menus_then_sends_the_key_and_returns_to_the_top(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:9")
+        self.assertEqual(harness.widget("w:slice:8").text(), "w")  # type: ignore[attr-defined]
+        harness.tap("w:slice:8")
+        harness.tap("w:slice:5")
+
+        # A key slice holds its key like a key button does, repeating until released.
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "W", (), True), ("up", "W"), ("down", "Space", (), True), ("up", "Space")],
+        )
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+
+    def test_a_modifier_latches_until_picked_again(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        self.assertTrue(harness.widget("w:slice:7").property("latched"))
+        harness.tap("w:center")
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), True), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
+        )
+
+    def test_the_center_goes_back_to_the_top(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:3")
+        harness.tap("w:slice:8")
+        self.assertEqual(harness.widget("w:center").text(), "×")  # type: ignore[attr-defined]
+        harness.tap("w:center")
+
+        self.assertEqual(harness.widget("w:center").text(), "")  # type: ignore[attr-defined]
+        self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
+        self.assertEqual(harness.backend.sent, [])
+
+    def test_a_wheel_menu_with_another_slice_count_is_rejected_when_built(self) -> None:
+        short = wheel.menu({0: ["AD01", "AD02"]})
+
+        with self.assertRaisesRegex(ValueError, r"wheel menu \[0\] has 2 slices; every menu needs 10"):
+            wheel.wheel("w", short, layouts.LAYOUTS, lambda state: "us")
+
+    def test_the_slices_fill_the_wheel_whatever_size_it_takes(self) -> None:
+        harness = StdHarness(
+            self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"min_width": 200, "min_height": 200})]
+        )
+        harness.window.show()
+        canvas = harness.widget("w")
+        for width, height in ((200, 200), (500, 260)):
+            harness.window.resize(width + 100, height + 100)
+            qt_app().processEvents()
+            slices = [harness.widget(f"w:slice:{index}").geometry() for index in range(wheel.SLICES)]
+            with self.subTest(size=(canvas.width(), canvas.height())):
+                self.assertGreater(canvas.width(), canvas.height() if width > height else 0)
+                self.assertLessEqual(min(rect.left() for rect in slices), 1)
+                self.assertLessEqual(min(rect.top() for rect in slices), 1)
+                self.assertGreaterEqual(max(rect.right() for rect in slices), canvas.width() - 2)
+                self.assertGreaterEqual(max(rect.bottom() for rect in slices), canvas.height() - 2)
+
+
 class ControlTests(unittest.TestCase):
     def test_checkbox_flips_its_variable_and_lights_while_true(self) -> None:
         harness = StdHarness(self, [controls.checkbox("on", "On", "on")], state={"on": axidev_osk.var("boolean", False)})
@@ -345,6 +449,23 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(controls_row.isHidden())
         harness.tap("s:toggle")
         self.assertTrue(panel.isHidden())
+
+    def test_a_window_with_a_strip_gives_its_spare_height_to_its_content(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        content = axidev_osk.grid(id="keys", children=[axidev_osk.button(id="key", label="A", cell={"row": 0, "column": 0})])
+        window = controls.with_strip(axidev_osk.window(id="pad", title="Pad", content=content), controls.strip("s", []))
+        root = axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[window], state=std.with_state(None))})
+        built = build_window(self, start_test_profile(engine, root).window("pad"), engine)
+        built.show()
+        key, strip = find_node(built, "key"), find_node(built, "s")
+        key_height, strip_height = key.height(), strip.height()
+
+        built.resize(built.width(), built.height() + 200)
+        qt_app().processEvents()
+
+        self.assertEqual(key.height(), key_height + 200)
+        self.assertEqual(strip.height(), strip_height)
 
 
 class WindowHelperTests(unittest.TestCase):

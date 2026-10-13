@@ -102,6 +102,9 @@ class RecordingBackend:
     def shutdown(self) -> None:
         self.shutdowns += 1
 
+    def stop_listening(self) -> None:
+        self.sent.append(("stop_listening",))
+
     def observe(self, observation: object) -> None:
         """Deliver a key observation to every listener, as the listener thread does."""
 

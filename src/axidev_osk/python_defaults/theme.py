@@ -141,10 +141,10 @@ QPushButton {
         stop: 1 #151520
     );
     border: 1px solid #2e2a3f;
-    border-radius: 12px;
-    padding: 8px 4px;
+    border-radius: 8px;
+    padding: 3px 4px;
     text-align: center;
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     color: #f5f6fa;
 }
@@ -234,19 +234,35 @@ QWidget[pointerLocatorEnabled="true"] QPushButton:disabled {
     background-color: rgba(15, 15, 22, 153);
 }
 
-QWidget#settingsStrip QPushButton {
+QPushButton[wheelItem] {
+    border-radius: 0px;
+    padding: 0px;
+}
+QPushButton[wheelItem="key"] {
+    font-size: 22px;
+}
+QPushButton[wheelItem="menu"] {
     font-size: 13px;
     font-weight: 500;
-    border-radius: 8px;
-    padding: 4px 10px;
-    min-height: 22px;
+    color: #b9bbc7;
+}
+QPushButton[wheelItem="empty"] {
+    background: transparent;
+}
+
+QWidget#settingsStrip QPushButton {
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    padding: 2px 6px;
+    min-height: 18px;
 }
 QWidget#settingsStrip QPushButton#stripToggle {
     background: transparent;
     border: none;
     border-radius: 6px;
     padding: 0px;
-    min-height: 24px;
+    min-height: 20px;
     font-size: 14px;
     font-weight: 700;
     color: #b9bbc7;
@@ -259,6 +275,6 @@ QWidget#settingsStrip QPushButton#stripToggle[latched="true"] {
 }
 QWidget#settingsStrip QLabel {
     color: #b9bbc7;
-    font-size: 13px;
+    font-size: 11px;
 }
 """

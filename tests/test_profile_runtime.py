@@ -29,6 +29,7 @@ from axidev_osk.runtime.state import ReadRecorder, StatePath, StateTree
 class FakeNodeKind:
     callbacks: Mapping[str, str] = field(default_factory=lambda: {"on_press": "probe.pressed"})
     has_children: bool = True
+    decode_live_placement: None = None
     widget_properties: frozenset[str] = frozenset()
 
     def decode_structure(self, reader: ConfigReader) -> object:

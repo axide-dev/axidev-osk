@@ -100,6 +100,10 @@ class KeyboardService:
         self._shutdown = True
         started_at = time.perf_counter()
         _logger.info("Shutting down keyboard backend")
+        # Stop observing before letting go of held keys. axidev_io waits for its
+        # listener thread while holding Python's lock, so a key event from these
+        # releases arriving mid-stop would leave both threads waiting forever.
+        self._backend.stop_listening()
         self.reset_state()
         self._backend.shutdown()
         _logger.info("Keyboard backend shutdown completed in %.3fs", time.perf_counter() - started_at)

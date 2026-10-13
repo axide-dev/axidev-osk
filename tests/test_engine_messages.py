@@ -70,6 +70,7 @@ class Harness:
 class _ProbeKind:
     callbacks: dict[str, str] = {}
     has_children = False
+    decode_live_placement = None
     widget_properties: frozenset[str] = frozenset()
 
     def decode_structure(self, reader: object) -> None:

@@ -4,9 +4,10 @@ A node kind declares everything about one widget type in one place: its
 callback fields and events, how its fixed fields and its values decode, how it
 builds a widget, and how a set of values is applied to that widget. Any value
 may be a binding; the builder decodes a node's values again whenever the state
-they read changes and hands the kind the new values with the previous ones. The
-builder also reports where a node built with ``report_geometry`` sits in its
-window.
+they read changes and hands the kind the new values with the previous ones.
+A kind may let its children's placement follow state too, the way a canvas
+places each child by its ``shape``. The builder also reports where a node
+built with ``report_geometry`` sits in its window.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ NodeBuild = Callable[[NodeConfig, "NodeBuilder"], QWidget]
 """Build a node's widget and children from its fixed fields; its values are applied afterwards."""
 NodeApply = Callable[[QWidget, object, object | None], None]
 """Apply a kind's options to its widget, given the options applied before or ``None`` the first time."""
+PlaceChild = Callable[[QWidget, QWidget, object], None]
+"""Place a child widget inside its parent's widget by the child's live placement; called again on each change."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +73,14 @@ class NodeKind:
 
     It runs at load and on every later decode.
     """
+    decode_live_placement: Callable[[ConfigReader], object] | None = None
+    """Read a child's placement fields that may follow state; ``place_child`` applies them."""
+    place_child: PlaceChild | None = None
+    """Place a child by its live placement, before its other values apply and again whenever it changes."""
+
+    def __post_init__(self) -> None:
+        if (self.decode_live_placement is None) != (self.place_child is None):
+            raise ValueError(f"Node kind {self.name!r} must set both decode_live_placement and place_child, or neither")
 
     @property
     def events(self) -> tuple[str, ...]:
@@ -116,6 +127,7 @@ class NodeBuilder:
         self._dispatcher = dispatcher
         self._bindings = bindings
         self._unbinds: list[Unsubscribe] | None = None
+        self._parents: list[NodeKind] = []
 
     def build_tree(self, node: NodeConfig) -> tuple[QWidget, list[Unsubscribe]]:
         """Build ``node`` and its children, returning the widget and every binding they made.
@@ -138,14 +150,26 @@ class NodeBuilder:
             self._unbinds = outer
         return widget, unbinds
 
-    def build(self, node: NodeConfig) -> QWidget:
-        """Build one node inside ``build_tree``; node kinds call it for their children."""
+    def build(self, node: NodeConfig, *, into: QWidget | None = None) -> QWidget:
+        """Build one node inside ``build_tree``; node kinds call it for their children.
+
+        A kind with ``place_child`` passes its own widget as ``into``, so the
+        builder can place each child there by the child's live placement.
+        """
 
         unbinds = self._unbinds
         if unbinds is None:
             raise RuntimeError("Nodes are built through build_tree, which owns their bindings")
+        parent = self._parents[-1] if self._parents else None
+        place_child = parent.place_child if parent is not None else None
+        if parent is not None and place_child is not None and into is None:
+            raise RuntimeError(f"Node kind {parent.name!r} must build its children with into=")
         kind = self._kinds[node.kind]
-        widget = kind.build(node, self)
+        self._parents.append(kind)
+        try:
+            widget = kind.build(node, self)
+        finally:
+            self._parents.pop()
         widget.setProperty(COMPONENT_TYPE, node.kind)
         widget.setProperty(COMPONENT_ID, node.id)
         if node.passes_input_block:
@@ -161,6 +185,9 @@ class NodeBuilder:
             _GeometryReporter(node.id, widget, self._dispatcher)
 
         def apply(values: NodeValues, previous: NodeValues | None) -> None:
+            if place_child is not None and (previous is None or values.placement != previous.placement):
+                assert into is not None
+                place_child(into, widget, values.placement)
             apply_style(widget, values.style, previous.style if previous is not None else None)
             kind.apply(widget, values.options, previous.options if previous is not None else None)
 

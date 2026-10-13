@@ -18,7 +18,9 @@ The root config is plain data plus functions:
 Node kinds and attachment kinds register how their options decode, and a
 node kind with children also decodes the placement fields its children carry,
 such as a grid ``cell``. The decoder here owns everything common to every
-kind: IDs, style, bindings, callbacks, and children.
+kind: IDs, style, bindings, callbacks, children, and the report opt-ins. A kind
+whose children's placement may follow state, as a canvas child's shape does,
+decodes that placement with each child's values.
 """
 
 from __future__ import annotations
@@ -61,6 +63,11 @@ class NodeKindSpec(Protocol):
     @property
     def has_children(self) -> bool: ...
 
+    @property
+    def decode_live_placement(self) -> Callable[[ConfigReader], object] | None:
+        """Read the placement fields of a child that may follow state, such as a canvas child's ``shape``."""
+        ...
+
     def decode_structure(self, reader: ConfigReader, /) -> object:
         """Read the kind's fixed fields, such as a box's ``direction``."""
         ...
@@ -76,9 +83,6 @@ class NodeKindSpec(Protocol):
     def check_options(self, reader: ConfigReader, options: object, children: tuple[str, ...], /) -> None:
         """Reject options that do not fit the node's children, given their IDs."""
         ...
-
-
-PlacementDecoder = Callable[[ConfigReader], object]
 
 
 class AttachmentKindSpec(Protocol):
@@ -104,10 +108,11 @@ class StyleConfig:
 
 @dataclass(frozen=True, slots=True)
 class NodeValues:
-    """A node's values: its kind's options and its style hooks."""
+    """A node's values: its kind's options, its style hooks, and the placement its parent may let follow state."""
 
     options: object
     style: StyleConfig
+    placement: object = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,13 +396,13 @@ class ConfigDecoder:
             values=_live(reader, resolver, _decode_window_values),
         )
 
-    def _decode_node(self, reader: ConfigReader, placement: PlacementDecoder | None, resolver: Resolver) -> NodeConfig:
-        return reader.decode(lambda node: self._decode_node_fields(node, placement, resolver))
+    def _decode_node(self, reader: ConfigReader, parent: NodeKindSpec | None, resolver: Resolver) -> NodeConfig:
+        return reader.decode(lambda node: self._decode_node_fields(node, parent, resolver))
 
     def _decode_node_fields(
         self,
         reader: ConfigReader,
-        placement: PlacementDecoder | None,
+        parent: NodeKindSpec | None,
         resolver: Resolver,
     ) -> NodeConfig:
         kind_name = reader.string("kind")
@@ -413,18 +418,20 @@ class ConfigDecoder:
         children: tuple[NodeConfig, ...] = ()
         if kind.has_children:
             children = tuple(
-                self._decode_node(child, kind.decode_child_placement, resolver)
+                self._decode_node(child, kind, resolver)
                 for child in reader.children("children", [])
             )
         structure = kind.decode_structure(reader)
         # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
-        child_placement = placement(reader) if placement is not None else None
+        child_placement = parent.decode_child_placement(reader) if parent is not None else None
+        live_placement = parent.decode_live_placement if parent is not None else None
         child_ids = tuple(child.id for child in children)
 
         def decode_values(values: ConfigReader) -> NodeValues:
             options = kind.decode_options(values)
             kind.check_options(values, options, child_ids)
-            return NodeValues(options=options, style=_decode_style(values))
+            placed = live_placement(values) if live_placement is not None else None
+            return NodeValues(options=options, style=_decode_style(values), placement=placed)
 
         return NodeConfig(
             kind=kind_name,

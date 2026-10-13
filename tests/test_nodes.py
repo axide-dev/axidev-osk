@@ -486,6 +486,103 @@ class NodeTests(unittest.TestCase):
             with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
                 self._profile(content)
 
+    def test_canvas_children_take_the_shape_their_binding_gives_and_follow_it(self) -> None:
+        def triangle(state: object) -> list[list[int]]:
+            left = 100 if state.moved else 0  # type: ignore[attr-defined]
+            return [[left, 0], [left + 100, 0], [left, 100]]
+
+        profile = self._profile(
+            {
+                "kind": "canvas",
+                "id": "board",
+                "min_width": 300,
+                "min_height": 200,
+                "children": [
+                    _button("corner", shape=triangle),
+                    _button("square", shape=[[0, 150], [50, 150], [50, 200], [0, 200]]),
+                ],
+            },
+            state={"moved": {"var": "boolean", "default": False}},
+        )
+        window = self._window(profile)
+        board = self._find(window, "board")
+
+        def hit(x: int, y: int) -> object:
+            found = board.childAt(QPoint(x, y))
+            return found.property("componentId") if found else None
+
+        self.assertEqual(hit(20, 20), "corner")
+        # Inside the triangle's bounding box but past its long side.
+        self.assertIsNone(hit(80, 80))
+        self.assertEqual(hit(25, 175), "square")
+
+        self.engine.dispatcher.dispatch(state_set("moved", True))
+        self.assertIsNone(hit(20, 20))
+        self.assertEqual(hit(120, 20), "corner")
+
+    def test_a_kind_with_live_child_placement_must_also_place_its_children(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must set both decode_live_placement and place_child"):
+            NodeKind(
+                name="half",
+                build=lambda node, builder: QWidget(),
+                apply=lambda *args: None,
+                decode_options=lambda reader: None,
+                has_children=True,
+                decode_live_placement=lambda reader: None,
+            )
+
+    def test_a_canvas_child_with_an_anchor_centers_its_box_on_it(self) -> None:
+        profile = self._profile(
+            {
+                "kind": "canvas",
+                "id": "board",
+                "min_width": 300,
+                "min_height": 200,
+                "children": [_button("wedge", shape=[[100, 0], [200, 0], [100, 100]], anchor=[120, 30])],
+            }
+        )
+        window = self._window(profile)
+
+        box = self._find(window, "wedge").geometry()
+        self.assertEqual((box.x() + box.width() / 2, box.y() + box.height() / 2), (120, 30))
+        self.assertTrue(box.contains(100, 0) and box.contains(199, 0) and box.contains(100, 99))
+
+    def test_shape_is_required_under_a_canvas_and_unknown_anywhere_else(self) -> None:
+        square = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        cases = {
+            r"children\[0\] has unknown keys: shape": {
+                "kind": "box",
+                "id": "row",
+                "children": [_button("a", shape=square)],
+            },
+            r"children\[0\] has unknown keys: anchor": {
+                "kind": "box",
+                "id": "row",
+                "children": [_button("a", anchor=[0, 0])],
+            },
+            r"children\[0\]\.shape is required": {"kind": "canvas", "id": "board", "children": [_button("a")]},
+            r"children\[0\]\.shape must be a list of at least three \[x, y\] corners": {
+                "kind": "canvas",
+                "id": "board",
+                "children": [_button("a", shape=[[0, 0], [10, 0]])],
+            },
+        }
+        for message, content in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ConfigError, message):
+                self._profile(content)
+
+    def test_a_node_reporting_its_geometry_follows_a_resize(self) -> None:
+        profile = self._profile({"kind": "canvas", "id": "board", "report_geometry": True, "children": []})
+        window = self._window(profile)
+        window.resize(320, 240)
+        qt_app().processEvents()
+
+        board = self._find(window, "board")
+        self.assertEqual(
+            self.engine.profile.state.get(("nodes", "board", "size")),
+            {"width": board.width(), "height": board.height()},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

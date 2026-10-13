@@ -1,7 +1,7 @@
 """Engine actions, observation events, and the handlers that record observations.
 
 Observations arrive as events. The handlers here copy them into runtime-owned
-state (``input.*``, ``keyboard.*``, ``windows.*``) before profile callbacks
+state (``input.*``, ``keyboard.*``, ``windows.*``, ``nodes.*``) before profile callbacks
 for the same event run, so profiles always read up-to-date state.
 """
 

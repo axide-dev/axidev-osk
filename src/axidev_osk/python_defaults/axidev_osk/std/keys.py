@@ -1,5 +1,11 @@
 """Keyboard key builders built only from ``axidev_osk`` primitives.
 
+Every key is built from a layout entry (``std.layouts``), and ``behavior``
+says how an entry acts as a key whatever widget shows it: ``key``, ``letter``,
+``shifted``, ``modifier``, and ``lock`` build a button for one fixed entry,
+``at`` one for the entry the active layout puts on a board position, and
+``std.wheel`` lends the same behavior to a wheel slice.
+
 Library state lives under ``std``:
 
 - ``std.latched.<latch>``: the output a latched modifier holds down.
@@ -27,15 +33,17 @@ is down. Both reach the button through ``styles.lit``, and a ``style`` in
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from ... import axidev_osk
+from . import layouts
 from .styles import lit
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
 _SIDES = ("Left", "Right")
+_BEHAVIOR = ("repeat", "mode", "latch")
 
 STATE = {
     "latched": axidev_osk.var(axidev_osk.map_of("string")),
@@ -74,11 +82,159 @@ def one_shot_keys(state: Any) -> list[str]:
     return sorted(_one_shot(state).values())
 
 
+def legend(state: Any, entry: Mapping[str, Any]) -> str:
+    """What a layout entry shows: its shifted legend while Shift (and, for letters, not Caps Lock) is on."""
+
+    shifted = entry.get("shifted")
+    if shifted is None:
+        return entry["label"]
+    shift = shift_active(state)
+    if entry["kind"] == "letter":
+        shift = shift != caps_active(state)
+    return shifted if shift else entry["label"]
+
+
+def from_entry(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A key button for one layout entry; ``opts`` overrides any button field."""
+
+    fields = behavior(entry, opts)
+    defaults = {"id": f"key:{entry['output']}", **_without(fields, "active", "latched")}
+    return _lit_button(defaults, _without(opts, *_BEHAVIOR), fields.get("active", False), fields.get("latched", False))
+
+
+def at(
+    position: str,
+    tables: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    layout: axidev_osk.Binding,
+    opts: Mapping[str, Any] | None = None,
+) -> axidev_osk.Map:
+    """A key for a board position whose meaning follows the active layout.
+
+    ``tables`` maps layout names to tables of entries by position, and the
+    ``layout`` binding names the active one. Its legend, lit state, and what
+    a press sends all come from the active layout's entry for ``position``.
+    """
+
+    value, run = on_layout([position], tables, layout, opts)
+    defaults = {
+        "id": f"key:{position}",
+        "label": lambda state: value(state, position, "label", ""),
+        "on_press": lambda ctx, event: run(ctx, event, position, "on_press"),
+        "on_release": lambda ctx, event: run(ctx, event, position, "on_release"),
+    }
+    return _lit_button(
+        defaults,
+        _without(opts, *_BEHAVIOR),
+        lambda state: value(state, position, "active", False),
+        lambda state: value(state, position, "latched", False),
+    )
+
+
+def on_layout(
+    positions: Iterable[str],
+    tables: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    layout: axidev_osk.Binding,
+    opts: Mapping[str, Any] | None = None,
+) -> tuple[Callable[[Any, str, str, Any], Any], Callable[[Any, Any, str, str], list[axidev_osk.Map]]]:
+    """How ``positions`` behave under whichever layout the ``layout`` binding names.
+
+    Builds every position's ``behavior`` in every layout up front and returns
+    two functions: ``value(state, position, field, default)`` reads one of a
+    behavior's fields in the active layout, and ``run(ctx, event, position,
+    field)`` runs one of its callbacks there.
+
+    Raises ``ValueError`` when a layout in ``tables`` has no entry for one
+    of ``positions``, so a missing key fails when the config is built.
+    """
+
+    wanted = set(positions)
+    for name, entries in tables.items():
+        missing = sorted(wanted - entries.keys())
+        if missing:
+            raise ValueError(f"Layout {name!r} has no entry for {', '.join(missing)}")
+    table = {
+        (name, position): behavior(entry, opts)
+        for name, entries in tables.items()
+        for position, entry in entries.items()
+        if position in wanted
+    }
+
+    def value(state: Any, position: str, field: str, default: Any) -> Any:
+        found = table[(layout(state), position)].get(field, default)
+        return found(state) if callable(found) else found
+
+    def run(ctx: Any, event: Any, position: str, field: str) -> list[axidev_osk.Map]:
+        handler = table[(layout(ctx.state), position)].get(field)
+        return handler(ctx, event) if handler is not None else []
+
+    return value, run
+
+
 def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
     """A momentary key: press sends ``output`` down, release sends it up."""
 
-    repeat = _flag(opts, "repeat", True)
+    return from_entry({"kind": "key", "label": label, "output": output}, opts)
 
+
+def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A letter key whose legend follows Shift and Caps Lock."""
+
+    return from_entry(layouts.letter(char), opts)
+
+
+def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A symbol key whose legend switches with Shift only."""
+
+    return from_entry(layouts.shifted(label, shifted_label, output), opts)
+
+
+def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A latching modifier.
+
+    ``mode = "held"`` (default) holds the real key down from the first tap
+    until the second. ``mode = "one_shot"`` sends nothing itself; the next key
+    press holds the real modifier key down around it. See the module docstring
+    for how keys share a latch.
+    """
+
+    return from_entry(layouts.modifier(label, output), opts)
+
+
+def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
+    """A lock key such as Caps Lock, lit from the system's observed lock state."""
+
+    return from_entry(layouts.lock(label, output), opts)
+
+
+def behavior(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """How a layout entry behaves as a key, whatever widget shows it.
+
+    Returns its ``label``, ``active`` while its key is down, ``latched``
+    while a modifier or lock holds, and the ``on_press`` and ``on_release``
+    callbacks. ``label`` and the callbacks are button fields; ``active`` and
+    ``latched`` light the widget through ``styles.lit``. Pressing sends the key down, repeating while it
+    is held, and releasing lets it go; a modifier latches instead.
+
+    ``opts`` may set ``repeat`` for any key, and ``mode`` and ``latch`` for a modifier.
+    """
+
+    kind, output = entry["kind"], entry["output"]
+    if kind == "modifier":
+        return _modifier_fields(entry["label"], output, opts)
+    repeat = False if kind == "lock" else _flag(opts, "repeat", True)
+    fields = _key_fields(output, repeat)
+    fields["label"] = entry["label"] if kind in {"key", "lock"} else (lambda state: legend(state, entry))
+    if kind == "lock":
+        lock_name = _LOCK_NAMES.get(output)
+        if lock_name is None:
+            raise ValueError(f"{output!r} is not an observed lock key")
+        fields["latched"] = lambda state: bool(axidev_osk.read(state, ["input", "locks", lock_name]))
+    elif kind not in {"key", "letter", "shifted"}:
+        raise ValueError(f"Unknown layout entry kind {kind!r}")
+    return fields
+
+
+def _key_fields(output: str, repeat: bool) -> dict[str, Any]:
     def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         held = _one_shot(ctx.state)
         actions = [axidev_osk.keyboard.down(name, repeat=False) for _latch, name in sorted(held.items())]
@@ -98,43 +254,15 @@ def key(label: Any, output: str, opts: Mapping[str, Any] | None = None) -> axide
         actions.append(axidev_osk.state.set(["std", "held", event["node"]], None))
         return actions
 
-    defaults = {
-        "id": f"key:{output}",
-        "label": label,
+    return {
+        "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return _lit_button(defaults, _without(opts, "repeat"), active=lambda state: key_down(state, output))
 
 
-def letter(char: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A letter key whose legend follows Shift and Caps Lock."""
-
-    lower, upper = char.lower(), char.upper()
-    return key(
-        lambda state: upper if shift_active(state) != caps_active(state) else lower,
-        upper,
-        opts,
-    )
-
-
-def shifted(label: str, shifted_label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A symbol key whose legend switches with Shift only."""
-
-    return key(lambda state: shifted_label if shift_active(state) else label, output, opts)
-
-
-def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A latching modifier.
-
-    ``mode = "held"`` (default) holds the real key down from the first tap
-    until the second. ``mode = "one_shot"`` sends nothing itself; the next key
-    press holds the real modifier key down around it. See the module docstring
-    for how keys share a latch.
-    """
-
+def _modifier_fields(label: str, output: str, opts: Mapping[str, Any] | None) -> dict[str, Any]:
     repeat = _flag(opts, "repeat", True)
-    options = _without(opts, "mode", "repeat", "latch")
     mode = (opts or {}).get("mode") or "held"
     latch = (opts or {}).get("latch") or _default_latch(label, output, mode, repeat)
     if mode not in {"held", "one_shot"}:
@@ -150,12 +278,7 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
             del event
             return [axidev_osk.state.set(latch_path, None if latched(ctx.state) else output)]
 
-        defaults: dict[str, Any] = {
-            "id": f"key:{output}",
-            "label": label,
-            "on_release": toggle_one_shot,
-        }
-        return _lit_button(defaults, {"latched": latched, **options})
+        return {"label": label, "latched": latched, "on_release": toggle_one_shot}
 
     def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
@@ -170,29 +293,13 @@ def modifier(label: str, output: str, opts: Mapping[str, Any] | None = None) -> 
             return [axidev_osk.state.set(latch_path, None), axidev_osk.keyboard.up(held)]
         return [axidev_osk.state.set(latch_path, output)]
 
-    defaults = {
-        "id": f"key:{output}",
+    return {
         "label": label,
+        "latched": latched,
+        "active": lambda state: key_down(state, output),
         "on_press": on_press,
         "on_release": on_release,
     }
-    return _lit_button(defaults, {"latched": latched, **options}, active=lambda state: key_down(state, output))
-
-
-def lock(label: str, output: str, opts: Mapping[str, Any] | None = None) -> axidev_osk.Map:
-    """A lock key such as Caps Lock, lit from the system's observed lock state."""
-
-    lock_name = _LOCK_NAMES.get(output)
-    if lock_name is None:
-        raise ValueError(f"{output!r} is not an observed lock key")
-    return key(
-        label,
-        output,
-        axidev_osk.merge(
-            {"repeat": False, "latched": lambda state: bool(axidev_osk.read(state, ["input", "locks", lock_name]))},
-            opts,
-        ),
-    )
 
 
 def on_reset(ctx: Any, event: Any) -> list[axidev_osk.Map]:
@@ -220,11 +327,14 @@ def _flag(opts: Mapping[str, Any] | None, name: str, default: bool) -> bool:
     return default if value is None else bool(value)
 
 
-def _lit_button(defaults: Mapping[str, Any], opts: Mapping[str, Any], active: Any = False) -> axidev_osk.Map:
-    """A button from ``defaults`` and ``opts``, lit through ``styles.lit`` by ``active`` and ``opts``' ``latched``."""
+def _lit_button(defaults: Mapping[str, Any], opts: Mapping[str, Any], active: Any, latched: Any) -> axidev_osk.Map:
+    """A button from ``defaults`` and ``opts``, lit through ``styles.lit`` by ``active`` and ``latched``.
 
-    latched = opts.get("latched")
-    style = {**lit(active, False if latched is None else latched), **(opts.get("style") or {})}
+    A ``latched`` in ``opts`` replaces the behavior's own, and a ``style`` in ``opts`` adds to the lit style.
+    """
+
+    chosen = opts.get("latched")
+    style = {**lit(active, latched if chosen is None else chosen), **(opts.get("style") or {})}
     return axidev_osk.button(**axidev_osk.merge(defaults, {**_without(opts, "latched", "style"), "style": style}))
 
 
