@@ -4,20 +4,40 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QContextMenuEvent, QMouseEvent
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QContextMenuEvent, QEnterEvent, QMouseEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
 
 class Button(QPushButton):
     """Application button that treats right clicks like left clicks.
 
-    The widget keeps no interaction state of its own. Callers render
-    pressed and latched state from runtime snapshots.
+    The widget keeps no interaction state of its own beyond whether the
+    pointer is over it, so ``entered`` and ``left`` always alternate. Profiles
+    render any lasting look, such as a latched key, through style properties.
     """
+
+    entered = Signal()
+    """The pointer moved onto the button."""
+    left = Signal()
+    """The pointer moved off the button."""
 
     def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
         super().__init__(label, parent)
+        self._hovered = False
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        super().enterEvent(event)
+        # Qt can repeat an enter, for example when another window closes under the pointer.
+        if not self._hovered:
+            self._hovered = True
+            self.entered.emit()
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        if self._hovered:
+            self._hovered = False
+            self.left.emit()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Treat a right-button press as a left-button press."""

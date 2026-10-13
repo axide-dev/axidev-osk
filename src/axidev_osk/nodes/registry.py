@@ -21,6 +21,7 @@ from ..kind_registry import KindRegistry
 from ..messages import DataMap, RuntimeEvent, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
+from .pointer import PointerReporter
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher
@@ -60,8 +61,6 @@ class NodeKind:
     decode_options: Callable[[ConfigReader], object]
     callbacks: Mapping[str, str] = field(default_factory=dict)
     has_children: bool = False
-    widget_properties: frozenset[str] = frozenset()
-    """Widget properties ``build`` and ``apply`` set, which a profile style cannot set."""
     decode_structure: Callable[[ConfigReader], object] = _no_options
     decode_child_placement: Callable[[ConfigReader], object] = _no_options
     check_options: Callable[[ConfigReader, object, tuple[str, ...]], None] = lambda reader, options, children: None
@@ -118,6 +117,9 @@ class NodeBuilder:
         widget.setProperty(COMPONENT_ID, node.id)
         if node.passes_input_block:
             widget.setProperty(PASSES_INPUT_BLOCK, True)
+        if node.reports_pointer:
+            # Built after the kind, so the reporter also watches the children the kind built.
+            PointerReporter(node.id, widget, self._dispatcher)
 
         def apply(values: NodeValues, previous: NodeValues | None) -> None:
             apply_style(widget, values.style, previous.style if previous is not None else None)

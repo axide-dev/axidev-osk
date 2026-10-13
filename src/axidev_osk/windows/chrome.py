@@ -4,6 +4,15 @@ These widgets are shared by frameless overlay surfaces. They emit
 ``dragDelta`` / ``resizeDelta`` signals and stay decoupled from any
 specific window class so multiple surface implementations can install
 the same chrome via ``install_overlay_chrome``.
+
+The engine owns this chrome instead of letting profiles build their own.
+On the Linux overlay backends (layer shell, input panel, X11 utility
+windows) the window is frameless and the app draws its title bar, so a
+standard-library title bar made of nodes could work there. On Windows the
+window keeps the operating system's own frame and title bar, which no
+profile can replace. The engine promises profiles only what it can keep on
+every platform, so a profile can turn this chrome off with
+``chrome.enabled`` but not replace it.
 """
 
 from __future__ import annotations
