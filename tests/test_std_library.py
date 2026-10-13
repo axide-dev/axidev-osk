@@ -240,6 +240,12 @@ class KeyTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
+    def test_a_layout_missing_a_position_is_rejected_when_built(self) -> None:
+        tables = {"one": {"AD01": layouts.letter("q")}, "two": {}}
+
+        with self.assertRaisesRegex(ValueError, "Layout 'two' has no entry for AD01"):
+            keys.at("AD01", tables, lambda state: "one")
+
     def test_a_position_key_shows_and_sends_whatever_the_active_layout_puts_there(self) -> None:
         tables = {"one": {"AD01": layouts.letter("q")}, "two": {"AD01": layouts.shifted("&", "1", "&")}}
         harness = StdHarness(
@@ -311,6 +317,12 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(harness.widget("w:center").text(), "")  # type: ignore[attr-defined]
         self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
         self.assertEqual(harness.backend.sent, [])
+
+    def test_a_wheel_menu_with_another_slice_count_is_rejected_when_built(self) -> None:
+        short = wheel.menu({0: ["AD01", "AD02"]})
+
+        with self.assertRaisesRegex(ValueError, r"wheel menu \[0\] has 2 slices; every menu needs 10"):
+            wheel.wheel("w", short, layouts.LAYOUTS, lambda state: "us")
 
     def test_the_slices_fill_the_wheel_whatever_size_it_takes(self) -> None:
         harness = StdHarness(

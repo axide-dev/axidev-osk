@@ -97,18 +97,18 @@ def from_entry(entry: Mapping[str, Any], opts: Mapping[str, Any] | None = None) 
 
 def at(
     position: str,
-    layouts: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    tables: Mapping[str, Mapping[str, Mapping[str, Any]]],
     layout: axidev_osk.Binding,
     opts: Mapping[str, Any] | None = None,
 ) -> axidev_osk.Map:
     """A key for a board position whose meaning follows the active layout.
 
-    ``layouts`` maps layout names to tables of entries by position, and the
+    ``tables`` maps layout names to tables of entries by position, and the
     ``layout`` binding names the active one. Its legend, lit state, and what
     a press sends all come from the active layout's entry for ``position``.
     """
 
-    value, run = on_layout([position], layouts, layout, opts)
+    value, run = on_layout([position], tables, layout, opts)
     defaults = {
         "id": f"key:{position}",
         "label": lambda state: value(state, position, "label", ""),
@@ -122,7 +122,7 @@ def at(
 
 def on_layout(
     positions: Iterable[str],
-    layouts: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    tables: Mapping[str, Mapping[str, Mapping[str, Any]]],
     layout: axidev_osk.Binding,
     opts: Mapping[str, Any] | None = None,
 ) -> tuple[Callable[[Any, str, str, Any], Any], Callable[[Any, Any, str, str], list[axidev_osk.Map]]]:
@@ -132,12 +132,19 @@ def on_layout(
     two functions: ``value(state, position, field, default)`` reads one of a
     behavior's fields in the active layout, and ``run(ctx, event, position,
     field)`` runs one of its callbacks there.
+
+    Raises ``ValueError`` when a layout in ``tables`` has no entry for one
+    of ``positions``, so a missing key fails when the config is built.
     """
 
     wanted = set(positions)
+    for name, entries in tables.items():
+        missing = sorted(wanted - entries.keys())
+        if missing:
+            raise ValueError(f"Layout {name!r} has no entry for {', '.join(missing)}")
     table = {
         (name, position): behavior(entry, opts)
-        for name, entries in layouts.items()
+        for name, entries in tables.items()
         for position, entry in entries.items()
         if position in wanted
     }

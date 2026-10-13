@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from typing import cast
 
 from PySide6.QtCore import QEvent, QRect, QRectF, Qt
 from PySide6.QtGui import (
@@ -36,8 +37,11 @@ class Button(QPushButton):
     drawn smaller, at the largest size that fits. A single label is drawn by
     the style itself, scaled down when it must shrink, so every stylesheet
     text rule still applies to it. A label given as several parts is spread
-    over the shape in rows, each row holding as many parts as the shape is
-    wide there.
+    over the shape in rows, each row holding as many parts as the widest
+    stretch the shape covers there, and each part is drawn by the style the
+    same way, so state rules such as a pressed text color apply to it too.
+    When no row layout fits even at the smallest size, the parts are drawn
+    as one label.
 
     A parent may give the button a shape (``set_shape``): the button is then
     clipped to it and draws its border along it, in the color its style
@@ -90,27 +94,38 @@ class Button(QPushButton):
             painter.drawPath(self._outline)
             painter.restore()
         area = style.subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
+        placed: list[tuple[QRect, str]] = []
         if self._parts is not None:
-            painter.setPen(option.palette.buttonText().color())
             font, placed = self.spread(self._parts, area)
-            painter.setFont(font)
             for box, part in placed:
-                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, part)
-        elif text:
-            # The style ignores any font but its own, so a label that must shrink is drawn scaled down.
-            scale = self.fitted_font(text, area).pixelSize() / max(1, QFontInfo(self.font()).pixelSize())
-            center = QRectF(area).center()
-            painter.translate(center)
-            painter.scale(scale, scale)
-            painter.translate(-center)
-            option.rect = QRectF(
-                center.x() - area.width() / (2 * scale),
-                center.y() - area.height() / (2 * scale),
-                area.width() / scale,
-                area.height() / scale,
-            ).toAlignedRect()
-            option.text = text
-            style.drawControl(QStyle.ControlElement.CE_PushButtonLabel, option, painter, self)
+                self._draw_label(painter, option, part.replace("&", "&&"), box, self._scale(font.pixelSize()))
+        if not placed and text:
+            self._draw_label(painter, option, text, area, self._scale(self.fitted_font(text, area).pixelSize()))
+
+    def _scale(self, pixel_size: int) -> float:
+        return pixel_size / max(1, QFontInfo(self.font()).pixelSize())
+
+    def _draw_label(self, painter: QPainter, option: QStyleOptionButton, text: str, box: QRect, scale: float) -> None:
+        """Draw ``text`` centered in ``box`` through the style, scaled down by ``scale``.
+
+        The style ignores any font but its own, so a label that must shrink
+        is drawn scaled down instead.
+        """
+
+        painter.save()
+        center = QRectF(box).center()
+        painter.translate(center)
+        painter.scale(scale, scale)
+        painter.translate(-center)
+        option.rect = QRectF(
+            center.x() - box.width() / (2 * scale),
+            center.y() - box.height() / (2 * scale),
+            box.width() / scale,
+            box.height() / scale,
+        ).toAlignedRect()
+        option.text = text
+        self.style().drawControl(QStyle.ControlElement.CE_PushButtonLabel, option, painter, self)
+        painter.restore()
 
     def fitted_font(self, text: str, area: QRect) -> QFont:
         """The style's font, made smaller until ``text`` fits ``area`` and the button's mask."""
@@ -137,15 +152,22 @@ class Button(QPushButton):
         mask = self.mask()
 
         def span(top: int, bottom: int) -> tuple[int, int] | None:
-            # Where a row is free across its whole height; the shapes are convex, so its two edges decide.
-            left, right = area.left(), area.right()
+            # The widest stretch the shape covers on every line of the row, so a part never lands in a gap.
+            runs = [(area.left(), area.right())]
             if not mask.isEmpty():
-                for y in (top, bottom):
-                    line = mask.intersected(QRect(area.left(), y, area.width(), 1)).boundingRect()
-                    if line.isEmpty():
+                for y in range(top, bottom + 1):
+                    # PySide6 iterates a region's rectangles, which its type stubs do not declare.
+                    pieces = cast(Iterable[QRect], mask.intersected(QRect(area.left(), y, area.width(), 1)))
+                    line = [(rect.left(), rect.right()) for rect in pieces]
+                    runs = [
+                        (max(left, line_left), min(right, line_right))
+                        for left, right in runs
+                        for line_left, line_right in line
+                        if max(left, line_left) < min(right, line_right)
+                    ]
+                    if not runs:
                         return None
-                    left, right = max(left, line.left()), min(right, line.right())
-            return (left, right) if right > left else None
+            return max(runs, key=lambda run: run[1] - run[0])
 
         def place(size: int, top: int) -> list[tuple[QRect, str]] | None:
             font.setPixelSize(size)

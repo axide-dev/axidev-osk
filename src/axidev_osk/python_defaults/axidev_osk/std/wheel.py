@@ -40,22 +40,16 @@ def _row_order(slices: int) -> list[int]:
     return [(left + step) % slices for step in range(slices)]
 
 
-def menu(items: Mapping[int, Any]) -> Tree:
-    """A menu with ``items`` by slice number; other slices stay empty."""
+def menu(items: Mapping[int, Any], slices: int = SLICES) -> Tree:
+    """A menu of ``slices`` slices with ``items`` by slice number; other slices stay empty."""
 
-    return [items.get(index) for index in range(SLICES)]
+    return [items.get(index) for index in range(slices)]
 
 
-def row(*positions: str) -> Tree:
+def row(*positions: str, slices: int = SLICES) -> Tree:
     """A menu holding a row of keys left to right, clockwise from the slice on the left."""
 
-    return menu(dict(zip(_row_order(SLICES), positions)))
-
-
-def column(upper: str, lower: str) -> Tree:
-    """A menu holding an upper and a lower key: up (slice 0) and down."""
-
-    return menu({0: upper, SLICES // 2: lower})
+    return menu(dict(zip(_row_order(slices), positions)), slices)
 
 
 TKL = menu(
@@ -112,6 +106,10 @@ def wheel(
     The center's radii are ``inner`` times the wheel's, and ``spacing`` pixels
     separate every part. Until the canvas first reports its size, the shapes
     fit its minimum size.
+
+    Raises ``ValueError`` when a menu of ``tree`` has another number of
+    slices than its top level, or an item that is not a position, a menu, or
+    ``None``.
     """
 
     path_var = ["std", "wheels", wheel_id]
@@ -119,6 +117,7 @@ def wheel(
     defaults = {"id": wheel_id, "report_size": True}
     fields = axidev_osk.merge(defaults, opts)
     slices = len(tree)
+    _check_tree(tree, slices, [])
 
     def ellipse(state: Any) -> tuple[float, float]:
         """The wheel's radii, from its reported size or its minimum size before the first report."""
@@ -206,11 +205,11 @@ def wedge(radius_x: float, radius_y: float, inner: float, spacing: float, index:
     """
 
     gap = spacing / 2
-    middle = index * 2 * math.pi / slices
+    mid_angle = index * 2 * math.pi / slices
     half = math.pi / slices
     outer = (radius_x, radius_y)
     hole = (radius_x * inner + gap, radius_y * inner + gap)
-    sides = [_side(radius_x, radius_y, middle, middle + turn, gap) for turn in (-half, half)]
+    sides = [_side(radius_x, radius_y, mid_angle, mid_angle + turn, gap) for turn in (-half, half)]
     corners = _arc(outer, _meet(outer, *sides[0]), _meet(outer, *sides[1]), ARC_CORNERS)
     corners += _arc(hole, _meet(hole, *sides[1]), _meet(hole, *sides[0]), max(2, round(ARC_CORNERS * inner)), backward=True)
     return [[radius_x + x, radius_y + y] for x, y in corners]
@@ -236,8 +235,8 @@ def hub(radius_x: float, radius_y: float, inner: float, spacing: float) -> Corne
     ]
 
 
-def _side(radius_x: float, radius_y: float, middle: float, edge: float, gap: float) -> tuple[tuple[float, float], tuple[float, float]]:
-    """A slice side: the line from the center toward ``edge`` on the ellipse, moved ``gap`` toward ``middle``.
+def _side(radius_x: float, radius_y: float, mid_angle: float, edge: float, gap: float) -> tuple[tuple[float, float], tuple[float, float]]:
+    """A slice side: the line from the center toward ``edge`` on the ellipse, moved ``gap`` toward ``mid_angle``.
 
     Returns a point on the line and its direction, both relative to the center.
     Angles run clockwise from the top, and y grows downward as on screen.
@@ -247,7 +246,7 @@ def _side(radius_x: float, radius_y: float, middle: float, edge: float, gap: flo
     length = math.hypot(along_x, along_y)
     along_x, along_y = along_x / length, along_y / length
     normal_x, normal_y = -along_y, along_x
-    if normal_x * math.sin(middle) * radius_x - normal_y * math.cos(middle) * radius_y < 0:
+    if normal_x * math.sin(mid_angle) * radius_x - normal_y * math.cos(mid_angle) * radius_y < 0:
         normal_x, normal_y = -normal_x, -normal_y
     return (normal_x * gap, normal_y * gap), (along_x, along_y)
 
@@ -288,6 +287,19 @@ def _arc(
         for step in range(steps + 1)
     ]
     return corners[::-1] if backward else corners
+
+
+def _check_tree(tree: Tree, slices: int, path: list[int]) -> None:
+    """Reject a menu with another slice count than the top level, or an item no slice can show."""
+
+    where = f"wheel menu {path}" if path else "wheel tree"
+    if len(tree) != slices:
+        raise ValueError(f"{where} has {len(tree)} slices; every menu needs {slices}, like the top level")
+    for index, node in enumerate(tree):
+        if isinstance(node, list):
+            _check_tree(node, slices, [*path, index])
+        elif node is not None and not isinstance(node, str):
+            raise ValueError(f"{where} slice {index} must be a position, a menu, or None, not {type(node).__name__}")
 
 
 def _positions(tree: Tree) -> list[str]:

@@ -103,6 +103,48 @@ class ButtonTests(unittest.TestCase):
         rows = [box.top() for box, _part in placed]
         self.assertEqual(rows, sorted(rows))
 
+    def test_parts_never_land_in_a_gap_of_a_dented_shape(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 14px; padding: 0px; border: none; }")
+        button.resize(200, 200)
+        # A U: two arms joined at the bottom, with a gap between them.
+        u_shape = QRegion(QRect(0, 0, 60, 200)) + QRegion(QRect(140, 0, 60, 200)) + QRegion(QRect(0, 140, 200, 60))
+        button.setMask(u_shape)
+        button.show()
+
+        for parts in (("Hello", "World"), ("a", "b", "c", "d")):
+            _font, placed = button.spread(parts, button.rect())
+            with self.subTest(parts):
+                self.assertEqual([part for _box, part in placed], list(parts))
+                for box, _part in placed:
+                    self.assertEqual(u_shape.intersected(box), QRegion(box))
+
+    def test_state_text_colors_apply_to_label_parts(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { font-size: 20px; color: #ffffff; background: #000000; border: none; padding: 0px; }"
+            "QPushButton:pressed { color: #0000ff; }"
+        )
+        button.resize(120, 60)
+        button.set_parts(("Ab", "Cd"))
+        button.show()
+        button.setDown(True)
+
+        image = button.grab().toImage()
+        text = [
+            image.pixelColor(x, y)
+            for x in range(image.width())
+            for y in range(image.height())
+            if image.pixelColor(x, y).lightness() > 60
+        ]
+
+        self.assertTrue(text)
+        self.assertTrue(all(color.red() < 80 and color.blue() > 120 for color in text))
+
     def test_a_list_label_that_empties_shows_nothing(self) -> None:
         qt_app()
         engine = make_test_engine(RecordingBackend())
