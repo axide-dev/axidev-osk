@@ -115,7 +115,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
             patch.object(runtime._window_manager, "get", return_value=window),
             patch.object(runtime._window_manager, "move_by") as move_by,
         ):
-            dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+            dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
             dispatcher.dispatch(pointer_motion_observed(4.25, -5.5))
             dispatcher.dispatch(pointer_motion_observed(5.75, 7.5))
             dispatcher.dispatch(window_drag_ended(_KEYBOARD_WINDOW))
@@ -133,7 +133,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime._window_manager.move_by = Mock(side_effect=lambda *args: calls.append(("move", args)))
         service.commit_surface.side_effect = lambda surface: calls.append(("commit", surface))
 
-        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual(calls, [("move", (_KEYBOARD_WINDOW, 4, 5)), ("commit", 123)])
@@ -142,7 +142,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime, service, _window = self._runtime_with_pointer_service()
         runtime._window_manager.get = Mock(return_value=None)
 
-        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertIsNone(runtime._pointer_drag.window_id)
@@ -155,7 +155,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime._window_manager.get = Mock(return_value=window)
         runtime._window_manager.move_by = Mock(side_effect=RuntimeError("move failed"))
 
-        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["move failed"])
@@ -170,7 +170,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime._window_manager.move_by = Mock()
         window.winId.side_effect = RuntimeError("surface failed")
 
-        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["surface failed"])
@@ -185,7 +185,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime._window_manager.move_by = Mock()
         service.commit_surface.side_effect = RuntimeError("commit failed")
 
-        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+        runtime.engine.dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["commit failed"])
@@ -197,7 +197,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         dispatcher = runtime.engine.dispatcher
 
         with patch.object(runtime._window_manager, "move_by") as move_by:
-            dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW))
+            dispatcher.dispatch(window_drag_started(_KEYBOARD_WINDOW, "left"))
             dispatcher.dispatch(window_drag_ended(_KEYBOARD_WINDOW))
             dispatcher.dispatch(pointer_motion_observed(4, 5))
 

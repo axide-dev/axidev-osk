@@ -176,6 +176,10 @@ def _dwell_button(placement: axidev_osk.Map) -> axidev_osk.Map:
     return axidev_osk.button(id="dwell", label="Dwell", style=std.lit(latched=enabled), on_release=toggle, **placement)
 
 
+def _key_nodes() -> list[axidev_osk.Map]:
+    return [_key_node(entry, cell) for entry, cell in zip(LAYOUT, _cells(), strict=True)]
+
+
 def keyboard_window() -> axidev_osk.Map:
     return axidev_osk.window(
         id=KEYBOARD,
@@ -195,7 +199,7 @@ def keyboard_window() -> axidev_osk.Map:
                     id="keyboard-grid",
                     spacing=GRID_GAP_PX,
                     style={"object_name": "keyboard"},
-                    children=[_key_node(entry, cell) for entry, cell in zip(LAYOUT, _cells(), strict=True)],
+                    children=std.locator.colored(_key_nodes()),
                 ),
                 axidev_osk.label(
                     id="keyboard-status",
@@ -350,7 +354,8 @@ def build_default_config() -> axidev_osk.Map:
                         "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
                         "keyboard.permission_required": lambda ctx, event: [axidev_osk.window.show(PERMISSION_PROMPT)],
                         "linux.permission_setup_opened": _on_permission_setup_opened,
-                    }
+                    },
+                    also=[std.locator.on(_key_nodes())],
                 ),
             )
         },

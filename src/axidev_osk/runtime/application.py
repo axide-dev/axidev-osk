@@ -34,7 +34,7 @@ from .app_messages import (
     SECURE_INPUT_PANEL_RELEASE,
     WINDOW_CLOSE_REQUESTED,
     AppQuitArguments,
-    WindowArguments,
+    WindowCloseRequestedArguments,
     app_quit,
     app_quit_requested,
     decode_app_quit,
@@ -179,7 +179,7 @@ class ApplicationRuntime:
     def _ask_to_quit(self, reason: str) -> None:
         self._dispatcher.dispatch(app_quit_requested(reason))
 
-    def _default_close(self, event: WindowArguments) -> MessageResult:
+    def _default_close(self, event: WindowCloseRequestedArguments) -> MessageResult:
         """Apply Qt's close rule unless the window turned it off with ``default_close``.
 
         Closing the window closes it; closing the last visible window asks to

@@ -33,6 +33,8 @@ APP_ACTIVATED = "app.activated"
 APP_QUIT_REQUESTED = "app.quit_requested"
 DWELL_COMPLETED = "dwell.completed"
 DISPLAY_CONFIGURATION_CHANGED = "display.configuration_changed"
+HOT_CORNER_ENTERED = "hot_corner.entered"
+HOT_CORNER_LEFT = "hot_corner.left"
 HOT_CORNER_TRIGGERED = "hot_corner.triggered"
 LINUX_PERMISSION_SETUP_OPENED = "linux.permission_setup_opened"
 POINTER_MOTION_OBSERVED = "pointer.motion_observed"
@@ -97,6 +99,33 @@ class WindowDeltaArguments:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowDragArguments:
+    """How far a window's title bar or resize grip was dragged, and with which mouse button."""
+
+    window_id: str
+    dx: int
+    dy: int
+    button: str
+
+
+@dataclass(frozen=True, slots=True)
+class WindowButtonArguments:
+    """A window and the mouse button behind what happened to it."""
+
+    window_id: str
+    button: str
+
+
+@dataclass(frozen=True, slots=True)
+class WindowCloseRequestedArguments:
+    """A request to close a window: ``button`` names the mouse button on its close button, or is ``None``
+    when the system asked."""
+
+    window_id: str
+    button: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class WindowPointArguments:
     """A window and a point on the screen, in pixels."""
 
@@ -125,6 +154,14 @@ def display_configuration_changed() -> RuntimeEvent:
     return validated_event(DISPLAY_CONFIGURATION_CHANGED, {}, decode_empty)
 
 
+def hot_corner_entered(corner: str) -> RuntimeEvent:
+    return validated_event(HOT_CORNER_ENTERED, {"corner": corner}, decode_hot_corner_triggered)
+
+
+def hot_corner_left(corner: str) -> RuntimeEvent:
+    return validated_event(HOT_CORNER_LEFT, {"corner": corner}, decode_hot_corner_triggered)
+
+
 def hot_corner_triggered(corner: str) -> RuntimeEvent:
     return validated_event(HOT_CORNER_TRIGGERED, {"corner": corner}, decode_hot_corner_triggered)
 
@@ -145,20 +182,24 @@ def secure_input_panel_released() -> RuntimeEvent:
     return validated_event(SECURE_INPUT_PANEL_RELEASED, {}, decode_empty)
 
 
-def window_close_requested(window_id: str) -> RuntimeEvent:
-    return validated_event(WINDOW_CLOSE_REQUESTED, {"window": window_id}, decode_window)
+def window_close_requested(window_id: str, button: str | None = None) -> RuntimeEvent:
+    return validated_event(
+        WINDOW_CLOSE_REQUESTED, {"window": window_id, "button": button}, decode_window_close_requested
+    )
 
 
-def window_drag_started(window_id: str) -> RuntimeEvent:
-    return validated_event(WINDOW_DRAG_STARTED, {"window": window_id}, decode_window)
+def window_drag_started(window_id: str, button: str) -> RuntimeEvent:
+    return validated_event(WINDOW_DRAG_STARTED, {"window": window_id, "button": button}, decode_window_button)
 
 
-def window_dragged(window_id: str, dx: int, dy: int) -> RuntimeEvent:
-    return validated_event(WINDOW_DRAGGED, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+def window_dragged(window_id: str, dx: int, dy: int, button: str) -> RuntimeEvent:
+    arguments = {"window": window_id, "dx": dx, "dy": dy, "button": button}
+    return validated_event(WINDOW_DRAGGED, arguments, decode_window_drag)
 
 
-def window_resize_dragged(window_id: str, dx: int, dy: int) -> RuntimeEvent:
-    return validated_event(WINDOW_RESIZE_DRAGGED, {"window": window_id, "dx": dx, "dy": dy}, decode_window_delta)
+def window_resize_dragged(window_id: str, dx: int, dy: int, button: str) -> RuntimeEvent:
+    arguments = {"window": window_id, "dx": dx, "dy": dy, "button": button}
+    return validated_event(WINDOW_RESIZE_DRAGGED, arguments, decode_window_drag)
 
 
 def dwell_completed(window_id: str, x: int, y: int) -> RuntimeEvent:
@@ -244,6 +285,33 @@ def decode_window_delta(arguments: DataMap) -> WindowDeltaArguments:
     )
 
 
+def decode_window_drag(arguments: DataMap) -> WindowDragArguments:
+    require_keys(arguments, ("window", "dx", "dy", "button"))
+    return WindowDragArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        dx=int_value(arguments, "dx"),
+        dy=int_value(arguments, "dy"),
+        button=non_empty_string_value(arguments, "button"),
+    )
+
+
+def decode_window_button(arguments: DataMap) -> WindowButtonArguments:
+    require_keys(arguments, ("window", "button"))
+    return WindowButtonArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        button=non_empty_string_value(arguments, "button"),
+    )
+
+
+def decode_window_close_requested(arguments: DataMap) -> WindowCloseRequestedArguments:
+    require_keys(arguments, ("window",), optional=("button",))
+    button = arguments.get("button")
+    return WindowCloseRequestedArguments(
+        window_id=non_empty_string_value(arguments, "window"),
+        button=None if button is None else non_empty_string_value(arguments, "button"),
+    )
+
+
 def decode_window_point(arguments: DataMap) -> WindowPointArguments:
     require_keys(arguments, ("window", "x", "y"))
     return WindowPointArguments(
@@ -270,13 +338,15 @@ def register_app_events(dispatcher: "Dispatcher") -> None:
     dispatcher.register_event(APP_QUIT_REQUESTED, decode_quit_requested)
     dispatcher.register_event(DISPLAY_CONFIGURATION_CHANGED, decode_empty)
     dispatcher.register_event(DWELL_COMPLETED, decode_window_point)
+    dispatcher.register_event(HOT_CORNER_ENTERED, decode_hot_corner_triggered)
+    dispatcher.register_event(HOT_CORNER_LEFT, decode_hot_corner_triggered)
     dispatcher.register_event(HOT_CORNER_TRIGGERED, decode_hot_corner_triggered)
     dispatcher.register_event(LINUX_PERMISSION_SETUP_OPENED, decode_permission_setup_opened)
     dispatcher.register_event(POINTER_MOTION_OBSERVED, decode_pointer_motion_observed)
     dispatcher.register_event(SECURE_INPUT_PANEL_PREPARED, decode_empty)
     dispatcher.register_event(SECURE_INPUT_PANEL_RELEASED, decode_empty)
-    dispatcher.register_event(WINDOW_CLOSE_REQUESTED, decode_window)
+    dispatcher.register_event(WINDOW_CLOSE_REQUESTED, decode_window_close_requested)
     dispatcher.register_event(WINDOW_DRAG_ENDED, decode_window)
-    dispatcher.register_event(WINDOW_DRAG_STARTED, decode_window)
-    dispatcher.register_event(WINDOW_DRAGGED, decode_window_delta)
-    dispatcher.register_event(WINDOW_RESIZE_DRAGGED, decode_window_delta)
+    dispatcher.register_event(WINDOW_DRAG_STARTED, decode_window_button)
+    dispatcher.register_event(WINDOW_DRAGGED, decode_window_drag)
+    dispatcher.register_event(WINDOW_RESIZE_DRAGGED, decode_window_drag)

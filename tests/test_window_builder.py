@@ -24,12 +24,14 @@ from axidev_osk.runtime.app_messages import (
     WINDOW_DRAGGED,
     WINDOW_RESIZE_DRAGGED,
     WindowArguments,
+    WindowButtonArguments,
+    WindowCloseRequestedArguments,
 )
 from axidev_osk.runtime.engine import Engine
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
 from axidev_osk.windows.chrome import OverlayResizeHandle, OverlayTitleBar
-from axidev_osk.windows.overlay.always_on_top import OverlayPlacement
+from axidev_osk.config.models import ANCHORS, Anchor
 from support import FakeOverlay, RecordingBackend, make_test_engine, qt_app, start_test_profile, wait_until
 
 _CONFIGURE_OVERLAY = "axidev_osk.windows.builder.configure_always_on_top_window"
@@ -118,7 +120,7 @@ class RuntimeWindowCloseTests(unittest.TestCase):
         # The request is posted, so it runs after the Qt event returns.
         self.assertEqual(events, [])
         qt_app().processEvents()
-        self.assertEqual(events, [WindowArguments("pad")])
+        self.assertEqual(events, [WindowCloseRequestedArguments("pad", None)])
 
     def test_removed_output_close_does_not_request_application_quit(self) -> None:
         harness = WindowHarness()
@@ -137,7 +139,7 @@ class RuntimeWindowCloseTests(unittest.TestCase):
         overlay.has_removed_output.return_value = False  # type: ignore[attr-defined]
         window.closeEvent(QCloseEvent())
         qt_app().processEvents()
-        self.assertEqual(events, [WindowArguments("pad")])
+        self.assertEqual(events, [WindowCloseRequestedArguments("pad", None)])
 
 
 class RuntimeWindowLayoutTests(unittest.TestCase):
@@ -207,13 +209,16 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         title_bar = window.findChild(OverlayTitleBar)
         grip = window.findChild(OverlayResizeHandle)
         assert title_bar is not None and grip is not None
-        title_bar.dragDelta.emit(3, -4)
-        grip.resizeDelta.emit(5, 6)
+        title_bar.dragDelta.emit(3, -4, "left")
+        grip.resizeDelta.emit(5, 6, "right")
         harness.engine.dispatcher.process_pending()
 
         self.assertEqual(
             events,
-            [(WINDOW_DRAGGED, {"window": "pad", "dx": 3, "dy": -4}), (WINDOW_RESIZE_DRAGGED, {"window": "pad", "dx": 5, "dy": 6})],
+            [
+                (WINDOW_DRAGGED, {"window": "pad", "dx": 3, "dy": -4, "button": "left"}),
+                (WINDOW_RESIZE_DRAGGED, {"window": "pad", "dx": 5, "dy": 6, "button": "right"}),
+            ],
         )
         overlay.move_by.assert_not_called()
         overlay.resize_by.assert_not_called()
@@ -236,7 +241,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         harness = WindowHarness()
         window = harness.build(overlay=FakeOverlay(uses_custom_chrome=True, uses_runtime_pointer_drag=True))
         self.addCleanup(window.deleteLater)
-        events: list[tuple[str, WindowArguments]] = []
+        events: list[tuple[str, object]] = []
         for name in (WINDOW_DRAG_STARTED, WINDOW_DRAG_ENDED):
             harness.engine.dispatcher.add_event_handler(
                 name,
@@ -245,14 +250,14 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         title_bar = window.findChild(OverlayTitleBar)
         assert title_bar is not None
-        title_bar.dragStarted.emit()
+        title_bar.dragStarted.emit("middle")
         title_bar.dragEnded.emit()
         self.assertEqual(events, [])
         harness.engine.dispatcher.process_pending()
 
         self.assertEqual(
             events,
-            [(WINDOW_DRAG_STARTED, WindowArguments("pad")), (WINDOW_DRAG_ENDED, WindowArguments("pad"))],
+            [(WINDOW_DRAG_STARTED, WindowButtonArguments("pad", "middle")), (WINDOW_DRAG_ENDED, WindowArguments("pad"))],
         )
 
     def test_qt_pointer_drag_does_not_report_drag_events(self) -> None:
@@ -264,7 +269,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         title_bar = window.findChild(OverlayTitleBar)
         assert title_bar is not None
-        title_bar.dragStarted.emit()
+        title_bar.dragStarted.emit("left")
 
         self.assertEqual(events, [])
 
@@ -310,6 +315,62 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         self.assertEqual(deltas, [])
         self.assertEqual(lifecycle, ["started", "ended"])
+
+    def test_any_mouse_button_drags_the_title_bar_and_grip_and_is_named(self) -> None:
+        qt_app()
+        title_bar = OverlayTitleBar("Test")
+        grip = OverlayResizeHandle()
+        drags: list[tuple[int, int, str]] = []
+        title_bar.dragDelta.connect(lambda dx, dy, button: drags.append((dx, dy, button)))
+        grip.resizeDelta.connect(lambda dx, dy, button: drags.append((dx, dy, button)))
+
+        def drag(widget: Any, button: Qt.MouseButton) -> None:
+            widget.mousePressEvent(
+                QMouseEvent(
+                    QEvent.Type.MouseButtonPress, QPointF(1, 1), QPointF(100, 100), button, button, Qt.KeyboardModifier.NoModifier
+                )
+            )
+            widget.mouseMoveEvent(
+                QMouseEvent(
+                    QEvent.Type.MouseMove,
+                    QPointF(3, 4),
+                    QPointF(102, 103),
+                    Qt.MouseButton.NoButton,
+                    button,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+            )
+            widget.mouseReleaseEvent(
+                QMouseEvent(
+                    QEvent.Type.MouseButtonRelease,
+                    QPointF(3, 4),
+                    QPointF(102, 103),
+                    button,
+                    Qt.MouseButton.NoButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+            )
+
+        drag(title_bar, Qt.MouseButton.RightButton)
+        drag(grip, Qt.MouseButton.MiddleButton)
+
+        self.assertEqual(drags, [(2, 3, "right"), (2, 3, "middle")])
+
+    def test_close_button_reports_its_mouse_button_through_the_window(self) -> None:
+        harness = WindowHarness()
+        window = harness.build(overlay=FakeOverlay(uses_custom_chrome=True))
+        self.addCleanup(window.deleteLater)
+        window.show()
+        events: list[object] = []
+        harness.engine.dispatcher.add_event_handler(WINDOW_CLOSE_REQUESTED, lambda event: events.append(event) or [])
+        close_button = window.findChild(QPushButton, "layerShellCloseButton")
+        assert close_button is not None
+
+        QTest.mouseClick(close_button, Qt.MouseButton.RightButton)
+        harness.engine.dispatcher.process_pending()
+
+        self.assertEqual(events, [WindowCloseRequestedArguments("pad", "right")])
+        self.assertTrue(window.isVisible())
 
     def test_non_raw_title_bar_drag_uses_incremental_global_positions(self) -> None:
         qt_app()
@@ -418,7 +479,17 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
             window = build_profile_window(harness.profile.window("pad"), harness.engine)
         self.addCleanup(window.deleteLater)
 
-        self.assertEqual(configure_overlay.call_args.kwargs["config"].placement, OverlayPlacement.CENTER)
+        self.assertEqual(configure_overlay.call_args.kwargs["config"].placement, ANCHORS["center"])
+
+    def test_window_can_start_at_its_own_anchor(self) -> None:
+        harness = WindowHarness(overlay={"placement": {"x": 0.25, "y": 1}, "keep_on_screen": False})
+
+        with patch(_CONFIGURE_OVERLAY, return_value=FakeOverlay(uses_custom_chrome=True)) as configure_overlay:
+            window = build_profile_window(harness.profile.window("pad"), harness.engine)
+        self.addCleanup(window.deleteLater)
+
+        config = configure_overlay.call_args.kwargs["config"]
+        self.assertEqual((config.placement, config.keep_on_screen), (Anchor(0.25, 1.0), False))
 
     def test_window_without_always_on_top_uses_plain_window(self) -> None:
         harness = WindowHarness(overlay={"always_on_top": False})

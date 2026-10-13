@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import math
 import os
 import sys
 from collections.abc import Callable
@@ -23,11 +24,10 @@ from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtWidgets import QWidget
 
-# AlwaysOnTopWindowConfig and OverlayPlacement are pure data DTOs and live
-# in the config layer so config files (and a future Lua config) can build
-# them without importing Qt-bound modules. We re-export them here so
-# existing callers keep working.
-from ...config.models import AlwaysOnTopWindowConfig, OverlayPlacement
+# AlwaysOnTopWindowConfig is a pure data record and lives in the config layer
+# so config files (and a future Lua config) can build it without importing
+# Qt-bound modules. It is re-exported here for the overlay's callers.
+from ...config.models import AlwaysOnTopWindowConfig
 from ...platform.overlay import OVERLAY_BACKEND_ENV, OVERLAY_DEBUG_ENV, OverlayBackend, read_selected_overlay_backend
 
 from ...platform.layer_shell import (
@@ -254,7 +254,7 @@ class AlwaysOnTopWindowController:
             "configure-window",
             backend=self._backend.value,
             manage_position=self._config.manage_position,
-            placement=self._config.placement.value,
+            placement=(self._config.placement.x, self._config.placement.y),
             screen_margin=self._config.screen_margin,
         )
 
@@ -470,10 +470,18 @@ class AlwaysOnTopWindowController:
         return (position.x(), position.y())
 
     def move_by(self, dx: int, dy: int) -> None:
-        """Move the overlay by a bounded delta."""
+        """Move the overlay, kept inside its screen when ``keep_on_screen`` asks.
+
+        A layer-shell window always stays inside: it is placed by margins, and
+        a compositor may refuse margins that reach past the screen.
+        """
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._move_layer_shell_by(dx, dy)
+            return
+        if not self._config.keep_on_screen:
+            self._window.move(self._window.x() + dx, self._window.y() + dy)
+            self._floating_position_initialized = True
             return
 
         geometry = self._current_screen_geometry()
@@ -486,18 +494,21 @@ class AlwaysOnTopWindowController:
         self._floating_position_initialized = True
 
     def resize_by(self, dx: int, dy: int) -> None:
-        """Resize the overlay by a bounded delta."""
+        """Resize the overlay, never below its minimum size, and within its screen when ``keep_on_screen`` asks.
+
+        A layer-shell window always stays inside, for the same reason as in ``move_by``.
+        """
 
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._resize_layer_shell_by(dx, dy)
             return
 
-        geometry = self._current_screen_geometry()
-        max_width = max(self._window.minimumWidth(), geometry.x() + geometry.width() - self._window.x())
-        max_height = max(self._window.minimumHeight(), geometry.y() + geometry.height() - self._window.y())
-
-        next_width = max(self._window.minimumWidth(), min(self._window.width() + dx, max_width))
-        next_height = max(self._window.minimumHeight(), min(self._window.height() + dy, max_height))
+        next_width = max(self._window.minimumWidth(), self._window.width() + dx)
+        next_height = max(self._window.minimumHeight(), self._window.height() + dy)
+        if self._config.keep_on_screen:
+            geometry = self._current_screen_geometry()
+            next_width = min(next_width, max(self._window.minimumWidth(), geometry.right() + 1 - self._window.x()))
+            next_height = min(next_height, max(self._window.minimumHeight(), geometry.bottom() + 1 - self._window.y()))
         self._window.resize(next_width, next_height)
         self._floating_position_initialized = True
 
@@ -651,13 +662,13 @@ class AlwaysOnTopWindowController:
     def _initialize_layer_shell_position(self) -> None:
         screen_size = self._current_screen_geometry(for_layer_shell=True).size()
 
-        if self._config.placement == OverlayPlacement.CENTER:
-            self._layer_shell_left_margin = (screen_size.width() - self._window.width()) // 2
-            self._layer_shell_bottom_margin = (screen_size.height() - self._window.height()) // 2
-        else:
-            margin = self._config.screen_margin
-            self._layer_shell_left_margin = screen_size.width() - self._window.width() - margin
-            self._layer_shell_bottom_margin = screen_size.height() - self._window.height() - margin
+        # A layer-shell window is placed by edges and margins, so the anchor becomes left and bottom margins.
+        anchor = self._config.placement
+        margin = self._config.screen_margin
+        free_width = screen_size.width() - self._window.width() - 2 * margin
+        free_height = screen_size.height() - self._window.height() - 2 * margin
+        self._layer_shell_left_margin = margin + math.floor(anchor.x * free_width)
+        self._layer_shell_bottom_margin = margin + math.floor((1 - anchor.y) * free_height)
 
         self._layer_shell_anchors = ANCHOR_LEFT | ANCHOR_BOTTOM
         self._layer_shell_margins = QMargins(self._layer_shell_left_margin, 0, 0, self._layer_shell_bottom_margin)
@@ -676,13 +687,12 @@ class AlwaysOnTopWindowController:
             return
 
         geometry = self._current_screen_geometry()
-        if self._config.placement == OverlayPlacement.CENTER:
-            target_x = geometry.x() + max(0, (geometry.width() - self._window.width()) // 2)
-            target_y = geometry.y() + max(0, (geometry.height() - self._window.height()) // 2)
-        else:
-            margin = self._config.screen_margin
-            target_x = geometry.x() + max(0, geometry.width() - self._window.width() - margin)
-            target_y = geometry.y() + margin
+        anchor = self._config.placement
+        margin = self._config.screen_margin
+        free_width = geometry.width() - self._window.width() - 2 * margin
+        free_height = geometry.height() - self._window.height() - 2 * margin
+        target_x = geometry.x() + max(0, margin + math.floor(anchor.x * free_width))
+        target_y = geometry.y() + max(0, margin + math.floor(anchor.y * free_height))
 
         self._window.move(target_x, target_y)
         self._floating_position_initialized = True

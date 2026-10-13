@@ -88,7 +88,53 @@ class HotCornerEventTests(unittest.TestCase):
             controller._indicator.close()
 
 
+    def test_reaching_and_leaving_a_corner_is_reported_and_the_built_in_trigger_can_be_turned_off(self) -> None:
+        for fires_on_rest, expected in (
+            (True, ["hot_corner.entered", "hot_corner.triggered", "hot_corner.left"]),
+            (False, ["hot_corner.entered", "hot_corner.left"]),
+        ):
+            with self.subTest(fires_on_rest=fires_on_rest):
+                engine = make_test_engine(RecordingBackend())
+                events: list[str] = []
+                for name in ("hot_corner.entered", "hot_corner.left", HOT_CORNER_TRIGGERED):
+                    engine.dispatcher.add_raw_event_handler(name, lambda event, name=name: events.append(name) or [])
+                with patch(
+                    "axidev_osk.hot_corner.controller.configure_hot_corner_overlay",
+                    return_value=FakeOverlayController(backend=OverlayBackend.X11_UTILITY_BRIDGE),
+                ):
+                    controller = HotCornerWindowToggleController(
+                        engine.dispatcher,
+                        config=hot_corner_config(dwell_ms=1, fires_on_rest=fires_on_rest),
+                        corners=frozenset({"bottom_left"}),
+                    )
+                try:
+                    handle = controller._sensor_handles[0]
+                    with patch.object(controller, "_show_indicator_for_screen"):
+                        controller._sensor_entered(handle)
+                        engine.dispatcher.process_pending()
+                        controller._entered_at = time.monotonic() - 1
+                        controller._poll_active_sensor()
+                        controller._sensor_left(handle)
+                    engine.dispatcher.process_pending()
+
+                    self.assertEqual(events, expected)
+                finally:
+                    controller.stop()
+                    controller._indicator.close()
+
+
 class HotCornerServiceTests(unittest.TestCase):
+    def test_disabled_corners_build_no_sensors(self) -> None:
+        engine = make_test_engine(RecordingBackend())
+        service = HotCornerService()
+        service.configure(hot_corner_config(enabled=False), frozenset({"top_left"}))
+
+        with patch("axidev_osk.hot_corner.service.HotCornerWindowToggleController") as controller_type:
+            service.start(engine.dispatcher)
+            service.stop()
+
+        controller_type.assert_not_called()
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])

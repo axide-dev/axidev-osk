@@ -17,6 +17,7 @@ from axidev_osk.hot_corner.controller import (
     ScreenCorner,
 )
 from axidev_osk.runtime.dispatcher import Dispatcher
+from axidev_osk.config.models import ANCHORS
 from axidev_osk.windows.overlay import layer_shell
 from axidev_osk.windows.overlay.layer_shell import ANCHOR_BOTTOM, ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_TOP
 from axidev_osk.windows.overlay.always_on_top import (
@@ -254,6 +255,56 @@ class OverlayWindowControllerTests(unittest.TestCase):
         controller.move_by(12, 34)
 
         self.assertEqual(window.moves, [(12, 34)])
+
+    def test_floating_window_starts_at_its_anchor(self) -> None:
+        cases = {
+            "top-right": (1000 - 100 - 16, 16),
+            "center": ((1000 - 100) // 2, (800 - 60) // 2),
+            "bottom-left": (16, 800 - 60 - 16),
+        }
+        for name, expected in cases.items():
+            with (
+                self.subTest(name),
+                patch.object(AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.X11_UTILITY),
+                patch.object(AlwaysOnTopWindowController, "_current_screen_geometry", return_value=QRect(0, 0, 1000, 800)),
+            ):
+                window = FakeWindow()
+                controller = AlwaysOnTopWindowController(window, config=AlwaysOnTopWindowConfig(placement=ANCHORS[name]))
+                controller._position_floating_window_if_needed()
+
+                self.assertEqual(window.moves[-1], expected)
+
+    def test_layer_shell_window_starts_at_its_anchor_through_margins(self) -> None:
+        # The margins the two presets had before anchors: center by halves, top-right by the screen margin.
+        cases = {
+            "center": QMargins((1000 - 100) // 2, 0, 0, (800 - 60) // 2),
+            "top-right": QMargins(1000 - 100 - 16, 0, 0, 800 - 60 - 16),
+        }
+        for name, expected in cases.items():
+            with (
+                self.subTest(name),
+                patch.object(AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL),
+                patch.object(AlwaysOnTopWindowController, "_current_screen_geometry", return_value=QRect(0, 0, 1000, 800)),
+            ):
+                controller = AlwaysOnTopWindowController(FakeWindow(), config=AlwaysOnTopWindowConfig(placement=ANCHORS[name]))
+                controller._initialize_layer_shell_position()
+
+                self.assertEqual(controller._layer_shell_margins, expected)
+
+    def test_floating_window_leaves_its_screen_only_without_keep_on_screen(self) -> None:
+        for keep_on_screen, expected in ((True, (0, 0)), (False, (-50, 0))):
+            with (
+                self.subTest(keep_on_screen=keep_on_screen),
+                patch.object(AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.X11_UTILITY),
+                patch.object(AlwaysOnTopWindowController, "_current_screen_geometry", return_value=QRect(0, 0, 1000, 800)),
+            ):
+                window = FakeWindow()
+                controller = AlwaysOnTopWindowController(
+                    window, config=AlwaysOnTopWindowConfig(keep_on_screen=keep_on_screen)
+                )
+                controller.move_by(-50, 0)
+
+                self.assertEqual(window.moves[-1], expected)
 
     def test_wayland_layer_shell_manual_move_persists_across_show(self) -> None:
         window = FakeWindow()

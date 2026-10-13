@@ -32,10 +32,10 @@ DEFAULT_FONT = {
 POINTER_LOCATOR = {"gap_color": "#242424"}
 
 HOT_CORNER_INDICATOR = {
-    "indicator_background": "#0B0B10",
-    "indicator_track": "#242433",
-    "indicator_progress": "#E61E8C",
-    "indicator_center": "#2A1421",
+    "indicator_background": "#DC0B0B10",
+    "indicator_track": "#B4242433",
+    "indicator_progress": "#EBE61E8C",
+    "indicator_center": "#C32A1421",
 }
 
 DEFAULT_QSS = """

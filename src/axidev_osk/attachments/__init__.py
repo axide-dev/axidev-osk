@@ -132,6 +132,14 @@ def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
             direction_reversal_progress_factor=reader.number(
                 "direction_reversal_progress_factor", defaults["direction_reversal_progress_factor"]
             ),
+            direction_reversal_angle_deg=reader.number(
+                "direction_reversal_angle_deg", defaults["direction_reversal_angle_deg"]
+            ),
+            acceleration_exponent_near=reader.number(
+                "acceleration_exponent_near", defaults["acceleration_exponent_near"]
+            ),
+            acceleration_exponent_far=reader.number("acceleration_exponent_far", defaults["acceleration_exponent_far"]),
+            poll_interval_ms=reader.integer("poll_interval_ms", defaults["poll_interval_ms"]),
             movement_penalty_px=reader.number("movement_penalty_px", defaults["movement_penalty_px"]),
             distance_curve_full_px=reader.number("distance_curve_full_px", defaults["distance_curve_full_px"]),
             velocity_release_ms=reader.integer("velocity_release_ms", defaults["velocity_release_ms"]),
@@ -139,6 +147,8 @@ def _decode_dwell(reader: ConfigReader) -> DwellClickConfig:
             indicator_min_dot_px=reader.integer("indicator_min_dot_px", defaults["indicator_min_dot_px"]),
             indicator_max_dot_px=reader.integer("indicator_max_dot_px", defaults["indicator_max_dot_px"]),
             indicator_fade_ms=reader.integer("indicator_fade_ms", defaults["indicator_fade_ms"]),
+            indicator_opacity=reader.number("indicator_opacity", defaults["indicator_opacity"]),
+            indicator_track_opacity=reader.number("indicator_track_opacity", defaults["indicator_track_opacity"]),
         ),
     )
 
@@ -153,6 +163,7 @@ def _decode_pointer_locator(reader: ConfigReader) -> PointerLocatorConfig:
             radius_percent=reader.number("radius_percent", defaults["radius_percent"]),
             maximum_opacity_percent=reader.number("maximum_opacity_percent", defaults["maximum_opacity_percent"]),
             radius_standard_deviations=reader.number("radius_standard_deviations", defaults["radius_standard_deviations"]),
+            poll_interval_ms=reader.integer("poll_interval_ms", defaults["poll_interval_ms"]),
             gap_color=reader.color("gap_color"),
         ),
     )
@@ -166,17 +177,37 @@ def _decode_hot_corners(reader: ConfigReader) -> HotCornersOptions:
     defaults = _defaults(HotCornerConfig)
     return HotCornersOptions(
         corners=corners,
-        settings=HotCornerConfig(
+        settings=_settings(reader, lambda: HotCornerConfig(
             indicator_background=reader.color("indicator_background"),
             indicator_track=reader.color("indicator_track"),
             indicator_progress=reader.color("indicator_progress"),
             indicator_center=reader.color("indicator_center"),
+            enabled=reader.boolean("enabled", defaults["enabled"]),
+            fires_on_rest=reader.boolean("fires_on_rest", defaults["fires_on_rest"]),
             dwell_ms=reader.integer("dwell_ms", defaults["dwell_ms"], minimum=1),
             poll_interval_ms=reader.integer("poll_interval_ms", defaults["poll_interval_ms"], minimum=1),
             corner_size_px=reader.integer("corner_size_px", defaults["corner_size_px"], minimum=1),
             indicator_size_px=reader.integer("indicator_size_px", defaults["indicator_size_px"], minimum=1),
             indicator_margin_px=reader.integer("indicator_margin_px", defaults["indicator_margin_px"], minimum=0),
-        ),
+            indicator_disc_inset_px=reader.integer(
+                "indicator_disc_inset_px", defaults["indicator_disc_inset_px"], minimum=0
+            ),
+            indicator_ring_inset_px=reader.integer(
+                "indicator_ring_inset_px", defaults["indicator_ring_inset_px"], minimum=0
+            ),
+            indicator_center_inset_px=reader.integer(
+                "indicator_center_inset_px", defaults["indicator_center_inset_px"], minimum=0
+            ),
+            indicator_track_width_px=reader.integer(
+                "indicator_track_width_px", defaults["indicator_track_width_px"], minimum=0
+            ),
+            indicator_progress_width_px=reader.integer(
+                "indicator_progress_width_px", defaults["indicator_progress_width_px"], minimum=0
+            ),
+            indicator_center_start_opacity=reader.number(
+                "indicator_center_start_opacity", defaults["indicator_center_start_opacity"], minimum=0.0, maximum=1.0
+            ),
+        )),
     )
 
 
