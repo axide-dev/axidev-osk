@@ -29,9 +29,10 @@ from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
-from ..components.mouse_buttons import mouse_button_name
+from ..components.mouse_buttons import MOUSE_BUTTONS, OTHER_BUTTON, mouse_button_name
 from ..messages import DataMap, RuntimeEvent
 from ..runtime.decoding import int_value, non_empty_string_value, number_value, require_keys, validated_event
+from ..runtime.event_fields import profile_node, samples
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher
@@ -57,9 +58,9 @@ _EVENTS = {
 
 @dataclass(frozen=True, slots=True)
 class NodePointerArguments:
-    node: str
-    x: float
-    y: float
+    node: str = profile_node()
+    x: float = samples(0.0)
+    y: float = samples(0.0)
 
 
 def decode_node_pointer(arguments: DataMap) -> NodePointerArguments:
@@ -73,10 +74,10 @@ def decode_node_pointer(arguments: DataMap) -> NodePointerArguments:
 
 @dataclass(frozen=True, slots=True)
 class NodePointerPressArguments:
-    node: str
-    x: float
-    y: float
-    button: str
+    node: str = profile_node()
+    x: float = samples(0.0)
+    y: float = samples(0.0)
+    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
 
 
 def decode_node_pointer_press(arguments: DataMap) -> NodePointerPressArguments:
@@ -91,11 +92,11 @@ def decode_node_pointer_press(arguments: DataMap) -> NodePointerPressArguments:
 
 @dataclass(frozen=True, slots=True)
 class NodeHoverArguments:
-    node: str
-    x: float
-    y: float
-    screen_x: int
-    screen_y: int
+    node: str = profile_node()
+    x: float = samples(0.0)
+    y: float = samples(0.0)
+    screen_x: int = samples(0)
+    screen_y: int = samples(0)
 
 
 def decode_node_hover(arguments: DataMap) -> NodeHoverArguments:
@@ -111,7 +112,7 @@ def decode_node_hover(arguments: DataMap) -> NodeHoverArguments:
 
 @dataclass(frozen=True, slots=True)
 class NodeArguments:
-    node: str
+    node: str = profile_node()
 
 
 def decode_node(arguments: DataMap) -> NodeArguments:
@@ -121,9 +122,9 @@ def decode_node(arguments: DataMap) -> NodeArguments:
 
 @dataclass(frozen=True, slots=True)
 class NodeWheelArguments:
-    node: str
-    dx: float
-    dy: float
+    node: str = profile_node()
+    dx: float = samples(0.0)
+    dy: float = samples(1.0)
 
 
 def decode_node_wheel(arguments: DataMap) -> NodeWheelArguments:

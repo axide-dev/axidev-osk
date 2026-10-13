@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from axidev_osk.python_defaults.default_profile import build_default_config
+from axidev_osk.runtime.app_messages import QuitReason
 from axidev_osk.runtime.application import ApplicationRuntime
 from axidev_osk.runtime.registries import ServiceRegistry
 from axidev_osk.services import register_services
@@ -95,7 +96,7 @@ class ServiceRegistryTests(unittest.TestCase):
         )
 
         def exec_and_quit() -> int:
-            runtime._quit_controller.request_quit("signal")
+            runtime._quit_controller.request_quit(QuitReason.SIGNAL)
             return 0
 
         with (

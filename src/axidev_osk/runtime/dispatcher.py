@@ -11,6 +11,7 @@ from typing import Generic, TypeVar, cast
 
 from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage, copy_data_map
 from .decoding import map_value, require_keys, string_value
+from .event_fields import samples
 
 
 DecodedT = TypeVar("DecodedT")
@@ -22,6 +23,9 @@ Wake = Callable[[], None]
 _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
 
+CHECK_HINT = "Run `axidev-osk check` to find configuration problems before they happen."
+"""Carried as ``hint`` by every ``action.failed`` and ``callback.failed``, and added to their log lines."""
+
 ACTION_FAILED = "action.failed"
 
 
@@ -29,21 +33,23 @@ ACTION_FAILED = "action.failed"
 class ActionFailedArguments:
     """What the dispatcher reports when an action cannot be looked up, decoded, or run."""
 
-    action: str
-    arguments: DataMap
-    stage: str
-    exception_type: str
-    message: str
+    action: str = samples("window.show")
+    arguments: DataMap = samples({})
+    stage: str = samples("lookup", "decode", "execute")
+    exception_type: str = samples("ValueError")
+    message: str = samples("example failure")
+    hint: str = samples(CHECK_HINT)
 
 
 def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
-    require_keys(arguments, ("action", "arguments", "stage", "exception_type", "message"))
+    require_keys(arguments, ("action", "arguments", "stage", "exception_type", "message", "hint"))
     return ActionFailedArguments(
         action=string_value(arguments, "action"),
         arguments=map_value(arguments, "arguments"),
         stage=string_value(arguments, "stage"),
         exception_type=string_value(arguments, "exception_type"),
         message=string_value(arguments, "message"),
+        hint=string_value(arguments, "hint"),
     )
 
 
@@ -154,6 +160,28 @@ class Dispatcher:
 
     def has_event(self, name: str) -> bool:
         return name in self._events
+
+    def action_names(self) -> frozenset[str]:
+        """Every registered action name."""
+
+        return frozenset(self._actions)
+
+    def event_names(self) -> frozenset[str]:
+        """Every registered event name."""
+
+        return frozenset(self._events)
+
+    def action_decoder(self, name: str) -> Decoder[object] | None:
+        """The decoder registered for an action, or ``None`` when the name is not registered."""
+
+        definition = self._actions.get(name)
+        return definition.decoder if definition is not None else None
+
+    def event_decoder(self, name: str) -> Decoder[object] | None:
+        """The decoder registered for an event, or ``None`` when the name is not registered."""
+
+        definition = self._events.get(name)
+        return definition.decoder if definition is not None else None
 
     def close(self) -> None:
         """Drop every waiting message and refuse later ones; used once the app shuts down."""
@@ -288,12 +316,13 @@ class Dispatcher:
 
     def _fail_action(self, action: RuntimeAction, *, stage: str, error: Exception) -> None:
         _logger.error(
-            "Action %s failed during %s with arguments %r: %s: %s",
+            "Action %s failed during %s with arguments %r: %s: %s. %s",
             action.action,
             stage,
             action.arguments,
             type(error).__name__,
             error,
+            CHECK_HINT,
         )
         if self._closed:
             return
@@ -306,6 +335,7 @@ class Dispatcher:
                     "stage": stage,
                     "exception_type": type(error).__name__,
                     "message": str(error),
+                    "hint": CHECK_HINT,
                 },
             )
         )

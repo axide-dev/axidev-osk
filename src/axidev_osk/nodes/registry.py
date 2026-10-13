@@ -25,6 +25,7 @@ from ..kind_registry import KindRegistry
 from ..messages import DataMap, DataValue, data_equal
 from ..runtime.decoding import non_empty_string_value, require_keys, validated_event
 from ..runtime.engine_messages import node_geometry_changed
+from ..runtime.event_fields import profile_node
 from ..widget_properties import CLASSES, COMPONENT_ID, COMPONENT_TYPE, PASSES_INPUT_BLOCK
 from .pointer import HoverReporter, PointerReporter, WheelReporter
 
@@ -42,7 +43,7 @@ PlaceChild = Callable[[QWidget, QWidget, object], None]
 
 @dataclass(frozen=True, slots=True)
 class NodeEventArguments:
-    node: str
+    node: str = profile_node()
 
 
 def decode_node_event(arguments: DataMap) -> NodeEventArguments:

@@ -12,7 +12,7 @@ from typing import Any
 
 from . import axidev_osk
 from .axidev_osk import std
-from .axidev_osk.std import board, controls, keys, layouts, prompts, wheel, windows
+from .axidev_osk.std import board, controls, failures, keys, layouts, prompts, wheel, windows
 from .theme import DEFAULT_FONT, DEFAULT_PALETTE, DEFAULT_QSS, HOT_CORNER_INDICATOR, POINTER_LOCATOR
 
 KEYBOARD = "keyboard"
@@ -440,7 +440,7 @@ def social_profile() -> axidev_osk.Map:
     return axidev_osk.profile(
         state=std.with_state(),
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
-        windows=_with_settings([social_window(), _quit_prompt(None)]),
+        windows=_with_settings([social_window(), _quit_prompt(None), failures.notice_window(PROMPT_OPTS)]),
         attachments=[
             axidev_osk.pointer_locator(
                 id="keyboard-locator",
@@ -458,6 +458,7 @@ def social_profile() -> axidev_osk.Map:
                 "app.activated": lambda ctx, event: windows.reveal(ctx.state, KEYBOARD),
             },
             also=[std.locator.on(_social_keys())],
+            failure_notice=True,
         ),
     )
 
@@ -540,6 +541,7 @@ def _keyboard_handlers(colored: list[axidev_osk.Map]) -> dict[str, Any]:
             "linux.permission_setup_opened": _on_permission_setup_opened,
         },
         also=[std.locator.on(colored)],
+        failure_notice=True,
     )
 
 
@@ -547,7 +549,7 @@ def wheel_profile() -> axidev_osk.Map:
     return axidev_osk.profile(
         state=std.with_state(),
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
-        windows=_with_settings([wheel_window(), *prompt_windows()]),
+        windows=_with_settings([wheel_window(), *prompt_windows(), failures.notice_window(PROMPT_OPTS)]),
         attachments=_keyboard_attachments(),
         on=_keyboard_handlers(_wheel()["children"]),
     )
@@ -559,7 +561,7 @@ def keyboard_profile() -> axidev_osk.Map:
     return axidev_osk.profile(
         state=std.with_state(),
         theme={"qss": DEFAULT_QSS, "palette": DEFAULT_PALETTE, "font": DEFAULT_FONT},
-        windows=_with_settings([keyboard_window(), *prompt_windows()]),
+        windows=_with_settings([keyboard_window(), *prompt_windows(), failures.notice_window(PROMPT_OPTS)]),
         attachments=_keyboard_attachments(),
         on=_keyboard_handlers(_key_nodes()),
     )

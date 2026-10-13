@@ -15,39 +15,14 @@ from axidev_osk.attachments.runtime import WindowAttachments
 from axidev_osk.config.models import HotCornerConfig
 from axidev_osk.config.profile import ProfileConfig, WindowConfig
 from axidev_osk.messages import DataMap, MessageResult
-from axidev_osk.runtime.app_messages import (
-    APP_QUIT,
-    LINUX_OPEN_PERMISSION_SETUP,
-    WINDOW_CLICK,
-    WINDOW_CLOSE,
-    WINDOW_HIDE,
-    WINDOW_MOVE_BY,
-    WINDOW_RESIZE_BY,
-    WINDOW_SHOW,
-    decode_app_quit,
-    decode_window,
-    decode_window_click,
-    decode_window_delta,
-)
-from axidev_osk.runtime.decoding import decode_empty
+from axidev_osk.runtime.app_messages import APP_ACTION_DECODERS
 from axidev_osk.runtime.dispatcher import Dispatcher
 from axidev_osk.runtime.engine import Engine, build_engine
 from axidev_osk.runtime.qt_wake import QtDispatcherWake
 from axidev_osk.services.keyboard import KeyboardService
 from axidev_osk.services.keyboard.io import KeyPressHandle
+from axidev_osk.services.keyboard.names import KeyNames
 from axidev_osk.windows.builder import RuntimeWindow, build_profile_window
-
-_APP_ACTIONS: dict[str, Callable[[DataMap], object]] = {
-    WINDOW_SHOW: decode_window,
-    WINDOW_HIDE: decode_window,
-    WINDOW_CLOSE: decode_window,
-    WINDOW_MOVE_BY: decode_window_delta,
-    WINDOW_RESIZE_BY: decode_window_delta,
-    WINDOW_CLICK: decode_window_click,
-    APP_QUIT: decode_app_quit,
-    LINUX_OPEN_PERMISSION_SETUP: decode_empty,
-}
-
 
 HOT_CORNER_COLORS = {
     "indicator_background": "#000000",
@@ -88,12 +63,14 @@ class RecordingBackend:
     needs_permission_setup = False
     permission_setup_text = ""
 
-    def __init__(self, canonical: Callable[[str], str] = lambda key: key) -> None:
+    def __init__(self, names: KeyNames | None = None) -> None:
+        """``names``, when given, refuses key and modifier names that are not official, as the real adapter does."""
+
         self.sent: list[tuple[object, ...]] = []
         self.observers: list[Callable[[object], None]] = []
         self.initialized = 0
         self.shutdowns = 0
-        self._canonical = canonical
+        self._names = names
 
     def initialize(self) -> bool:
         self.initialized += 1
@@ -115,8 +92,9 @@ class RecordingBackend:
         self.observers.append(listener)
         return lambda: self.observers.remove(listener)
 
-    def canonical_key(self, key: str) -> str:
-        return self._canonical(key)
+    def check_names(self, key: str, mods: tuple[str, ...]) -> None:
+        if self._names is not None:
+            self._names.check(key, mods)
 
     def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle:
         self.sent.append(("down", key, mods, repeat))
@@ -211,7 +189,7 @@ def record_app_actions(dispatcher: Dispatcher) -> list[tuple[str, DataMap]]:
 
         return decode, record
 
-    for name, decoder in _APP_ACTIONS.items():
+    for name, decoder in APP_ACTION_DECODERS.items():
         decode, record = recorder(name, decoder)
         dispatcher.register_action(name, decode, record)
     return recorded

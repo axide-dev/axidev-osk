@@ -11,9 +11,12 @@ observed state) live in ``engine_messages``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
+from ..components.mouse_buttons import MOUSE_BUTTONS, OTHER_BUTTON
 from ..messages import DataMap, RuntimeAction, RuntimeEvent
 from .decoding import (
     bool_value,
@@ -26,6 +29,7 @@ from .decoding import (
     validated_action,
     validated_event,
 )
+from .event_fields import profile_window, samples
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -64,20 +68,43 @@ WINDOW_RESIZE_TO = "window.resize_to"
 WINDOW_SHOW = "window.show"
 
 
+class ScreenCorner(str, Enum):
+    """The screen corners a ``hot_corners`` attachment watches and ``hot_corner.triggered`` names."""
+
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
+
+
+HOT_CORNERS = tuple(corner.value for corner in ScreenCorner)
+
+
+class QuitReason(str, Enum):
+    """Why the application asks a profile before quitting, as ``app.quit_requested`` reports it."""
+
+    SIGNAL = "signal"
+    STDIN_CLOSED = "stdin_closed"
+    WINDOW_CLOSED = "window_closed"
+
+
+QUIT_REASONS = tuple(reason.value for reason in QuitReason)
+
+
 @dataclass(frozen=True, slots=True)
 class HotCornerTriggeredArguments:
-    corner: str
+    corner: str = samples(*HOT_CORNERS)
 
 
 @dataclass(frozen=True, slots=True)
 class PointerMotionObservedArguments:
-    dx: float
-    dy: float
+    dx: float = samples(0.0)
+    dy: float = samples(0.0)
 
 
 @dataclass(frozen=True, slots=True)
 class QuitRequestedArguments:
-    reason: str
+    reason: str = samples(*QUIT_REASONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +124,7 @@ class ProfileSwitchArguments:
 
 @dataclass(frozen=True, slots=True)
 class WindowArguments:
-    window_id: str
+    window_id: str = profile_window(key="window")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,27 +140,27 @@ class WindowSizeArguments:
 class WindowDeltaArguments:
     """A window and a distance in pixels: a drag, or how far to move or resize it."""
 
-    window_id: str
-    dx: int
-    dy: int
+    window_id: str = profile_window(key="window")
+    dx: int = samples(0)
+    dy: int = samples(0)
 
 
 @dataclass(frozen=True, slots=True)
 class WindowDragArguments:
     """How far a window's title bar or resize grip was dragged, and with which mouse button."""
 
-    window_id: str
-    dx: int
-    dy: int
-    button: str
+    window_id: str = profile_window(key="window")
+    dx: int = samples(0)
+    dy: int = samples(0)
+    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
 class WindowButtonArguments:
     """A window and the mouse button behind what happened to it."""
 
-    window_id: str
-    button: str
+    window_id: str = profile_window(key="window")
+    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,17 +168,17 @@ class WindowCloseRequestedArguments:
     """A request to close a window: ``button`` names the mouse button on its close button, or is ``None``
     when the system asked."""
 
-    window_id: str
-    button: str | None
+    window_id: str = profile_window(key="window")
+    button: str | None = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
 class WindowPointArguments:
     """A window and a point on the screen, in pixels."""
 
-    window_id: str
-    x: int
-    y: int
+    window_id: str = profile_window(key="window")
+    x: int = samples(0)
+    y: int = samples(0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +193,8 @@ def app_activated() -> RuntimeEvent:
     return validated_event(APP_ACTIVATED, {}, decode_empty)
 
 
-def app_quit_requested(reason: str) -> RuntimeEvent:
-    return validated_event(APP_QUIT_REQUESTED, {"reason": reason}, decode_quit_requested)
+def app_quit_requested(reason: QuitReason) -> RuntimeEvent:
+    return validated_event(APP_QUIT_REQUESTED, {"reason": reason.value}, decode_quit_requested)
 
 
 def hot_corner_entered(corner: str) -> RuntimeEvent:
@@ -390,6 +417,31 @@ def decode_window_click(arguments: DataMap) -> WindowClickArguments:
         y=int_value(arguments, "y"),
         button=non_empty_string_value(arguments, "button") if "button" in arguments else "left",
     )
+
+
+# The application's actions and their decoders, listed once: the application registers them from here and
+# ``axidev-osk check`` decodes the actions callbacks return with them.
+APP_ACTION_DECODERS: dict[str, Callable[[DataMap], Any]] = {
+    APP_QUIT: decode_app_quit,
+    LINUX_OPEN_PERMISSION_SETUP: decode_empty,
+    PROFILE_START: decode_empty,
+    PROFILE_SWITCH: decode_profile_switch,
+    SECURE_INPUT_PANEL_PREPARE: decode_empty,
+    SECURE_INPUT_PANEL_RELEASE: decode_empty,
+    WINDOW_CLOSE: decode_window,
+    WINDOW_HIDE: decode_window,
+    WINDOW_CLICK: decode_window_click,
+    WINDOW_MOVE_BY: decode_window_delta,
+    WINDOW_MOVE_TO: decode_window_point,
+    WINDOW_RESIZE_BY: decode_window_delta,
+    WINDOW_RESIZE_TO: decode_window_size,
+    WINDOW_SHOW: decode_window,
+}
+"""Every action the application runtime registers, with its decoder.
+
+The application registers each of these with its handler, and the config
+check decodes them without the application.
+"""
 
 
 def register_app_events(dispatcher: "Dispatcher") -> None:

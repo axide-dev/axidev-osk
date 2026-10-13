@@ -26,6 +26,7 @@ from axidev_osk.runtime.engine_messages import (
 )
 from axidev_osk.runtime.functions import CallbackContext
 from axidev_osk.services.keyboard.io import KeyObservation
+from axidev_osk.services.keyboard.names import KeyNames
 from axidev_osk.services.keyboard.service import KeyboardService
 from axidev_osk.services.process import ProcessService
 from support import RecordingBackend
@@ -34,7 +35,7 @@ from support import RecordingBackend
 class Harness:
     def __init__(self, profile: dict[str, object] | None = None) -> None:
         self.dispatcher = Dispatcher()
-        self.backend = RecordingBackend(canonical=lambda key: key.upper() if len(key) == 1 else key)
+        self.backend = RecordingBackend(KeyNames.load())
         self.keyboard = KeyboardService(self.backend)  # type: ignore[arg-type]
         self.spawned: list[tuple[tuple[str, ...], str, bool]] = []
         processes = SimpleNamespace(spawn=lambda argv, tag, detached: self.spawned.append((argv, tag, detached)))
@@ -186,12 +187,28 @@ class KeyboardEffectTests(unittest.TestCase):
         failures = harness.events(ACTION_FAILED)
         harness.backend.press = Mock(side_effect=RuntimeError("Keyboard output is not ready: permission denied"))  # type: ignore[method-assign]
 
-        harness.act("keyboard.down", key="a")
+        harness.act("keyboard.down", key="A")
 
         self.assertEqual(
             [(failure.action, failure.message) for failure in failures],  # type: ignore[attr-defined]
             [("keyboard.down", "Keyboard output is not ready: permission denied")],
         )
+
+    def test_a_key_name_that_is_not_the_official_spelling_fails_naming_the_official_one(self) -> None:
+        harness = Harness()
+        failures = harness.events(ACTION_FAILED)
+
+        harness.act("keyboard.tap", key="esc")
+        harness.act("keyboard.down", key="A", mods=["control"])
+
+        self.assertEqual(
+            [(failure.action, failure.message) for failure in failures],  # type: ignore[attr-defined]
+            [
+                ("keyboard.tap", "Key name 'esc' is not the official spelling; use 'Escape'"),
+                ("keyboard.down", "Modifier name 'control' is not the official spelling; use 'Ctrl'"),
+            ],
+        )
+        self.assertEqual(harness.backend.sent, [])
 
     def test_event_constructors_reject_bad_arguments_where_they_are_called(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not be empty"):
@@ -200,11 +217,11 @@ class KeyboardEffectTests(unittest.TestCase):
     def test_down_up_tap_and_text_reach_the_backend(self) -> None:
         harness = Harness()
 
-        harness.act("keyboard.down", key="a", mods=["Shift"])
-        harness.act("keyboard.up", key="a")
-        harness.act("keyboard.up", key="a")
+        harness.act("keyboard.down", key="A", mods=["Shift"])
+        harness.act("keyboard.up", key="A")
+        harness.act("keyboard.up", key="A")
         harness.act("keyboard.tap", key="F5", mods=["Ctrl"])
-        harness.act("keyboard.tap", key="b")
+        harness.act("keyboard.tap", key="B")
         harness.act("keyboard.type_text", text="moo")
 
         self.assertEqual(

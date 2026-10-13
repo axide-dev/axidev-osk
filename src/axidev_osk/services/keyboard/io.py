@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Any
 
 from ...runtime.diagnostics import keyboard_debug_enabled
+from .names import KeyNames
 
 _logger = logging.getLogger(__name__)
 
@@ -177,19 +178,18 @@ class AxidevIoKeyboardBackend:
 
         return unsubscribe
 
-    def canonical_key(self, key_name: str) -> str:
-        """Return the backend's canonical spelling of a key name."""
+    def check_names(self, key: str, mods: tuple[str, ...]) -> None:
+        """Raise ``KeyNameError`` unless ``key`` and ``mods`` use axidev_io's official spelling.
 
-        if self._keyboard is None:
-            return key_name
-        try:
-            formatted = self._keyboard.keys.format(self._keyboard.keys.parse(key_name))
-            return formatted or key_name
-        except Exception:
-            return key_name
+        Before output is ready nothing is checked: sending then fails anyway,
+        and releasing a key that was never held does nothing.
+        """
+
+        if self._keyboard is not None:
+            KeyNames(self._keyboard.keys).check(key, mods)
 
     def press(self, key: str, mods: tuple[str, ...], repeat: bool) -> KeyPressHandle:
-        """Send ``key`` (already canonical) down with explicit modifiers and return its release handle.
+        """Send ``key`` (already checked) down with explicit modifiers and return its release handle.
 
         Raises when output is not ready or the backend refuses the key, so the
         failing action reaches the profile as ``action.failed``.
@@ -209,7 +209,7 @@ class AxidevIoKeyboardBackend:
         keyboard.sender.key_up(press.key_name, mods=list(press.mods))
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        """Send one press and release of ``key`` (already canonical) with explicit modifiers."""
+        """Send one press and release of ``key`` (already checked) with explicit modifiers."""
 
         self._require_ready().sender.tap(key, mods=list(mods))
 

@@ -28,6 +28,7 @@ from .decoding import (
     validated_event,
 )
 from .dispatcher import Dispatcher
+from .event_fields import profile_node, profile_window, samples
 from .profile_runtime import ProfileRuntime
 
 _profile_logger = logging.getLogger("axidev_osk.profile")
@@ -131,54 +132,67 @@ window, and each node built with ``report_geometry``."""
 
 @dataclass(frozen=True, slots=True)
 class InputKeyArguments:
-    key: str
-    text: str | None
-    modifiers: tuple[str, ...]
-    pressed: bool
+    key: str = samples("A")
+    text: str | None = samples("a")
+    modifiers: tuple[str, ...] = samples([])
+    pressed: bool = samples(False, True)
 
 
 @dataclass(frozen=True, slots=True)
 class KeyboardStatusArguments:
-    ready: bool
-    status: str
-    needs_permission_setup: bool
-    permission_setup_text: str
+    ready: bool = samples(False, True)
+    status: str = samples("")
+    needs_permission_setup: bool = samples(False, True)
+    permission_setup_text: str = samples("")
 
 
 @dataclass(frozen=True, slots=True)
 class ProcessExitedArguments:
-    tag: str
-    code: int
-    error: str | None
+    tag: str = samples("example")
+    code: int = samples(0)
+    error: str | None = samples("example error")
 
 
 @dataclass(frozen=True, slots=True)
 class WindowStateArguments:
-    window_id: str
-    visible: bool
-    minimized: bool
-    x: int
-    y: int
-    width: int
-    height: int
-    content_width: int
-    content_height: int
+    window_id: str = profile_window(key="window")
+    visible: bool = samples(False, True)
+    minimized: bool = samples(False, True)
+    x: int = samples(0)
+    y: int = samples(0)
+    width: int = samples(100)
+    height: int = samples(100)
+    content_width: int = samples(100)
+    content_height: int = samples(100)
 
 
 @dataclass(frozen=True, slots=True)
 class DisplayConfigurationArguments:
     """Every connected screen, as ``display_configuration_changed`` describes it."""
 
-    screens: tuple[DataMap, ...]
+    screens: tuple[DataMap, ...] = samples(
+        [],
+        [
+            {
+                "name": "screen",
+                "primary": True,
+                "x": 0,
+                "y": 0,
+                "width": 1920,
+                "height": 1080,
+                "available": {"x": 0, "y": 0, "width": 1920, "height": 1040},
+            }
+        ],
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class NodeGeometryArguments:
-    node: str
-    x: int
-    y: int
-    width: int
-    height: int
+    node: str = profile_node()
+    x: int = samples(0)
+    y: int = samples(0)
+    width: int = samples(100)
+    height: int = samples(100)
 
 
 @dataclass(frozen=True, slots=True)

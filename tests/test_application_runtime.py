@@ -12,9 +12,11 @@ from axidev_osk.nodes import BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.default_profile import build_default_config
 from axidev_osk.runtime.app_messages import (
+    APP_ACTION_DECODERS,
     APP_QUIT_REQUESTED,
     LINUX_OPEN_PERMISSION_SETUP,
     LINUX_PERMISSION_SETUP_OPENED,
+    QuitReason,
     app_activated,
     app_quit,
     pointer_motion_observed,
@@ -29,7 +31,8 @@ from axidev_osk.runtime.app_messages import (
     window_show,
 )
 from axidev_osk.runtime.application import ApplicationRuntime
-from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments
+from axidev_osk.runtime.dispatcher import ACTION_FAILED, ActionFailedArguments, Dispatcher
+from axidev_osk.runtime.engine import build_engine
 from axidev_osk.runtime.engine_messages import WINDOW_STATE_CHANGED, keyboard_down, keyboard_reset
 from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.runtime.registries import ServiceRegistry
@@ -102,6 +105,17 @@ def _record_raw_events(runtime: ApplicationRuntime, name: str) -> list[DataMap]:
 
     runtime.engine.dispatcher.add_raw_event_handler(name, record)
     return events
+
+
+class AppActionTableTests(unittest.TestCase):
+    def test_the_app_registers_exactly_the_shared_table_of_app_actions_with_its_decoders(self) -> None:
+        dispatcher = _runtime_without_platform_services().engine.dispatcher
+        engine_only = Dispatcher()
+        build_engine(engine_only, keyboard=KeyboardService(RecordingBackend()), processes=Mock())
+
+        self.assertEqual(dispatcher.action_names() - engine_only.action_names(), set(APP_ACTION_DECODERS))
+        for name, decoder in APP_ACTION_DECODERS.items():
+            self.assertIs(dispatcher.action_decoder(name), decoder, name)
 
 
 class ApplicationRuntimePointerDragTests(unittest.TestCase):
@@ -280,7 +294,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
             patch.object(runtime._window_manager, "show"),
             patch.object(qt_app(), "exit") as exit_app,
         ):
-            runtime._quit_controller.request_quit("signal")
+            runtime._quit_controller.request_quit(QuitReason.SIGNAL)
 
         self.assertEqual(requests, [{"reason": "signal"}])
         exit_app.assert_not_called()
@@ -293,7 +307,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
             patch.object(runtime._window_manager, "show") as show,
             patch.object(qt_app(), "exit") as exit_app,
         ):
-            runtime._quit_controller.request_quit("signal")
+            runtime._quit_controller.request_quit(QuitReason.SIGNAL)
 
         show.assert_called_once_with("quit-prompt")
         exit_app.assert_not_called()
@@ -390,7 +404,7 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
         _start(self, runtime)
 
         with patch.object(qt_app(), "exit") as exit_app:
-            runtime._quit_controller.request_quit("signal")
+            runtime._quit_controller.request_quit(QuitReason.SIGNAL)
 
         exit_app.assert_called_once_with(0)
 
@@ -924,7 +938,11 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         ):
             runtime.engine.dispatcher.dispatch(secure_input_panel_prepare())
 
-        self.assertEqual([failure.message for failure in failures], ["window failed"])
+        # The profile's failure notice then fails to show the same way, once.
+        self.assertEqual(
+            [(failure.action, failure.message) for failure in failures],
+            [("secure_input_panel.prepare", "window failed"), ("window.show", "window failed")],
+        )
         self.assertEqual(backend.shutdowns, 1)
         logger.exception.assert_called_once_with("Failed to close a partially prepared secure input panel")
 

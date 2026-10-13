@@ -18,9 +18,11 @@ from collections.abc import Callable
 from PySide6.QtCore import QObject, QSocketNotifier, QTimer
 from PySide6.QtWidgets import QApplication
 
+from ..runtime.app_messages import QuitReason
+
 
 QuitCallback = Callable[[], None]
-AskToQuit = Callable[[str], None]
+AskToQuit = Callable[[QuitReason], None]
 """Called with the reason, such as ``signal`` or ``window_closed``, when a quit needs confirmation."""
 
 _logger = logging.getLogger(__name__)
@@ -120,7 +122,7 @@ class ApplicationQuitController(QObject):
         self._signal_timer.start()
         self._install_stdin_eof_handler()
 
-    def request_quit(self, reason: str, *, confirm: bool = True) -> None:
+    def request_quit(self, reason: QuitReason, *, confirm: bool = True) -> None:
         """Ask to quit, or send the quit when no confirmation is needed.
 
         Args:
@@ -178,7 +180,7 @@ class ApplicationQuitController(QObject):
 
     def _handle_signal(self, signum: int, _frame: object) -> None:
         confirm = signum != signal.SIGTERM
-        QTimer.singleShot(0, lambda: self.request_quit("signal", confirm=confirm))
+        QTimer.singleShot(0, lambda: self.request_quit(QuitReason.SIGNAL, confirm=confirm))
 
     def _callback_name(self, callback: QuitCallback) -> str:
         self_obj = getattr(callback, "__self__", None)
@@ -201,4 +203,4 @@ class ApplicationQuitController(QObject):
         except OSError:
             return
         if data == b"":
-            self.request_quit("stdin_closed")
+            self.request_quit(QuitReason.STDIN_CLOSED)

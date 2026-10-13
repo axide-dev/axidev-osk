@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..messages import MessageResult
 from .app_messages import (
+    APP_ACTION_DECODERS,
     POINTER_MOTION_OBSERVED,
     WINDOW_CLICK,
     WINDOW_CLOSE,
@@ -29,11 +30,6 @@ from .app_messages import (
     WindowDeltaArguments,
     WindowPointArguments,
     WindowSizeArguments,
-    decode_window,
-    decode_window_click,
-    decode_window_delta,
-    decode_window_point,
-    decode_window_size,
     window_dragged,
 )
 from .engine_messages import DISPLAY_CONFIGURATION_CHANGED, DisplayConfigurationArguments
@@ -89,9 +85,6 @@ def register_window_actions(
         windows.resize_to(arguments.window_id, arguments.width, arguments.height)
         return []
 
-    dispatcher.register_action(WINDOW_SHOW, decode_window, show)
-    dispatcher.register_action(WINDOW_HIDE, decode_window, hide)
-    dispatcher.register_action(WINDOW_CLOSE, decode_window, close)
     def resize_by(arguments: WindowDeltaArguments) -> MessageResult:
         windows.resize_by(arguments.window_id, arguments.dx, arguments.dy)
         return []
@@ -100,11 +93,14 @@ def register_window_actions(
         windows.click(arguments.window_id, arguments.x, arguments.y, arguments.button)
         return []
 
-    dispatcher.register_action(WINDOW_MOVE_BY, decode_window_delta, move_by)
-    dispatcher.register_action(WINDOW_RESIZE_BY, decode_window_delta, resize_by)
-    dispatcher.register_action(WINDOW_MOVE_TO, decode_window_point, move_to)
-    dispatcher.register_action(WINDOW_RESIZE_TO, decode_window_size, resize_to)
-    dispatcher.register_action(WINDOW_CLICK, decode_window_click, click)
+    dispatcher.register_action(WINDOW_SHOW, APP_ACTION_DECODERS[WINDOW_SHOW], show)
+    dispatcher.register_action(WINDOW_HIDE, APP_ACTION_DECODERS[WINDOW_HIDE], hide)
+    dispatcher.register_action(WINDOW_CLOSE, APP_ACTION_DECODERS[WINDOW_CLOSE], close)
+    dispatcher.register_action(WINDOW_MOVE_BY, APP_ACTION_DECODERS[WINDOW_MOVE_BY], move_by)
+    dispatcher.register_action(WINDOW_RESIZE_BY, APP_ACTION_DECODERS[WINDOW_RESIZE_BY], resize_by)
+    dispatcher.register_action(WINDOW_MOVE_TO, APP_ACTION_DECODERS[WINDOW_MOVE_TO], move_to)
+    dispatcher.register_action(WINDOW_RESIZE_TO, APP_ACTION_DECODERS[WINDOW_RESIZE_TO], resize_to)
+    dispatcher.register_action(WINDOW_CLICK, APP_ACTION_DECODERS[WINDOW_CLICK], click)
 
 
 def register_display_recovery(dispatcher: "Dispatcher", windows: "WindowManager") -> None:

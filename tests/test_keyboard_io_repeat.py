@@ -7,6 +7,7 @@ from unittest.mock import Mock, call, patch
 
 from axidev_osk.runtime.diagnostics import KEYBOARD_DEBUG_ENV
 from axidev_osk.services.keyboard.io import AxidevIoKeyboardBackend, KeyObservation, KeyPressHandle
+from axidev_osk.services.keyboard.names import KeyNameError
 
 
 class FakeKeys:
@@ -83,12 +84,19 @@ class KeyboardIoRepeatTests(unittest.TestCase):
         )
         sender.type_text.assert_called_once_with("moo")
 
-    def test_canonical_key_uses_backend_spelling_and_falls_back_to_the_input(self) -> None:
-        backend, _sender = self._ready_backend()
+    def test_names_must_be_the_official_spelling_once_output_is_ready(self) -> None:
+        from axidev_io import keyboard
 
-        self.assertEqual(backend.canonical_key("shift_L"), "ShiftLeft")
-        self.assertEqual(backend.canonical_key("F13"), "f13")
-        self.assertEqual(AxidevIoKeyboardBackend().canonical_key("a"), "a")
+        backend, _sender = self._ready_backend()
+        backend._keyboard = SimpleNamespace(sender=_sender, keys=keyboard.keys)
+
+        backend.check_names("Escape", ("Ctrl", "Shift"))
+        with self.assertRaisesRegex(KeyNameError, "use 'Escape'"):
+            backend.check_names("esc", ())
+        with self.assertRaisesRegex(KeyNameError, "use 'Ctrl'"):
+            backend.check_names("A", ("control",))
+        # Before output is ready nothing is checked, since sending fails anyway.
+        AxidevIoKeyboardBackend().check_names("esc", ())
 
     def test_listener_events_become_key_observations(self) -> None:
         backend, fake_listener = self._initialized_backend()

@@ -52,12 +52,13 @@ A feature starts in a profile. One that most profiles need is promoted to the st
 - `runtime/profile_runtime.py`: state actions, `state.changed`, `callback.failed`, and binding tracking.
 - `runtime/engine_messages.py`: messages the engine handles itself: keyboard, processes, logging, and observations.
 - `runtime/timers.py`: timers profiles start and cancel.
-- `runtime/app_messages.py`: messages the application runtime handles or sends.
+- `runtime/app_messages.py`: messages the application runtime handles or sends, and `APP_ACTION_DECODERS`, the one table of its action decoders.
 - `runtime/application.py`: startup, the running profile, and shutdown. `runtime/event_handlers.py`: the window actions and the Wayland title-bar drag.
 - `nodes/`: node kinds and their events. `attachments/`: attachment kinds.
 - `windows/`: building windows, their chrome, and dwell. `components/`: the widgets nodes build.
 - `services/`, `platform/`, and `hot_corner/`: platform integration behind the queue. `application/`: quit sequencing and Linux permission setup.
 - `config/`: decoding of root configs and state declarations.
+- `config_check/` and `cli/check.py`: `axidev-osk check`.
 - `python_defaults/`: the `axidev_osk` helpers, the standard library, and the bundled config.
 
 ## How To Add Things
@@ -66,7 +67,7 @@ A node kind. Register a `NodeKind` in `nodes/kinds.py` with its build and apply 
 
 An attachment. Add its options record, with its defaults, and its decoder in `attachments/__init__.py`, and register it in `register_builtin_attachments` with its `attach` step. Its options are values a profile may bind, so it owns no state and needs no setter action. Set its `limit` when at most one fits a window or a profile. Add the `axidev_osk` builder and a test in `tests/test_attachments.py`.
 
-An action or event. Write an arguments record, a decoder, and a constructor where Python code sends it, and register the name where the owning subsystem registers its messages. An event that reports an observation writes its observed variables with `set_observed`. Add the `axidev_osk` action builder if profiles should send it.
+An action or event. Write an arguments record, a decoder, and a constructor where Python code sends it, and register the name where the owning subsystem registers its messages. An action the application handles also goes in `APP_ACTION_DECODERS`. An event's record marks the values each field takes (`runtime/event_fields.py`), so `axidev-osk check` can call handlers with them. An event that reports an observation writes its observed variables with `set_observed`. Add the `axidev_osk` action builder if profiles should send it.
 
 A standard-library helper. Write it in `python_defaults/axidev_osk/std/` using only `axidev_osk` builders and actions. Take an `opts` map and merge it last with `axidev_osk.merge`, so any field can be overridden. Declare library state in the module's `STATE`; react to events through `std.with_handlers`. Test it in `tests/test_std_library.py`.
 
@@ -94,6 +95,8 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=src python -m unittest discover -s tests
 python -m flake8 --select=F,E9,W6 src
 python -m pyright
 ```
+
+After changing a bundled profile or the standard library, also run `PYTHONPATH=src python -m axidev_osk check`.
 
 ## Contribution Workflow
 

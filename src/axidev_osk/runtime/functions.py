@@ -27,8 +27,12 @@ def call_callback(
     ref: FunctionRef,
     state: StateTree,
     event: DataMap,
+    recorder: ReadRecorder | None = None,
 ) -> list[RuntimeAction]:
     """Call ``fn(ctx, event)`` and decode the returned actions.
+
+    ``recorder``, when given, collects the state paths the callback read,
+    even when it fails.
 
     A callback may return ``None`` or a list of action maps shaped like
     ``{"action": "window.show", "arguments": {...}}``. ``event`` is handed over
@@ -37,7 +41,7 @@ def call_callback(
     """
 
     function = registry.get(ref)
-    result = function(CallbackContext(state=state.view()), event)
+    result = function(CallbackContext(state=state.view(recorder)), event)
     if result is None:
         return []
     if not isinstance(result, list):
