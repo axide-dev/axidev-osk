@@ -44,9 +44,11 @@ class Button(QPushButton):
     is over it, so ``entered`` and ``left`` always alternate. Profiles render
     any lasting look, such as a latched key, through style properties.
 
-    Its label is never cut: the font its style gives it is the largest size
+    Its label shrinks to fit: the font its style gives it is the largest size
     used, and a label that does not fit its content area, or its shape, is
-    drawn smaller, at the largest size that fits. A single label is drawn by
+    drawn smaller, at the largest size that fits, but never smaller than its
+    smallest size (``set_label_min_px``, 1 pixel unless set), where it may be
+    cut instead. A single label is drawn by
     the style itself, scaled down when it must shrink, so every stylesheet
     text rule still applies to it. A label given as several parts is spread
     over the shape in rows, each row holding as many parts as the widest
@@ -74,6 +76,7 @@ class Button(QPushButton):
         self._border_colors: dict[int, QColor] = {}
         self._hovered = False
         self._pressed_with = "left"
+        self._label_min_px = 1
 
     @property
     def pressed_with(self) -> str:
@@ -93,6 +96,12 @@ class Button(QPushButton):
         self._parts = parts
         if parts is not None:
             self.setText(" ".join(parts).replace("&", "&&"))
+        self.update()
+
+    def set_label_min_px(self, pixels: int) -> None:
+        """Never draw the label smaller than ``pixels``, even when it must be cut."""
+
+        self._label_min_px = pixels
         self.update()
 
     def set_shape(self, outline: QPainterPath) -> None:
@@ -237,9 +246,10 @@ class Button(QPushButton):
         return font, placed
 
     def _largest_fitting(self, fits: Callable[[int], bool]) -> int:
-        """The largest pixel size up to the style's that ``fits``, by bisection; 1 when none does."""
+        """The largest pixel size up to the style's that ``fits``, by bisection; the smallest size when none does."""
 
-        low, high = 1, max(1, QFontInfo(self.font()).pixelSize())
+        high = max(1, QFontInfo(self.font()).pixelSize())
+        low = min(self._label_min_px, high)
         while low < high:
             middle = (low + high + 1) // 2
             if fits(middle):

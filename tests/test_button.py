@@ -35,6 +35,20 @@ class ButtonTests(unittest.TestCase):
         clipped = button.fitted_font("Back", area)
         self.assertLessEqual(QFontMetrics(clipped).horizontalAdvance("Back"), 20)
 
+    def test_a_label_never_shrinks_below_its_smallest_size(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 18px; padding: 0px; border: none; }")
+        button.resize(60, 40)
+        button.show()
+        text = "Backspace Backspace Backspace"
+
+        self.assertLess(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+        button.set_label_min_px(12)
+
+        self.assertEqual(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+
     def test_state_text_colors_apply_even_to_a_label_that_shrinks(self) -> None:
         qt_app()
         button = Button("Backspace")

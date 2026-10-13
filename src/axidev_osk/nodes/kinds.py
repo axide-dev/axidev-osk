@@ -87,6 +87,8 @@ class ButtonOptions:
     size: SizeOptions = SizeOptions()
     locator_color: str | None = None
     """The color a ``pointer_locator`` glows over the button; without one it glows the gap color."""
+    label_min_px: int = 1
+    """The smallest pixel size the label shrinks to when it does not fit; below it the label is cut."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +258,7 @@ def _decode_button(reader: ConfigReader) -> ButtonOptions:
         visible=_visible(reader),
         size=_decode_size(reader),
         locator_color=reader.optional_color("locator_color"),
+        label_min_px=reader.integer("label_min_px", 1, minimum=1),
     )
 
 
@@ -391,6 +394,8 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
             widget.set_parts(None)
             # Qt reads a single "&" as a shortcut marker; doubling it shows the label as written.
             widget.setText(options.label.replace("&", "&&"))
+    if old is None or options.label_min_px != old.label_min_px:
+        widget.set_label_min_px(options.label_min_px)
     if old is None or options.enabled != old.enabled:
         widget.setEnabled(options.enabled)
     if old is None or options.visible != old.visible:
