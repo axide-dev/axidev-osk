@@ -46,22 +46,26 @@ class ButtonTests(unittest.TestCase):
         button.resize(60, 30)
         button.show()
 
-        def text_pixels() -> list[QColor]:
+        def text_color() -> tuple[float, float]:
+            """The text's average red and blue; an average, because subpixel smoothing tints single edge pixels."""
+
             image = button.grab().toImage()
-            return [
+            text: list[QColor] = [
                 image.pixelColor(x, y)
                 for x in range(image.width())
                 for y in range(image.height())
                 if image.pixelColor(x, y).lightness() > 60
             ]
+            self.assertTrue(text)
+            return sum(color.red() for color in text) / len(text), sum(color.blue() for color in text) / len(text)
 
-        idle = text_pixels()
+        idle_red, _idle_blue = text_color()
         button.setDown(True)
-        pressed = text_pixels()
+        pressed_red, pressed_blue = text_color()
 
-        self.assertTrue(idle and all(color.blue() >= color.red() for color in idle))
-        self.assertTrue(pressed)
-        self.assertTrue(all(color.red() < 80 and color.blue() > 120 for color in pressed))
+        self.assertGreater(idle_red, 100)
+        self.assertLess(pressed_red, 40)
+        self.assertGreater(pressed_blue, 120)
 
     def test_a_shaped_button_draws_its_border_along_its_shape(self) -> None:
         qt_app()

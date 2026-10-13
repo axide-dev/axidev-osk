@@ -68,11 +68,6 @@ class NodeKindSpec(Protocol):
         """Read the placement fields of a child that may follow state, such as a canvas child's ``shape``."""
         ...
 
-    @property
-    def widget_properties(self) -> frozenset[str]:
-        """Widget properties the kind sets itself, which a profile style cannot set."""
-        ...
-
     def decode_structure(self, reader: ConfigReader, /) -> object:
         """Read the kind's fixed fields, such as a box's ``direction``."""
         ...
@@ -129,6 +124,7 @@ class NodeConfig:
     this child, such as a grid cell; it is ``None`` for a window's content.
     ``passes_input_block`` lets the node take clicks while its window blocks input.
     ``report_size`` makes the engine write the node's size to ``nodes.<id>.size``.
+    ``reports_pointer`` makes it post pointer events (``nodes/pointer.py``).
     ``path`` is the node's config path, such as ``config.profiles.default.windows[0].content``.
     """
 
@@ -141,6 +137,7 @@ class NodeConfig:
     placement: object = None
     passes_input_block: bool = False
     report_size: bool = False
+    reports_pointer: bool = False
     path: str = ""
 
     def walk(self) -> "list[NodeConfig]":
@@ -414,7 +411,6 @@ class ConfigDecoder:
                 self._decode_node(child, kind, resolver)
                 for child in reader.children("children", [])
             )
-        reserved = ENGINE_WIDGET_PROPERTIES | kind.widget_properties
         structure = kind.decode_structure(reader)
         # The parent reads its placement fields first, so it can reject a field before a binding in it runs.
         child_placement = parent.decode_child_placement(reader) if parent is not None else None
@@ -425,7 +421,7 @@ class ConfigDecoder:
             options = kind.decode_options(values)
             kind.check_options(values, options, child_ids)
             placed = live_placement(values) if live_placement is not None else None
-            return NodeValues(options=options, style=_decode_style(values, reserved), placement=placed)
+            return NodeValues(options=options, style=_decode_style(values), placement=placed)
 
         return NodeConfig(
             kind=kind_name,
@@ -437,6 +433,7 @@ class ConfigDecoder:
             placement=child_placement,
             passes_input_block=reader.boolean("passes_input_block", False),
             report_size=reader.boolean("report_size", False),
+            reports_pointer=reader.boolean("reports_pointer", False),
             path=reader.path,
         )
 
@@ -500,14 +497,14 @@ def _decode_font(reader: ConfigReader) -> FontConfig:
     )
 
 
-def _decode_style(reader: ConfigReader, reserved: frozenset[str] = ENGINE_WIDGET_PROPERTIES) -> StyleConfig:
+def _decode_style(reader: ConfigReader) -> StyleConfig:
     style_reader = reader.optional_child("style")
     if style_reader is None:
         return StyleConfig()
 
     def decode(style: ConfigReader) -> StyleConfig:
         properties = style.data_map("properties", {})
-        taken = sorted(name for name in properties if name in reserved)
+        taken = sorted(name for name in properties if name in ENGINE_WIDGET_PROPERTIES)
         if taken:
             raise ConfigError(f"{style.field_path('properties')} cannot set engine properties: {', '.join(taken)}")
         return StyleConfig(

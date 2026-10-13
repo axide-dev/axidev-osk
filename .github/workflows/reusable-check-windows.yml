@@ -52,6 +52,8 @@ jobs:
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
+          # The offscreen platform finds no fonts on Windows by itself, so label sizes read as -1 without this.
+          QT_QPA_FONTDIR: C:\Windows\Fonts
         run: python -m unittest discover -s tests
 
       - name: Build axidev-osk distributions
