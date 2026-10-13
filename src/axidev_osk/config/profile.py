@@ -146,6 +146,7 @@ class WindowValues:
     closes it, and closing the last visible window asks to quit. A profile
     turns it off for a window whose close it handles itself.
     ``input_blocked`` ignores clicks except on nodes with ``passes_input_block``.
+    ``close_label`` is the text of the engine-drawn close button.
     """
 
     title: str
@@ -154,6 +155,7 @@ class WindowValues:
     default_close: bool
     input_blocked: bool
     style: StyleConfig
+    close_label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +455,7 @@ def _decode_window_values(reader: ConfigReader) -> WindowValues:
         default_close=reader.boolean("default_close", True),
         input_blocked=reader.boolean("input_blocked", False),
         style=_decode_style(reader),
+        close_label=reader.string("close_label", "x"),
     )
 
 

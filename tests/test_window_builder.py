@@ -142,7 +142,7 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
         engine = make_test_engine(RecordingBackend())
         overlay = Mock()
         values = WindowValues(
-            title="Pad", opacity=1.0, minimum_size=(0, 0), default_close=True, input_blocked=False, style=StyleConfig()
+            title="Pad", opacity=1.0, minimum_size=(0, 0), default_close=True, input_blocked=False, style=StyleConfig(), close_label="x"
         )
 
         with (
@@ -555,6 +555,19 @@ class RuntimeWindowLayoutTests(unittest.TestCase):
 
         self.assertIsNone(window._input_blocker)
         self.assertAlmostEqual(window.windowOpacity(), 0.85, delta=0.005)
+
+
+    def test_the_close_button_shows_the_close_label_and_follows_it(self) -> None:
+        harness = WindowHarness(state={"close": axidev_osk.var("string", "Close")}, close_label=lambda s: s.close)
+        window = harness.build()
+        self.addCleanup(window.deleteLater)
+        close_button = window.findChild(QPushButton, "layerShellCloseButton")
+        assert close_button is not None
+        self.assertEqual(close_button.text(), "Close")
+
+        harness.engine.dispatcher.dispatch(state_set("close", "Fermer"))
+
+        self.assertEqual(close_button.text(), "Fermer")
 
 
 class RuntimeWindowDwellTests(unittest.TestCase):
