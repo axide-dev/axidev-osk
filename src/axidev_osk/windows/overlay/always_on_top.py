@@ -479,18 +479,24 @@ class AlwaysOnTopWindowController:
         """Put the window's top-left corner back at ``(x, y)``, as ``position`` reported it.
 
         A layer surface is anchored to the screen's left and bottom edges like
-        every drag leaves it, so a later drag continues from there. KWin
-        places the input panel itself, so it ignores the request.
+        every drag leaves it, so a later drag continues from there, and stays
+        inside the screen as a drag does: a compositor may refuse margins that
+        reach past it. KWin places the input panel itself, so it ignores the
+        request.
         """
 
         if self._backend == OverlayBackend.WAYLAND_INPUT_PANEL:
             return
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
-            self.move_to_anchored(QPoint(x, y), anchors=ANCHOR_LEFT | ANCHOR_BOTTOM)
+            geometry = self._current_screen_geometry(for_layer_shell=True)
+            corner = QPoint(
+                max(geometry.x(), min(x, geometry.x() + max(0, geometry.width() - self._window.width()))),
+                max(geometry.y(), min(y, geometry.y() + max(0, geometry.height() - self._window.height()))),
+            )
+            self.move_to_anchored(corner, anchors=ANCHOR_LEFT | ANCHOR_BOTTOM, screen_geometry=geometry)
             return
-        self._window.move(x, y)
+        self._window.move(*self._kept_on_screen(x, y))
         self._floating_position_initialized = True
-        self.keep_on_screen()
 
     def move_by(self, dx: int, dy: int) -> None:
         """Move the overlay, kept inside its screen when ``keep_on_screen`` asks.
@@ -502,9 +508,9 @@ class AlwaysOnTopWindowController:
         if self._backend == OverlayBackend.WAYLAND_LAYER_SHELL:
             self._move_layer_shell_by(dx, dy)
             return
-        self._window.move(self._window.x() + dx, self._window.y() + dy)
+        # One move to the kept position, so a drag against the edge never moves the window out and back.
+        self._window.move(*self._kept_on_screen(self._window.x() + dx, self._window.y() + dy))
         self._floating_position_initialized = True
-        self.keep_on_screen()
 
     def keep_on_screen(self) -> None:
         """Move a floating window back inside its screen's available area, unless ``keep_on_screen`` is off.
@@ -513,17 +519,21 @@ class AlwaysOnTopWindowController:
         input panel itself, so neither changes here.
         """
 
-        if not self._config.keep_on_screen:
-            return
         if self._backend in (OverlayBackend.WAYLAND_LAYER_SHELL, OverlayBackend.WAYLAND_INPUT_PANEL):
             return
+        kept = self._kept_on_screen(self._window.x(), self._window.y())
+        if kept != (self._window.x(), self._window.y()):
+            self._window.move(*kept)
+
+    def _kept_on_screen(self, x: int, y: int) -> tuple[int, int]:
+        """Where a floating window's corner at ``(x, y)`` stays: inside its screen unless ``keep_on_screen`` is off."""
+
+        if not self._config.keep_on_screen:
+            return x, y
         geometry = self._current_screen_geometry()
         max_x = geometry.x() + max(0, geometry.width() - self._window.width())
         max_y = geometry.y() + max(0, geometry.height() - self._window.height())
-        next_x = max(geometry.x(), min(self._window.x(), max_x))
-        next_y = max(geometry.y(), min(self._window.y(), max_y))
-        if (next_x, next_y) != (self._window.x(), self._window.y()):
-            self._window.move(next_x, next_y)
+        return max(geometry.x(), min(x, max_x)), max(geometry.y(), min(y, max_y))
 
     def resize_by(self, dx: int, dy: int) -> None:
         """Resize the overlay, never below its minimum size, and within its screen when ``keep_on_screen`` asks.

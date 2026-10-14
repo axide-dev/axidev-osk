@@ -210,11 +210,18 @@ class AttachmentRuntimeTests(unittest.TestCase):
         self.assertEqual([config.delay_ms for config in harness.windows["pad"].dwell], [250])
 
     def test_starting_while_attachments_still_run_raises(self) -> None:
-        harness = AttachmentHarness([axidev_osk.dwell(id="d", window="pad")])
-        harness.start()
+        # The second profile's only attachment is unavailable, so it binds nothing, yet it still runs.
+        for attachments, service in (([axidev_osk.dwell(id="d", window="pad")], True), ([axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS)], False)):
+            with self.subTest(service=service):
+                harness = AttachmentHarness(attachments, hot_corner_service=service)
+                if service:
+                    harness.start()
+                else:
+                    with self.assertLogs("axidev_osk.attachments.runtime", level="WARNING"):
+                        harness.start()
 
-        with self.assertRaisesRegex(RuntimeError, "still running"):
-            harness.runtime.start(harness.profile)
+                with self.assertRaisesRegex(RuntimeError, "still running"):
+                    harness.runtime.start(harness.profile)
 
     def test_stopping_turns_hot_corners_off_until_a_profile_with_them_starts(self) -> None:
         harness = AttachmentHarness([axidev_osk.hot_corners(id="hc", **HOT_CORNER_COLORS)])

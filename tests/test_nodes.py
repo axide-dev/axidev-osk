@@ -184,6 +184,34 @@ class NodeTests(unittest.TestCase):
         self.assertEqual((reports[2][2], reports[2][3]), (in_grid[1].x(), in_grid[1].y()))
         self.assertEqual(buttons, ["right", None, "right"])
 
+    def test_a_press_whose_release_was_lost_ends_at_the_next_press(self) -> None:
+        reports: list[tuple[str, object]] = []
+
+        def on(name: str) -> object:
+            return lambda ctx, event: reports.append((name, event.get("button"))) or []
+
+        window = {"id": "pad", "title": "Pad", "content": {"kind": "box", "id": "row", "reports_pointer": True, "children": [_button("a")]}}
+        handlers = {name: on(name) for name in ("node.pointer_pressed", "node.pointer_released")}
+        profile = start_test_profile(self.engine, {"active_profile": "p", "profiles": {"p": {"windows": [window], "on": handlers}}})
+        shown = self._window(profile)
+        QTest.qWait(10)
+        a = self._find(shown, "a")
+        point = a.rect().center()
+
+        # The window hides mid-press, so the release never reaches the node.
+        QTest.mousePress(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        shown.hide()
+        shown.show()
+        QTest.qWait(10)
+        QTest.mousePress(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        QTest.mouseRelease(a, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        QTest.qWait(10)
+
+        self.assertEqual(
+            reports,
+            [("node.pointer_pressed", "left"), ("node.pointer_pressed", "left"), ("node.pointer_released", "left")],
+        )
+
     def test_nodes_that_opt_in_report_hovering_leaving_and_wheel_turns(self) -> None:
         reports: list[DataMap] = []
 
@@ -242,6 +270,30 @@ class NodeTests(unittest.TestCase):
                 {"name": "node.pointer_left", "node": "row"},
             ],
         )
+
+    def test_a_reporting_node_also_reports_over_a_child_widget_added_after_it_was_built(self) -> None:
+        turns: list[object] = []
+        window = {"id": "pad", "title": "Pad", "content": {"kind": "box", "id": "row", "reports_wheel": True, "children": [_button("a")]}}
+        profile = start_test_profile(
+            self.engine,
+            {"active_profile": "p", "profiles": {"p": {"windows": [window], "on": {"node.wheel": lambda ctx, event: turns.append(event["node"]) or []}}}},
+        )
+        shown = self._window(profile)
+        row = self._find(shown, "row")
+        later = QWidget()
+        row.layout().addWidget(later)  # type: ignore[union-attr]
+        later.show()
+        QTest.qWait(10)
+
+        point = QPointF(later.rect().center())
+        turn = QWheelEvent(
+            point, QPointF(later.mapToGlobal(point)), QPoint(), QPoint(0, 120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        QApplication.sendEvent(later, turn)
+        QTest.qWait(10)
+
+        self.assertEqual(turns, ["row"])
 
     def test_a_node_reporting_its_geometry_records_its_place_in_state(self) -> None:
         profile = self._profile(
