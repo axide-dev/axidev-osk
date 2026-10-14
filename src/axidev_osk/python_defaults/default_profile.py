@@ -165,7 +165,6 @@ def _profile_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_o
         on_select=lambda ctx, profile: [axidev_osk.profile.switch(profile)],
         label="Profile",
         group=group,
-        panel_opts={"direction": "horizontal"},
     )
 
 
@@ -177,7 +176,6 @@ def _layout_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_os
         on_select=lambda ctx, name: [axidev_osk.state.set("settings.layout", name)],
         label="Layout",
         group=group,
-        panel_opts={"direction": "horizontal"},
     )
 
 

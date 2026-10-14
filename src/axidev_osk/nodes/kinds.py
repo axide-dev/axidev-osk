@@ -1,4 +1,4 @@
-"""Built-in node kinds: button, label, spacer, grid, box, stack, and canvas.
+"""Built-in node kinds: button, label, spacer, grid, box, scroll, stack, and canvas.
 
 Every value a kind reads from its options may be a binding. Fixed fields (a
 box's direction, a grid child's cell, a box child's stretch) are read
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..components.button.widget import Button
 from ..components.canvas import Canvas
+from ..components.scroll.widget import SCROLLBAR_CHOICES, ScrollArea
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
 from ..messages import DataMap
@@ -129,6 +130,19 @@ class GridOptions(LayoutOptions):
 
 
 @dataclass(frozen=True, slots=True)
+class ScrollOptions(LayoutOptions):
+    """Values of a scroll: its layout values, its size limits, and how it scrolls.
+
+    ``wheel_scrolls`` lets the mouse wheel scroll it; ``scrollbar`` shows the
+    scrollbar ``as_needed``, ``always``, or ``never``.
+    """
+
+    size: SizeOptions = SizeOptions()
+    wheel_scrolls: bool = True
+    scrollbar: str = "as_needed"
+
+
+@dataclass(frozen=True, slots=True)
 class StackOptions:
     current: str | None = None
     visible: bool = True
@@ -204,6 +218,17 @@ def register_builtin_nodes(registry: NodeKindRegistry) -> None:
             build=_build_box,
             apply=_apply_layout,
             decode_options=_decode_layout,
+            has_children=True,
+            decode_structure=_decode_box_structure,
+            decode_child_placement=_decode_box_placement,
+        )
+    )
+    registry.register(
+        NodeKind(
+            name="scroll",
+            build=_build_scroll,
+            apply=_apply_scroll,
+            decode_options=_decode_scroll,
             has_children=True,
             decode_structure=_decode_box_structure,
             decode_child_placement=_decode_box_placement,
@@ -294,6 +319,18 @@ def _decode_grid(reader: ConfigReader) -> GridOptions:
         visible=layout.visible,
         row_stretch=reader.integer_list("row_stretch", (), shape=shape, any_length=True),
         column_stretch=reader.integer_list("column_stretch", (), shape=shape, any_length=True),
+    )
+
+
+def _decode_scroll(reader: ConfigReader) -> ScrollOptions:
+    layout = _decode_layout(reader)
+    return ScrollOptions(
+        spacing=layout.spacing,
+        margins=layout.margins,
+        visible=layout.visible,
+        size=_decode_size(reader),
+        wheel_scrolls=reader.boolean("wheel_scrolls", True),
+        scrollbar=reader.choice("scrollbar", SCROLLBAR_CHOICES, "as_needed"),
     )
 
 
@@ -490,6 +527,36 @@ def _build_box(node: NodeConfig, builder: NodeBuilder) -> QWidget:
         assert isinstance(placement, BoxPlacement)
         layout.addWidget(builder.build(child), placement.stretch)
     return container
+
+
+def _build_scroll(node: NodeConfig, builder: NodeBuilder) -> QWidget:
+    """A box whose children scroll along its direction once they outgrow its maximum size."""
+
+    structure = node.structure
+    assert isinstance(structure, BoxStructure)
+    return ScrollArea(_build_box(node, builder), structure.direction)
+
+
+def _apply_scroll(widget: QWidget, options: object, previous: object | None) -> None:
+    assert isinstance(widget, ScrollArea) and isinstance(options, ScrollOptions)
+    old = previous if isinstance(previous, ScrollOptions) else None
+    content = widget.widget()
+    assert content is not None
+    # Spacing and margins belong to the box inside; visibility to the area itself.
+    _apply_layout(
+        content,
+        LayoutOptions(spacing=options.spacing, margins=options.margins),
+        LayoutOptions(spacing=old.spacing, margins=old.margins) if old is not None else None,
+    )
+    if old is None or options.size != old.size:
+        options.size.apply(widget)
+        widget.updateGeometry()
+    if old is None or options.wheel_scrolls != old.wheel_scrolls:
+        widget.set_wheel_scrolls(options.wheel_scrolls)
+    if old is None or options.scrollbar != old.scrollbar:
+        widget.set_scrollbar(options.scrollbar)
+    if old is None or options.visible != old.visible:
+        _apply_visible(widget, options.visible)
 
 
 def _apply_layout(widget: QWidget, options: object, previous: object | None) -> None:

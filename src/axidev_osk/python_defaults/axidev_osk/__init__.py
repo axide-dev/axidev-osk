@@ -141,6 +141,10 @@ def box(**fields: Any) -> Map:
     return _node("box", fields)
 
 
+def scroll(**fields: Any) -> Map:
+    return _node("scroll", fields)
+
+
 def stack(**fields: Any) -> Map:
     return _node("stack", fields)
 
