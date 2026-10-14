@@ -51,7 +51,10 @@ class TimerTests(unittest.TestCase):
         elapsed: list[Any] = []
         self.engine.dispatcher.add_raw_event_handler(TIMER_ELAPSED, lambda event: elapsed.append(event) or [])
         self._send(axidev_osk.timer.start("hide", 0))
-        QTest.qWait(20)
+        for _attempt in range(200):
+            if self.fired:
+                break
+            QTest.qWait(5)
         self.assertEqual((self.fired, len(elapsed)), (["hide"], 1))
 
         # A fire Qt queued before the cancel reaches the queue after it.
