@@ -307,7 +307,7 @@ class WheelTests(unittest.TestCase):
         harness.tap("w:slice:7")
         harness.tap("w:slice:6")
         self.assertTrue(harness.widget("w:slice:7").property("latched"))
-        harness.tap("w:center")
+        harness.tap("w:center:top")
         harness.tap("w:slice:9")
         harness.tap("w:slice:7")
         harness.tap("w:slice:6")
@@ -318,17 +318,64 @@ class WheelTests(unittest.TestCase):
             [("down", "ShiftLeft", (), True), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
         )
 
-    def test_the_center_goes_back_to_the_top(self) -> None:
+    def test_top_goes_back_to_the_top_from_any_menu(self) -> None:
+        harness = self._harness()
+
+        self.assertFalse(harness.widget("w:center:top").isEnabled())
+        harness.tap("w:slice:3")
+        harness.tap("w:slice:8")
+        harness.tap("w:center:top")
+
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+        self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
+        self.assertEqual(harness.backend.sent, [])
+
+    def test_back_goes_up_one_menu(self) -> None:
         harness = self._harness()
 
         harness.tap("w:slice:3")
         harness.tap("w:slice:8")
-        self.assertEqual(harness.widget("w:center").text(), "×")  # type: ignore[attr-defined]
-        harness.tap("w:center")
+        harness.tap("w:center:back")
+        self.assertEqual(harness.state("std", "wheels", "w"), [3])
+        harness.tap("w:center:back")
 
-        self.assertEqual(harness.widget("w:center").text(), "")  # type: ignore[attr-defined]
-        self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
-        self.assertEqual(harness.backend.sent, [])
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+        self.assertFalse(harness.widget("w:center:back").isEnabled())
+
+    def test_stay_keeps_the_menu_open_after_each_key_until_turned_off(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:center:stay")
+        self.assertTrue(harness.widget("w:center:stay").property("latched"))
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:8")
+        self.assertEqual(harness.state("std", "wheels", "w"), [9])
+        harness.tap("w:center:stay")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "Q", (), True), ("up", "Q"), ("down", "W", (), True), ("up", "W"), ("down", "Q", (), True), ("up", "Q")],
+        )
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+
+    def test_release_lets_go_of_every_latched_modifier(self) -> None:
+        harness = self._harness()
+
+        self.assertFalse(harness.widget("w:center:release").isEnabled())
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:8")
+        harness.tap("w:center:release")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), True), ("down", "CtrlLeft", (), True), ("up", "CtrlLeft"), ("up", "ShiftLeft")],
+        )
+        self.assertFalse(harness.widget("w:slice:7").property("latched"))
+        self.assertFalse(harness.widget("w:center:release").isEnabled())
 
     def test_a_wheel_menu_with_another_slice_count_is_rejected_when_built(self) -> None:
         short = wheel.menu({0: ["AD01", "AD02"]})

@@ -469,7 +469,7 @@ def _wheel() -> axidev_osk.Map:
         layouts.LAYOUTS,
         _setting("layout"),
         {"min_width": 260, "min_height": 260},
-        inner=0.22,
+        inner=0.34,
         spacing=GRID_GAP_PX,
     )
     return axidev_osk.merge(canvas, {"children": std.locator.colored(canvas["children"])})

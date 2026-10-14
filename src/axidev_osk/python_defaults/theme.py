@@ -249,6 +249,10 @@ QPushButton[wheelItem="menu"] {
 QPushButton[wheelItem="empty"] {
     background: transparent;
 }
+QPushButton[wheelItem="center"] {
+    font-size: 11px;
+    font-weight: 600;
+}
 
 QWidget#settingsStrip QPushButton {
     font-size: 11px;

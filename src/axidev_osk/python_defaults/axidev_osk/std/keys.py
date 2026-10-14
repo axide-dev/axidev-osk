@@ -313,6 +313,25 @@ def on_reset(ctx: Any, event: Any) -> list[axidev_osk.Map]:
     ]
 
 
+def any_modifier_latched(state: Any) -> bool:
+    """Whether a modifier is latched down or waiting for the next key press."""
+
+    latched = axidev_osk.read(state, "std.latched")
+    return any(True for _latch in latched or ()) or bool(_one_shot(state))
+
+
+def release_modifiers(state: Any) -> list[axidev_osk.Map]:
+    """Let go of every latched modifier and drop every pending one-shot modifier."""
+
+    latched = axidev_osk.read(state, "std.latched")
+    held = sorted(latched[latch] for latch in latched) if latched is not None else []
+    return [
+        *(axidev_osk.keyboard.up(output) for output in held),
+        axidev_osk.state.set("std.latched", None),
+        axidev_osk.state.set("std.one_shot", None),
+    ]
+
+
 def _default_latch(label: str, output: str, mode: str, repeat: bool) -> str:
     """Name the latch a key shares with its other-side twin only when everything else matches."""
 
