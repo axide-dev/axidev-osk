@@ -537,9 +537,12 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
 
 
 def _switch_root(
-    on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, panel: bool = False, keep_position: bool = True
+    on_go: Any, *, extra: dict[str, axidev_osk.Map] | None = None, panels: tuple[str, ...] = (), keep_position: bool = True
 ) -> axidev_osk.Map:
-    """Two profiles, ``a`` and ``b``, each showing a ``pad`` window and recording ``app.activated``."""
+    """Two profiles, ``a`` and ``b``, each showing a ``pad`` window and recording ``app.activated``.
+
+    The profiles named in ``panels`` put their lock-screen panel on ``pad``.
+    """
 
     def profile(name: str, children: list[axidev_osk.Map]) -> axidev_osk.Map:
         return axidev_osk.profile(
@@ -553,7 +556,7 @@ def _switch_root(
                     content=axidev_osk.box(id=f"{name}:root", children=children),
                 )
             ],
-            attachments=[axidev_osk.secure_input_panel(id="panel", window="pad")] if panel and name == "a" else [],
+            attachments=[axidev_osk.secure_input_panel(id="panel", window="pad")] if name in panels else [],
             on={"app.activated": lambda ctx, event: [axidev_osk.state.set("activated", [*ctx.state.activated, name])]},
         )
 
@@ -669,20 +672,19 @@ class ProfileSwitchTests(unittest.TestCase):
         runtime.engine.dispatcher.dispatch(app_activated())
         self.assertEqual(self._state(runtime, "activated"), ["a"])
 
-    def test_a_failed_rollback_reports_its_own_error(self) -> None:
+    def test_a_failed_rollback_quits_instead_of_running_without_a_profile(self) -> None:
         runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")]))
-        failures = _record_failures(runtime)
+        shutdown = Mock()
+        runtime._quit_controller.shutdown = shutdown
 
         with (
             patch("axidev_osk.runtime.application.build_profile_window", side_effect=RuntimeError("no window")),
-            self.assertLogs(level="ERROR"),
+            self.assertLogs(level="ERROR") as logs,
         ):
             self._release(runtime, "a:go")
 
-        self.assertEqual(
-            [(failure.action, failure.exception_type) for failure in failures],
-            [("profile.start", "ProfileRollbackFailed")],
-        )
+        shutdown.assert_called_once_with(1)
+        self.assertIn("Profile a could not start again after b failed (no window); quitting", "\n".join(logs.output))
 
     def test_a_switch_releases_held_keys(self) -> None:
         runtime = self._runtime(_switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")]))
@@ -755,7 +757,7 @@ class ProfileSwitchTests(unittest.TestCase):
 
     def test_a_prepared_lock_screen_panel_refuses_a_profile_without_one(self) -> None:
         runtime = self._runtime(
-            _switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")], panel=True), show_startup_windows=False
+            _switch_root(lambda ctx, event: [axidev_osk.profile.switch("b")], panels=("a",)), show_startup_windows=False
         )
         failures = _record_failures(runtime)
         runtime.engine.dispatcher.dispatch(secure_input_panel_prepare())
@@ -810,6 +812,31 @@ class SecureInputPanelLifecycleTests(unittest.TestCase):
         self.assertEqual(backend.initialized, 2)
         self.assertEqual(backend.shutdowns, 0)
         reset_state.assert_called_once_with()
+
+    def test_a_prepare_arriving_mid_switch_runs_once_the_new_profile_is_up(self) -> None:
+        runtime, backend, _keyboard = self._runtime(_switch_root(lambda ctx, event: [], panels=("a", "b")))
+        failures = _record_failures(runtime)
+
+        sent: list[bool] = []
+
+        def prepare_once_hidden(event: DataMap) -> list[Any]:
+            # The old window reports hiding after the switch ran and before profile.start: the gap.
+            if event["visible"] or sent:
+                return []
+            sent.append(True)
+            return [secure_input_panel_prepare()]
+
+        runtime.engine.dispatcher.dispatch(window_show("pad"))
+        runtime.engine.dispatcher.add_raw_event_handler("window.state_changed", prepare_once_hidden)
+        runtime.engine.dispatcher.dispatch(profile_switch("b"))
+
+        self.assertEqual(sent, [True])
+
+        self.assertEqual(failures, [])
+        self.assertEqual(runtime.engine.profile.state.get(("app", "profile")), "b")
+        panel = runtime._window_manager.get("pad")
+        self.assertTrue(panel is not None and panel.isVisible())
+        self.assertEqual(backend.initialized, 1)
 
     def test_prepare_shows_a_panel_the_profile_hid(self) -> None:
         runtime, _backend, _keyboard = self._runtime()

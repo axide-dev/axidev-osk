@@ -151,6 +151,7 @@ def menu(
     children: Sequence[axidev_osk.Map],
     *,
     group: str | None = None,
+    panel: Callable[..., axidev_osk.Map] = axidev_osk.box,
     opts: Mapping[str, Any] | None = None,
     panel_opts: Mapping[str, Any] | None = None,
 ) -> tuple[axidev_osk.Map, axidev_osk.Map]:
@@ -158,7 +159,10 @@ def menu(
 
     The profile places both, usually the button in a strip and the panel in
     that strip's panels. Opening the menu closes the other menus of ``group``.
-    ``opts`` replaces fields of the button and ``panel_opts`` fields of the panel.
+    ``panel`` is the node builder that makes the panel, such as
+    ``axidev_osk.box`` (the default), ``axidev_osk.grid``, or
+    ``axidev_osk.scroll``. ``opts`` replaces fields of the button and
+    ``panel_opts`` fields of the panel.
     """
 
     button_defaults = {
@@ -174,7 +178,7 @@ def menu(
         "children": list(children),
         "style": {"classes": ["menuPanel"]},
     }
-    return axidev_osk.button(**axidev_osk.merge(button_defaults, opts)), axidev_osk.box(**axidev_osk.merge(panel_defaults, panel_opts))
+    return axidev_osk.button(**axidev_osk.merge(button_defaults, opts)), panel(**axidev_osk.merge(panel_defaults, panel_opts))
 
 
 def dropdown(
@@ -193,7 +197,7 @@ def dropdown(
     ``value`` is a binding naming the current choice, which the button shows
     and the panel lights. The panel is an ``axidev_osk.scroll`` holding one
     choice per row, which scrolls once it is ``LIST_MAX_HEIGHT`` pixels tall;
-    ``panel_opts`` may set another ``max_height``, ``direction``, or kind.
+    ``panel_opts`` may set another ``max_height`` or ``direction``.
     """
 
     texts = {choice: text for choice, text in choices}
@@ -218,8 +222,16 @@ def dropdown(
         )
         for index, (choice, text) in enumerate(choices)
     ]
-    list_opts = {"kind": "scroll", "max_height": LIST_MAX_HEIGHT}
-    return menu(id, button_label, items, group=group, opts=opts, panel_opts=axidev_osk.merge(list_opts, panel_opts))
+    list_opts = {"max_height": LIST_MAX_HEIGHT}
+    return menu(
+        id,
+        button_label,
+        items,
+        group=group,
+        panel=axidev_osk.scroll,
+        opts=opts,
+        panel_opts=axidev_osk.merge(list_opts, panel_opts),
+    )
 
 
 def strip(

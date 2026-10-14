@@ -45,7 +45,9 @@ from .app_messages import (
     decode_profile_switch,
     linux_permission_setup_opened,
     profile_start,
+    secure_input_panel_prepare,
     secure_input_panel_prepared,
+    secure_input_panel_release,
     secure_input_panel_released,
     window_close,
 )
@@ -58,16 +60,6 @@ from .registries import ServiceRegistry
 from .window_manager import WindowFactory, WindowManager
 
 _logger = logging.getLogger(__name__)
-
-
-class ProfileRollbackFailed(RuntimeError):
-    """The previous profile could not start again after a switch failed, so no profile runs."""
-
-    def __init__(self, previous: str, target: str, error: Exception) -> None:
-        super().__init__(
-            f"Profile {previous!r} could not start again after switching to {target!r} failed: "
-            f"{type(error).__name__}: {error}"
-        )
 
 
 class ApplicationRuntime:
@@ -134,8 +126,13 @@ class ApplicationRuntime:
         self._dispatcher.register_action(APP_QUIT, decode_app_quit, self._quit, when_idle=True)
         self._dispatcher.register_action(PROFILE_SWITCH, decode_profile_switch, self._switch_profile, when_idle=True)
         self._dispatcher.register_action(PROFILE_START, decode_empty, self._start_switched_profile, when_idle=True)
-        self._dispatcher.register_action(SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel)
-        self._dispatcher.register_action(SECURE_INPUT_PANEL_RELEASE, decode_empty, self._release_secure_input_panel)
+        # The panel actions wait for an idle queue, so one sent back mid-switch runs after profile.start.
+        self._dispatcher.register_action(
+            SECURE_INPUT_PANEL_PREPARE, decode_empty, self._prepare_secure_input_panel, when_idle=True
+        )
+        self._dispatcher.register_action(
+            SECURE_INPUT_PANEL_RELEASE, decode_empty, self._release_secure_input_panel, when_idle=True
+        )
         self._dispatcher.register_action(LINUX_OPEN_PERMISSION_SETUP, decode_empty, self._open_permission_setup)
         self._dispatcher.add_event_handler(WINDOW_CLOSE_REQUESTED, self._default_close)
 
@@ -250,8 +247,9 @@ class ApplicationRuntime:
         Each window it shows on start with ``keep_position`` is built at the
         position a window with the same ID last reported. If it fails to build, the previous profile
         starts again, with its own variables back at their defaults, and the
-        failure is reported as ``action.failed``; if that fails too, the
-        report is ``ProfileRollbackFailed``.
+        failure is reported as ``action.failed``. If tearing the failed
+        profile down or starting the previous one fails too, no profile could
+        run, so the app shuts down with exit code 1, as when startup fails.
         """
 
         del arguments
@@ -265,12 +263,16 @@ class ApplicationRuntime:
             self._show_start_windows()
         except Exception as error:
             _logger.exception("Failed to build profile %s; building %s again", target.id, previous.id)
-            self._deactivate()
             try:
+                self._deactivate()
                 self._activate(previous)
                 self._show_start_windows()
-            except Exception as rollback_error:
-                raise ProfileRollbackFailed(previous.id, target.id, error) from rollback_error
+            except Exception:
+                _logger.exception(
+                    "Profile %s could not start again after %s failed (%s); quitting", previous.id, target.id, error
+                )
+                self._quit_controller.shutdown(1)
+                return []
             raise
         return []
 
@@ -345,13 +347,17 @@ class ApplicationRuntime:
     def _prepare_secure_input_panel(self, arguments: EmptyArguments) -> MessageResult:
         """Start keyboard output and show the profile's lock-screen window.
 
-        Only prepare and release change whether the panel is prepared. A
-        prepared panel is shown again, in case the profile hid or closed its
-        window. Keyboard output that cannot start fails the preparation, so
+        Only prepare and release change whether the panel is prepared. Both
+        run once the queue is idle; one that runs while a profile switch waits
+        for ``profile.start`` sends itself again, so it runs once the new
+        profile is up. A prepared panel is shown again, in case the profile
+        hid or closed its window. Keyboard output that cannot start fails the preparation, so
         the supervisor hears ``ERROR`` instead of a panel that cannot type.
         """
 
         del arguments
+        if self._switching_to is not None:
+            return [secure_input_panel_prepare()]
         window_id = self._secure_input_panel_window()
         if self._panel_prepared:
             self._window_manager.show(window_id).set_close_enabled(False)
@@ -380,6 +386,9 @@ class ApplicationRuntime:
         """Close the panel while retaining this KWin input-method connection."""
 
         del arguments
+        if self._switching_to is not None:
+            # Like prepare, it waits for the profile a switch is starting.
+            return [secure_input_panel_release()]
         window_id = self._secure_input_panel_window()
         if not self._panel_prepared:
             return [secure_input_panel_released()]

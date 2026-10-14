@@ -261,7 +261,8 @@ def _dwell_menu(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map
         "Dwell settings",
         items,
         group=group,
-        panel_opts={"kind": "grid", "spacing": 6},
+        panel=axidev_osk.grid,
+        panel_opts={"spacing": 6},
     )
 
 
