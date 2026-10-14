@@ -152,7 +152,7 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         service.end_drag.assert_called_once_with()
         service.commit_surface.assert_not_called()
 
-    def test_pointer_motion_cancels_drag_when_move_fails(self) -> None:
+    def test_a_failing_move_is_reported_and_the_drag_continues_until_released(self) -> None:
         runtime, service, window = self._runtime_with_pointer_service()
         failures = _record_failures(runtime)
         runtime._window_manager.get = Mock(return_value=window)
@@ -162,11 +162,14 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["move failed"])
+        self.assertEqual(runtime._pointer_drag.window_id, _KEYBOARD_WINDOW)
+        service.end_drag.assert_not_called()
+        runtime.engine.dispatcher.dispatch(window_drag_ended(_KEYBOARD_WINDOW))
         self.assertIsNone(runtime._pointer_drag.window_id)
         service.end_drag.assert_called_once_with()
         service.commit_surface.assert_not_called()
 
-    def test_pointer_motion_cancels_drag_when_surface_lookup_fails(self) -> None:
+    def test_a_failing_surface_lookup_is_reported_and_the_drag_continues(self) -> None:
         runtime, service, window = self._runtime_with_pointer_service()
         failures = _record_failures(runtime)
         runtime._window_manager.get = Mock(return_value=window)
@@ -177,11 +180,11 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["surface failed"])
-        self.assertIsNone(runtime._pointer_drag.window_id)
-        service.end_drag.assert_called_once_with()
+        self.assertEqual(runtime._pointer_drag.window_id, _KEYBOARD_WINDOW)
+        service.end_drag.assert_not_called()
         service.commit_surface.assert_not_called()
 
-    def test_pointer_motion_cancels_drag_when_commit_fails(self) -> None:
+    def test_a_failing_commit_is_reported_and_the_drag_continues(self) -> None:
         runtime, service, window = self._runtime_with_pointer_service()
         failures = _record_failures(runtime)
         runtime._window_manager.get = Mock(return_value=window)
@@ -192,8 +195,8 @@ class ApplicationRuntimePointerDragTests(unittest.TestCase):
         runtime.engine.dispatcher.dispatch(pointer_motion_observed(4, 5))
 
         self.assertEqual([failure.message for failure in failures], ["commit failed"])
-        self.assertIsNone(runtime._pointer_drag.window_id)
-        service.end_drag.assert_called_once_with()
+        self.assertEqual(runtime._pointer_drag.window_id, _KEYBOARD_WINDOW)
+        service.end_drag.assert_not_called()
 
     def test_a_window_that_reports_its_own_deltas_collects_no_pointer_motion(self) -> None:
         runtime, service, window = self._runtime_with_pointer_service()
@@ -507,6 +510,10 @@ class ApplicationRuntimeQuitTests(unittest.TestCase):
             axidev_osk.window.show("typo"),
             axidev_osk.window.hide("typo"),
             axidev_osk.window.close("typo"),
+            axidev_osk.window.move_by("typo", 1, 1),
+            axidev_osk.window.move_to("typo", 1, 1),
+            axidev_osk.window.resize_by("typo", 1, 1),
+            axidev_osk.window.resize_to("typo", 100, 100),
         ]
 
         for action in actions:
