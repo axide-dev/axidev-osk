@@ -38,7 +38,7 @@ from typing import Any
 
 from ... import axidev_osk
 from . import layouts
-from .styles import lit
+from .styles import lit, merge_style
 
 _SHIFT_KEYS = ("ShiftLeft", "ShiftRight")
 _LOCK_NAMES = {"CapsLock": "capslock", "NumLock": "numlock"}
@@ -317,7 +317,8 @@ def any_modifier_latched(state: Any) -> bool:
     """Whether a modifier is latched down or waiting for the next key press."""
 
     latched = axidev_osk.read(state, "std.latched")
-    return any(True for _latch in latched or ()) or bool(_one_shot(state))
+    # A state map is always true, like a Lua table, so emptiness is its length.
+    return (latched is not None and len(latched) > 0) or bool(_one_shot(state))
 
 
 def release_modifiers(state: Any) -> list[axidev_osk.Map]:
@@ -349,11 +350,12 @@ def _flag(opts: Mapping[str, Any] | None, name: str, default: bool) -> bool:
 def _lit_button(defaults: Mapping[str, Any], opts: Mapping[str, Any], active: Any, latched: Any) -> axidev_osk.Map:
     """A button from ``defaults`` and ``opts``, lit through ``styles.lit`` by ``active`` and ``latched``.
 
-    A ``latched`` in ``opts`` replaces the behavior's own, and a ``style`` in ``opts`` adds to the lit style.
+    A ``latched`` in ``opts`` replaces the behavior's own, and a ``style`` in ``opts`` adds to the lit style
+    (``styles.merge_style``).
     """
 
     chosen = opts.get("latched")
-    style = {**lit(active, latched if chosen is None else chosen), **(opts.get("style") or {})}
+    style = merge_style(lit(active, latched if chosen is None else chosen), opts.get("style"))
     return axidev_osk.button(**axidev_osk.merge(defaults, {**_without(opts, "latched", "style"), "style": style}))
 
 

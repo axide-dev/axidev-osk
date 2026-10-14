@@ -377,6 +377,53 @@ class WheelTests(unittest.TestCase):
         self.assertFalse(harness.widget("w:slice:7").property("latched"))
         self.assertFalse(harness.widget("w:center:release").isEnabled())
 
+    def test_slice_and_center_styles_add_to_the_wheels_own(self) -> None:
+        harness = StdHarness(
+            self,
+            [
+                wheel.wheel(
+                    "w",
+                    wheel.TKL,
+                    layouts.LAYOUTS,
+                    lambda state: "us",
+                    slice_opts={"style": {"classes": ["mine"], "properties": {"extra": True}}},
+                    center={"stay": {"label": "Hold", "style": {"properties": {"extra": True}}}},
+                )
+            ],
+        )
+
+        piece = harness.widget("w:slice:4")
+        self.assertEqual((piece.property("wheelItem"), piece.property("extra"), piece.property("classes")), ("key", True, ["mine"]))
+        harness.tap("w:center:stay")
+        stay = harness.widget("w:center:stay")
+        self.assertEqual(stay.text(), "Hold")  # type: ignore[attr-defined]
+        self.assertEqual((stay.property("wheelCenter"), stay.property("latched"), stay.property("extra")), ("stay", True, True))
+
+    def test_key_opts_make_the_wheels_modifiers_one_shot(self) -> None:
+        harness = StdHarness(self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", key_opts={"mode": "one_shot"})])
+
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), False), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
+        )
+
+    def test_a_wheel_refuses_to_stop_reporting_its_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "needs report_geometry"):
+            wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"report_geometry": False})
+
+    def test_shapes_stay_inside_a_wheel_before_its_first_size_report(self) -> None:
+        # Without a minimum size, the radii fall back to half a pixel until the canvas reports.
+        for outer, inner, slices in ((1.0, 0.25, wheel.SLICES), (0.25, 0.0, len(wheel.CENTER))):
+            for index in range(slices):
+                with self.subTest(outer=outer, index=index):
+                    corners = wheel.wedge(0.5, 0.5, outer, inner, 0, index, slices)
+                    self.assertTrue(all(-0.01 <= x <= 1.01 and -0.01 <= y <= 1.01 for x, y in corners), corners)
+
     def test_a_wheel_menu_with_another_slice_count_is_rejected_when_built(self) -> None:
         short = wheel.menu({0: ["AD01", "AD02"]})
 
@@ -384,11 +431,17 @@ class WheelTests(unittest.TestCase):
             wheel.wheel("w", short, layouts.LAYOUTS, lambda state: "us")
 
     def test_the_slices_fill_the_wheel_whatever_size_it_takes(self) -> None:
+        for canvas_id in ("w", "renamed"):
+            with self.subTest(canvas_id=canvas_id):
+                self._check_slices_fill(canvas_id)
+
+    def _check_slices_fill(self, canvas_id: str) -> None:
         harness = StdHarness(
-            self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"min_width": 200, "min_height": 200})]
+            self,
+            [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"id": canvas_id, "min_width": 200, "min_height": 200})],
         )
         harness.window.show()
-        canvas = harness.widget("w")
+        canvas = harness.widget(canvas_id)
         for width, height in ((200, 200), (500, 260)):
             harness.window.resize(width + 100, height + 100)
             qt_app().processEvents()

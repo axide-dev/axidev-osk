@@ -88,6 +88,8 @@ class ButtonOptions:
     size: SizeOptions = SizeOptions()
     locator_color: str | None = None
     """The color a ``pointer_locator`` glows over the button; without one it glows the gap color."""
+    outline_color: str | None = None
+    """The border color of a shaped button; without one it is sampled from the button's style."""
     label_min_px: int = 1
     """The smallest pixel size the label shrinks to when it does not fit; below it the label is cut."""
 
@@ -283,6 +285,7 @@ def _decode_button(reader: ConfigReader) -> ButtonOptions:
         visible=_visible(reader),
         size=_decode_size(reader),
         locator_color=reader.optional_color("locator_color"),
+        outline_color=reader.optional_color("outline_color"),
         label_min_px=reader.integer("label_min_px", 1, minimum=1),
     )
 
@@ -439,6 +442,8 @@ def _apply_button(widget: QWidget, options: object, previous: object | None) -> 
         _apply_visible(widget, options.visible)
     if old is None or options.locator_color != old.locator_color:
         widget.setProperty(LOCATOR_COLOR, options.locator_color)
+    if old is None or options.outline_color != old.outline_color:
+        widget.set_outline_color(options.outline_color)
 
 
 def _build_label(node: NodeConfig, builder: NodeBuilder) -> QWidget:

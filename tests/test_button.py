@@ -101,6 +101,35 @@ class ButtonTests(unittest.TestCase):
         self.assertGreater(edge.red(), 120)
         self.assertLess(inside.red(), 40)
 
+    def test_a_shaped_border_follows_style_properties_and_a_set_outline_color(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { background: #000000; border: 1px solid #ff0000; border-radius: 0px; }"
+            'QPushButton[latched="true"] { border-color: #00ff00; }'
+        )
+        button.resize(100, 100)
+        triangle = QPainterPath()
+        triangle.addPolygon(QPolygonF([QPointF(0, 0), QPointF(100, 0), QPointF(0, 100)]))
+        triangle.closeSubpath()
+        button.set_shape(triangle)
+        button.show()
+
+        def edge() -> QColor:
+            return button.grab().toImage().pixelColor(49, 49)
+
+        self.assertGreater(edge().red(), 120)
+        # Restyled the way the node builder applies a style property.
+        button.setProperty("latched", True)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        latched = edge()
+        self.assertGreater(latched.green(), 120)
+        self.assertLess(latched.red(), 40)
+        button.set_outline_color("#0000ff")
+        self.assertGreater(edge().blue(), 120)
+
     def test_parts_are_spread_inside_the_shape_in_order(self) -> None:
         qt_app()
         button = Button()

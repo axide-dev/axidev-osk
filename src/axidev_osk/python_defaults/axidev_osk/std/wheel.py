@@ -27,7 +27,7 @@ from typing import Any
 
 from ... import axidev_osk
 from . import keys
-from .styles import lit
+from .styles import lit, merge_style
 
 SLICES = 10
 
@@ -109,6 +109,8 @@ def wheel(
     inner: float = 0.25,
     spacing: float = 0,
     center: Mapping[str, Mapping[str, Any]] | None = None,
+    slice_opts: Mapping[str, Any] | None = None,
+    key_opts: Mapping[str, Any] | None = None,
 ) -> axidev_osk.Map:
     """An ``axidev_osk.canvas`` whose slices walk ``tree``; ``opts`` overrides any canvas field.
 
@@ -119,20 +121,30 @@ def wheel(
     to the top unless Stay is on; releasing a menu slice opens it.
 
     The center's radii are ``inner`` times the wheel's, and ``spacing`` pixels
-    separate every part. ``center`` maps a segment name of ``CENTER`` to
-    fields that override that segment's button, such as its ``label``. Until the canvas first reports its size, the shapes
+    separate every part. Until the canvas first reports its size, the shapes
     fit its minimum size.
+
+    ``center`` maps a segment name of ``CENTER`` to fields that override that
+    segment's button, such as its ``label``; ``slice_opts`` overrides fields
+    of every slice's button; and ``key_opts`` is the ``opts`` every key's
+    behavior is built with, such as a modifier's ``mode`` (``keys.behavior``).
+    A ``style`` in ``center`` or ``slice_opts`` adds to the wheel's own
+    (``styles.merge_style``).
 
     Raises ``ValueError`` when a menu of ``tree`` has another number of
     slices than its top level, or an item that is not a position, a menu, or
-    ``None``.
+    ``None``; when ``center`` names no segment of ``CENTER``; or when
+    ``opts`` turns ``report_geometry`` off, since the wheel fits its shapes
+    to the size the canvas reports.
     """
 
     path_var = ["std", "wheels", wheel_id]
     stay_var = ["std", "wheel_stays", wheel_id]
-    size_var = ["nodes", wheel_id, "size"]
     defaults = {"id": wheel_id, "report_geometry": True}
     fields = axidev_osk.merge(defaults, opts)
+    if not fields["report_geometry"]:
+        raise ValueError(f"wheel {wheel_id!r} needs report_geometry: its shapes follow the canvas's reported size")
+    size_var = ["nodes", fields["id"], "size"]
     slices = len(tree)
     _check_tree(tree, slices, [])
 
@@ -162,7 +174,7 @@ def wheel(
             node = node[step] if isinstance(node, list) else None
         return node
 
-    value, run = keys.on_layout(_positions(tree), layouts, layout)
+    value, run = keys.on_layout(_positions(tree), layouts, layout, key_opts)
 
     def slice_button(index: int) -> axidev_osk.Map:
         def field(name: str, default: Any) -> axidev_osk.Binding:
@@ -193,15 +205,16 @@ def wheel(
             return []
 
         lit_properties = lit(field("active", False), field("latched", False))["properties"]
-        return axidev_osk.button(
-            id=f"{wheel_id}:slice:{index}",
-            shape=lambda state: wedge(*ellipse(state), 1.0, inner, spacing, index, slices),
-            anchor=lambda state: middle(*ellipse(state), 1.0, inner, index, slices),
-            label=field("label", ""),
-            on_press=on_press,
-            on_release=on_release,
-            style={"properties": lambda state: {**lit_properties(state), **kind(state)}},
-        )
+        style = {"properties": lambda state: {**lit_properties(state), **kind(state)}}
+        defaults = {
+            "id": f"{wheel_id}:slice:{index}",
+            "shape": lambda state: wedge(*ellipse(state), 1.0, inner, spacing, index, slices),
+            "anchor": lambda state: middle(*ellipse(state), 1.0, inner, index, slices),
+            "label": field("label", ""),
+            "on_press": on_press,
+            "on_release": on_release,
+        }
+        return _button(defaults, style, slice_opts)
 
     def go_up(ctx: Any, event: Any) -> list[axidev_osk.Map]:
         del event
@@ -233,26 +246,33 @@ def wheel(
         raise ValueError(f"wheel center has no segment {', '.join(unknown)}; its segments are {', '.join(CENTER)}")
 
     def center_button(index: int, name: str) -> axidev_osk.Map:
-        fields = dict(segments[name])
-        lit_properties = lit(latched=fields.pop("latched", False))["properties"]
+        segment = dict(segments[name])
+        lit_properties = lit(latched=segment.pop("latched", False))["properties"]
 
         def properties(state: Any) -> dict[str, Any]:
             return {**lit_properties(state), "wheelItem": "center", "wheelCenter": name}
 
         defaults = {
-            **fields,
+            **segment,
             "id": f"{wheel_id}:center:{name}",
             "shape": lambda state: wedge(*ellipse(state), inner, 0.0, spacing, index, len(CENTER)),
             "anchor": lambda state: middle(*ellipse(state), inner, 0.0, index, len(CENTER)),
-            "style": {"properties": properties},
         }
-        return axidev_osk.button(**axidev_osk.merge(defaults, (center or {}).get(name)))
+        return _button(defaults, {"properties": properties}, (center or {}).get(name))
 
     children = [
         *(slice_button(index) for index in range(slices)),
         *(center_button(index, name) for index, name in enumerate(CENTER)),
     ]
     return axidev_osk.canvas(**axidev_osk.merge(fields, {"children": children}))
+
+
+def _button(defaults: Mapping[str, Any], style: axidev_osk.Map, opts: Mapping[str, Any] | None) -> axidev_osk.Map:
+    """A button from ``defaults`` with ``opts`` merged last and its ``style`` added to ``style``."""
+
+    extra = dict(opts or {})
+    merged_style = merge_style(style, extra.pop("style", None))
+    return axidev_osk.button(**axidev_osk.merge({**defaults, "style": merged_style}, extra))
 
 
 def wedge(radius_x: float, radius_y: float, outer: float, inner: float, spacing: float, index: int, slices: int) -> Corners:
@@ -270,10 +290,13 @@ def wedge(radius_x: float, radius_y: float, outer: float, inner: float, spacing:
     mid_angle = index * 2 * math.pi / slices
     half = math.pi / slices
     rim_gap = gap if outer < 1 else 0.0
-    rim = (radius_x * outer - rim_gap, radius_y * outer - rim_gap)
+    # Kept above zero, since a rim is divided by; only a wheel narrower than its gaps comes near.
+    rim = (max(radius_x * outer - rim_gap, 0.01), max(radius_y * outer - rim_gap, 0.01))
     # Two sides ``gap`` inside their lines cross ``gap / sin(half)`` from the middle.
     least = gap / math.sin(half) + 1 if half < math.pi / 2 else gap + 1
     hole = (max(radius_x * inner + gap, least), max(radius_y * inner + gap, least))
+    # A wheel only a few pixels across leaves no room for the gaps; the hole then takes half the rim, so the slice stays whole.
+    hole = (min(hole[0], rim[0] / 2), min(hole[1], rim[1] / 2))
     sides = [_side(radius_x, radius_y, mid_angle, mid_angle + turn, gap) for turn in (-half, half)]
     reach = ARC_CORNERS * SLICES / slices
     corners = _arc(rim, _meet(rim, *sides[0]), _meet(rim, *sides[1]), max(2, round(reach * outer)))
