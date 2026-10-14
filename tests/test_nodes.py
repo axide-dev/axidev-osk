@@ -5,7 +5,7 @@ import unittest
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PySide6.QtGui import QEnterEvent, QKeySequence, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QStackedWidget, QWidget
 
 from axidev_osk.components.button import Button
 from axidev_osk.config.profile import ProfileConfig
@@ -370,6 +370,59 @@ class NodeTests(unittest.TestCase):
             [{"node": "cow", "button": name} for name in ("left", "right", "back", "forward")],
         )
         self.assertEqual(cow.text(), "Moo 4")  # type: ignore[attr-defined]
+
+    def _scroll_window(self, scroll: dict[str, object], on: dict[str, object] | None = None) -> tuple[QWidget, QScrollArea]:
+        window = {"id": "pad", "title": "Pad", "content": {"kind": "box", "id": "root", "children": [scroll]}}
+        profile = start_test_profile(
+            self.engine, {"active_profile": "p", "profiles": {"p": {"windows": [window], "on": on or {}}}}
+        )
+        shown = self._window(profile)
+        QTest.qWait(10)
+        area = self._find(shown, str(scroll["id"]))
+        assert isinstance(area, QScrollArea)
+        return shown, area
+
+    def _turn_wheel_down(self, area: QScrollArea) -> None:
+        # Qt passes a turn a button ignores on to its parents only for real input, so the test turns it over the viewport.
+        widget = area.viewport()
+        point = QPointF(widget.rect().center())
+        turn = QWheelEvent(
+            point, QPointF(widget.mapToGlobal(point)), QPoint(), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        QApplication.sendEvent(widget, turn)
+        QTest.qWait(10)
+
+    def test_a_scroll_stops_growing_at_its_maximum_and_scrolls_with_the_wheel(self) -> None:
+        items = [_button(f"item{index}", label=f"Item {index}") for index in range(20)]
+        _shown, area = self._scroll_window({"kind": "scroll", "id": "list", "max_height": 120, "children": items})
+
+        self.assertEqual(area.height(), 120)
+        self._turn_wheel_down(area)
+
+        self.assertGreater(area.verticalScrollBar().value(), 0)
+
+    def test_a_scroll_shorter_than_its_maximum_shows_every_child_without_scrolling(self) -> None:
+        items = [_button(f"item{index}", label=f"Item {index}") for index in range(2)]
+        _shown, area = self._scroll_window({"kind": "scroll", "id": "list", "max_height": 400, "children": items})
+
+        content = area.widget()
+        assert content is not None
+        self.assertEqual(area.height(), content.sizeHint().height())
+        self.assertEqual(area.verticalScrollBar().maximum(), 0)
+
+    def test_a_scroll_with_wheel_scrolling_off_stays_put_and_still_reports_the_turn(self) -> None:
+        turns: list[DataMap] = []
+        items = [_button(f"item{index}", label=f"Item {index}") for index in range(20)]
+        _shown, area = self._scroll_window(
+            {"kind": "scroll", "id": "list", "max_height": 120, "wheel_scrolls": False, "reports_wheel": True, "children": items},
+            on={"node.wheel": lambda ctx, event: turns.append(dict(event)) or []},
+        )
+
+        self._turn_wheel_down(area)
+
+        self.assertEqual(area.verticalScrollBar().value(), 0)
+        self.assertEqual([(turn["node"], turn["dy"]) for turn in turns], [("list", -1.0)])
 
     def test_labels_stacks_and_style_hooks(self) -> None:
         profile = self._profile(

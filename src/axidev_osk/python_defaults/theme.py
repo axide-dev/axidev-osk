@@ -261,4 +261,24 @@ QWidget#settingsStrip QLabel {
     color: #b9bbc7;
     font-size: 13px;
 }
+QWidget#settingsStrip QScrollArea {
+    background: transparent;
+}
+QWidget#settingsStrip QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0px 0px 0px 2px;
+}
+QWidget#settingsStrip QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 60);
+    border-radius: 3px;
+    min-height: 24px;
+}
+QWidget#settingsStrip QScrollBar::add-line:vertical,
+QWidget#settingsStrip QScrollBar::sub-line:vertical,
+QWidget#settingsStrip QScrollBar::add-page:vertical,
+QWidget#settingsStrip QScrollBar::sub-page:vertical {
+    background: transparent;
+    height: 0px;
+}
 """
