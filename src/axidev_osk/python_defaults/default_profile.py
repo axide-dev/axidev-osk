@@ -165,7 +165,6 @@ def _profile_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_o
         on_select=lambda ctx, profile: [axidev_osk.profile.switch(profile)],
         label="Profile",
         group=group,
-        panel_opts={"direction": "horizontal"},
     )
 
 
@@ -177,7 +176,6 @@ def _layout_dropdown(window: str, group: str) -> tuple[axidev_osk.Map, axidev_os
         on_select=lambda ctx, name: [axidev_osk.state.set("settings.layout", name)],
         label="Layout",
         group=group,
-        panel_opts={"direction": "horizontal"},
     )
 
 
@@ -209,7 +207,8 @@ def _dwell_menu(window: str, group: str) -> tuple[axidev_osk.Map, axidev_osk.Map
         "Dwell settings",
         items,
         group=group,
-        panel_opts={"kind": "grid", "spacing": 6},
+        panel=axidev_osk.grid,
+        panel_opts={"spacing": 6},
     )
 
 
@@ -472,7 +471,7 @@ def _wheel() -> axidev_osk.Map:
         layouts.LAYOUTS,
         _setting("layout"),
         {"min_width": 260, "min_height": 260},
-        inner=0.22,
+        inner=0.34,
         spacing=GRID_GAP_PX,
     )
     return axidev_osk.merge(canvas, {"children": std.locator.colored(canvas["children"])})

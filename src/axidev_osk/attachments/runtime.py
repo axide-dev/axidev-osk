@@ -42,6 +42,8 @@ class AttachmentRuntime:
         self._locators: dict[str, dict[str, PointerLocatorConfig]] = {}
         self._secure_input_panel_window: str | None = None
         self._unbinds: list[Unsubscribe] = []
+        self._running: str | None = None
+        """The profile whose attachments are attached, from ``start`` until ``stop``."""
 
     @property
     def secure_input_panel_window(self) -> str | None:
@@ -54,8 +56,9 @@ class AttachmentRuntime:
         caller stops them first.
         """
 
-        if self._unbinds:
-            raise RuntimeError("Attachments are still running; stop them before starting a profile's")
+        if self._running is not None:
+            raise RuntimeError(f"Profile {self._running!r}'s attachments are still running; stop them before starting a profile's")
+        self._running = profile.id
         for attachment in profile.attachments:
             try:
                 apply = self._kinds[attachment.kind].attach(self, attachment.target)
@@ -75,6 +78,7 @@ class AttachmentRuntime:
         for unbind in self._unbinds:
             unbind()
         self._unbinds.clear()
+        self._running = None
         self._dwell.clear()
         self._locators.clear()
         self._secure_input_panel_window = None

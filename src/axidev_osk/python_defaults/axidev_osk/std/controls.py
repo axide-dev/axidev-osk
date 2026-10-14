@@ -4,7 +4,8 @@ Each control reads and writes state, so a profile decides what it controls.
 Menus and dropdowns open as inline panels inside the window, not as popups,
 because popups fail on layer-shell windows. A menu is a button plus a panel
 the profile places anywhere in the same window; the window grows while the
-panel shows and shrinks back when it hides. A strip is a menu shaped as a
+panel shows and shrinks back when it hides. A dropdown's panel is a scrolling
+list, so it stops growing past a few choices however many it holds. A strip is a menu shaped as a
 bottom row: closed it shows only a ``⋯`` button, open it shows its controls
 beside the button and their panels above it.
 
@@ -23,6 +24,9 @@ from .styles import lit
 
 STATE = {"menus": axidev_osk.var(axidev_osk.map_of("string"))}
 """The library's control variables, merged under ``std`` by ``std.with_state``."""
+
+LIST_MAX_HEIGHT = 180
+"""How tall a dropdown's list grows before it scrolls, in pixels: about five strip buttons."""
 
 Number = int | float
 NumberOrBinding = Number | Callable[[Any], Number]
@@ -147,6 +151,7 @@ def menu(
     children: Sequence[axidev_osk.Map],
     *,
     group: str | None = None,
+    panel: Callable[..., axidev_osk.Map] = axidev_osk.box,
     opts: Mapping[str, Any] | None = None,
     panel_opts: Mapping[str, Any] | None = None,
 ) -> tuple[axidev_osk.Map, axidev_osk.Map]:
@@ -154,7 +159,10 @@ def menu(
 
     The profile places both, usually the button in a strip and the panel in
     that strip's panels. Opening the menu closes the other menus of ``group``.
-    ``opts`` replaces fields of the button and ``panel_opts`` fields of the panel.
+    ``panel`` is the node builder that makes the panel, such as
+    ``axidev_osk.box`` (the default), ``axidev_osk.grid``, or
+    ``axidev_osk.scroll``. ``opts`` replaces fields of the button and
+    ``panel_opts`` fields of the panel.
     """
 
     button_defaults = {
@@ -170,7 +178,7 @@ def menu(
         "children": list(children),
         "style": {"classes": ["menuPanel"]},
     }
-    return axidev_osk.button(**axidev_osk.merge(button_defaults, opts)), axidev_osk.box(**axidev_osk.merge(panel_defaults, panel_opts))
+    return axidev_osk.button(**axidev_osk.merge(button_defaults, opts)), panel(**axidev_osk.merge(panel_defaults, panel_opts))
 
 
 def dropdown(
@@ -187,7 +195,9 @@ def dropdown(
     """A menu listing ``choices`` as ``(value, text)`` pairs; picking one runs ``on_select`` and closes it.
 
     ``value`` is a binding naming the current choice, which the button shows
-    and the panel lights.
+    and the panel lights. The panel is an ``axidev_osk.scroll`` holding one
+    choice per row, which scrolls once it is ``LIST_MAX_HEIGHT`` pixels tall;
+    ``panel_opts`` may set another ``max_height`` or ``direction``.
     """
 
     texts = {choice: text for choice, text in choices}
@@ -212,7 +222,16 @@ def dropdown(
         )
         for index, (choice, text) in enumerate(choices)
     ]
-    return menu(id, button_label, items, group=group, opts=opts, panel_opts=panel_opts)
+    list_opts = {"max_height": LIST_MAX_HEIGHT}
+    return menu(
+        id,
+        button_label,
+        items,
+        group=group,
+        panel=axidev_osk.scroll,
+        opts=opts,
+        panel_opts=axidev_osk.merge(list_opts, panel_opts),
+    )
 
 
 def strip(

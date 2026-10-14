@@ -33,7 +33,6 @@ from .app_messages import (
     window_dragged,
 )
 from .engine_messages import DISPLAY_CONFIGURATION_CHANGED, DisplayConfigurationArguments
-from .dispatcher import ACTION_FAILED, ActionFailedArguments
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -64,20 +63,18 @@ def register_window_actions(
         return []
 
     def move_by(arguments: WindowDeltaArguments) -> MessageResult:
-        window = windows.get(arguments.window_id)
-        if window is None:
-            return []
+        # The manager raises for a window the profile does not define, like every window action.
         windows.move_by(arguments.window_id, arguments.dx, arguments.dy)
-        if relative_pointer is not None:
+        window = windows.get(arguments.window_id)
+        if window is not None and relative_pointer is not None:
             relative_pointer.commit_surface(int(window.winId()))
         return []
 
     def move_to(arguments: WindowPointArguments) -> MessageResult:
-        window = windows.get(arguments.window_id)
-        if window is None:
-            return []
+        # The manager raises for a window the profile does not define, like every window action.
         windows.move_to(arguments.window_id, arguments.x, arguments.y)
-        if relative_pointer is not None:
+        window = windows.get(arguments.window_id)
+        if window is not None and relative_pointer is not None:
             relative_pointer.commit_surface(int(window.winId()))
         return []
 
@@ -130,8 +127,9 @@ class PointerDragRouter:
     Only a window whose title bar leaves movement to raw pointer motion
     starts collection; every other window reports its own deltas. The
     profile decides what a drag does; the standard library moves the window
-    with ``window.move_by``. A failing move of the dragged window ends the
-    drag.
+    with ``window.move_by``. The drag ends on what the engine observes: the
+    release, or the window being gone or hidden. A failing action reaches the
+    profile as ``action.failed`` and does not end it.
     """
 
     def __init__(self, windows: "WindowManager", relative_pointer: RelativePointer | None) -> None:
@@ -151,7 +149,6 @@ class PointerDragRouter:
         dispatcher.add_event_handler(WINDOW_DRAG_STARTED, self._drag_started)
         dispatcher.add_event_handler(WINDOW_DRAG_ENDED, self._drag_ended)
         dispatcher.add_event_handler(POINTER_MOTION_OBSERVED, self._motion_observed)
-        dispatcher.add_event_handler(ACTION_FAILED, self._action_failed)
 
     def _drag_started(self, event: WindowButtonArguments) -> MessageResult:
         window = self._windows.get(event.window_id)
@@ -188,13 +185,6 @@ class PointerDragRouter:
         if not dx and not dy:
             return []
         return [window_dragged(window_id, dx, dy, self._button)]
-
-    def _action_failed(self, event: ActionFailedArguments) -> MessageResult:
-        """Stop the drag when moving the dragged window fails."""
-
-        if event.action == WINDOW_MOVE_BY and event.arguments.get("window") == self._window_id:
-            self._stop()
-        return []
 
     def _stop(self) -> None:
         self._set_dragging(False)

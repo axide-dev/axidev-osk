@@ -60,10 +60,11 @@ class Button(QPushButton):
     as one label.
 
     A parent may give the button a shape (``set_shape``): the button is then
-    clipped to it and draws its border along it, in the color its style
-    gives a rectangular button's border in the same state. That color is
-    read from the left edge of a small rectangular sample, so it assumes a
-    solid left border, no margin, and a corner radius under half the sample.
+    clipped to it and draws its border along it, in the color set with
+    ``set_outline_color``. Without one, it uses the color its style gives a
+    rectangular button's border in the same state, read from the left edge
+    of a small rectangular sample, which assumes a solid left border, no
+    margin, and a corner radius under half the sample.
     """
 
     entered = Signal()
@@ -76,6 +77,7 @@ class Button(QPushButton):
         self._parts: tuple[str, ...] | None = None
         self._outline: QPainterPath | None = None
         self._border_colors: dict[int, QColor] = {}
+        self._outline_color: QColor | None = None
         self._hovered = False
         self._pressed_with = "left"
         self._label_min_px = 1
@@ -104,6 +106,12 @@ class Button(QPushButton):
         """Never draw the label smaller than ``pixels``, even when it must be cut."""
 
         self._label_min_px = pixels
+        self.update()
+
+    def set_outline_color(self, color: str | None) -> None:
+        """Draw a shaped button's border in ``color``, or, given ``None``, in the color its style samples."""
+
+        self._outline_color = QColor(color) if color is not None else None
         self.update()
 
     def set_shape(self, outline: QPainterPath) -> None:
@@ -261,8 +269,13 @@ class Button(QPushButton):
         return low
 
     def _border_color(self, option: QStyleOptionButton) -> QColor:
-        """The border color the style draws for this button's state, read off a small rectangular sample once per state."""
+        """The outline color set for the button, or the one its style draws for its state.
 
+        The style's color is read off a small rectangular sample once per state.
+        """
+
+        if self._outline_color is not None:
+            return self._outline_color
         key = option.state.value
         if key not in self._border_colors:
             self._border_colors[key] = self._sample_border(option)

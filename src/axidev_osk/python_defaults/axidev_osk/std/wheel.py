@@ -5,11 +5,18 @@ whose ``shape`` binding draws its wedge of the ellipse filling that size, so
 the wheel stretches with its window. A map is a list with one item per slice,
 slice 0 on top and numbered clockwise. An item is a board position (``std.board``), which sends that
 position's key from the active layout, a nested list, which opens as a menu
-of its own, or ``None`` for an empty slice. Picking a key returns to the top.
-The center button goes back to the top from any menu.
+of its own, or ``None`` for an empty slice. Picking a key returns to the top
+unless the wheel is set to stay in its menu.
 
-The menu path a wheel has open lives in ``std.wheels.<wheel id>``, a list of
-slice numbers.
+The center is a ring of four segments: Back goes up one menu, Stay latches
+the wheel to keep its menu open after a key, Top goes back to the top menu,
+and Release lets go of every latched modifier.
+
+Library state lives under ``std``:
+
+- ``std.wheels.<wheel id>``: the menu path the wheel has open, a list of
+  slice numbers.
+- ``std.wheel_stays.<wheel id>``: whether picking a key keeps that menu open.
 """
 
 from __future__ import annotations
@@ -20,11 +27,14 @@ from typing import Any
 
 from ... import axidev_osk
 from . import keys
-from .styles import lit
+from .styles import lit, merge_style
 
 SLICES = 10
 
-STATE = {"wheels": axidev_osk.var(axidev_osk.map_of(axidev_osk.list_of("integer")))}
+STATE = {
+    "wheels": axidev_osk.var(axidev_osk.map_of(axidev_osk.list_of("integer"))),
+    "wheel_stays": axidev_osk.var(axidev_osk.map_of("boolean")),
+}
 """The library's wheel variables, merged under ``std`` by ``std.with_state``."""
 
 Tree = list[Any]
@@ -32,6 +42,9 @@ Corners = list[list[float]]
 
 ARC_CORNERS = 24
 """Corners along each outer arc; inner arcs and the center take fewer or more in proportion."""
+
+CENTER = ("back", "stay", "top", "release")
+"""The center's segments, clockwise from the top."""
 
 
 def _row_order(slices: int) -> list[int]:
@@ -95,6 +108,9 @@ def wheel(
     *,
     inner: float = 0.25,
     spacing: float = 0,
+    center: Mapping[str, Mapping[str, Any]] | None = None,
+    slice_opts: Mapping[str, Any] | None = None,
+    key_opts: Mapping[str, Any] | None = None,
 ) -> axidev_osk.Map:
     """An ``axidev_osk.canvas`` whose slices walk ``tree``; ``opts`` overrides any canvas field.
 
@@ -102,21 +118,33 @@ def wheel(
     for ``keys.at``. A key slice behaves exactly like that key's button
     (``keys.behavior``): pressing sends it down and holding repeats it, and a
     modifier latches until it is picked again. Releasing a key slice returns
-    to the top; releasing a menu slice opens it.
+    to the top unless Stay is on; releasing a menu slice opens it.
 
     The center's radii are ``inner`` times the wheel's, and ``spacing`` pixels
     separate every part. Until the canvas first reports its size, the shapes
     fit its minimum size.
 
+    ``center`` maps a segment name of ``CENTER`` to fields that override that
+    segment's button, such as its ``label``; ``slice_opts`` overrides fields
+    of every slice's button; and ``key_opts`` is the ``opts`` every key's
+    behavior is built with, such as a modifier's ``mode`` (``keys.behavior``).
+    A ``style`` in ``center`` or ``slice_opts`` adds to the wheel's own
+    (``styles.merge_style``).
+
     Raises ``ValueError`` when a menu of ``tree`` has another number of
     slices than its top level, or an item that is not a position, a menu, or
-    ``None``.
+    ``None``; when ``center`` names no segment of ``CENTER``; or when
+    ``opts`` turns ``report_geometry`` off, since the wheel fits its shapes
+    to the size the canvas reports.
     """
 
     path_var = ["std", "wheels", wheel_id]
-    size_var = ["nodes", wheel_id, "size"]
+    stay_var = ["std", "wheel_stays", wheel_id]
     defaults = {"id": wheel_id, "report_geometry": True}
     fields = axidev_osk.merge(defaults, opts)
+    if not fields["report_geometry"]:
+        raise ValueError(f"wheel {wheel_id!r} needs report_geometry: its shapes follow the canvas's reported size")
+    size_var = ["nodes", fields["id"], "size"]
     slices = len(tree)
     _check_tree(tree, slices, [])
 
@@ -137,13 +165,16 @@ def wheel(
     def path(state: Any) -> list[int]:
         return list(axidev_osk.read(state, path_var) or [])
 
+    def stays(state: Any) -> bool:
+        return bool(axidev_osk.read(state, stay_var))
+
     def item(state: Any, index: int) -> Any:
         node: Any = tree
         for step in [*path(state), index]:
             node = node[step] if isinstance(node, list) else None
         return node
 
-    value, run = keys.on_layout(_positions(tree), layouts, layout)
+    value, run = keys.on_layout(_positions(tree), layouts, layout, key_opts)
 
     def slice_button(index: int) -> axidev_osk.Map:
         def field(name: str, default: Any) -> axidev_osk.Binding:
@@ -169,70 +200,116 @@ def wheel(
             if isinstance(found, list):
                 return [axidev_osk.state.set(path_var, [*path(ctx.state), index])]
             if isinstance(found, str):
-                return [*run(ctx, event, found, "on_release"), axidev_osk.state.set(path_var, None)]
+                sent = run(ctx, event, found, "on_release")
+                return sent if stays(ctx.state) else [*sent, axidev_osk.state.set(path_var, None)]
             return []
 
         lit_properties = lit(field("active", False), field("latched", False))["properties"]
-        return axidev_osk.button(
-            id=f"{wheel_id}:slice:{index}",
-            shape=lambda state: wedge(*ellipse(state), inner, spacing, index, slices),
-            anchor=lambda state: middle(*ellipse(state), inner, index, slices),
-            label=field("label", ""),
-            on_press=on_press,
-            on_release=on_release,
-            style={"properties": lambda state: {**lit_properties(state), **kind(state)}},
-        )
+        style = {"properties": lambda state: {**lit_properties(state), **kind(state)}}
+        defaults = {
+            "id": f"{wheel_id}:slice:{index}",
+            "shape": lambda state: wedge(*ellipse(state), 1.0, inner, spacing, index, slices),
+            "anchor": lambda state: middle(*ellipse(state), 1.0, inner, index, slices),
+            "label": field("label", ""),
+            "on_press": on_press,
+            "on_release": on_release,
+        }
+        return _button(defaults, style, slice_opts)
 
-    center = axidev_osk.button(
-        id=f"{wheel_id}:center",
-        shape=lambda state: hub(*ellipse(state), inner, spacing),
-        anchor=lambda state: list(ellipse(state)),
-        label=lambda state: "×" if path(state) else "",
-        on_release=lambda ctx, event: [axidev_osk.state.set(path_var, None)],
-        style={"properties": {"wheelItem": "center"}},
-    )
-    children = [*(slice_button(index) for index in range(slices)), center]
+    def go_up(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+        del event
+        return [axidev_osk.state.set(path_var, path(ctx.state)[:-1] or None)]
+
+    def toggle_stay(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+        del event
+        return [axidev_osk.state.set(stay_var, not stays(ctx.state))]
+
+    def in_menu(state: Any) -> bool:
+        return bool(path(state))
+
+    segments: dict[str, dict[str, Any]] = {
+        "back": {"label": "Back", "enabled": in_menu, "on_release": go_up},
+        "stay": {"label": "Stay", "latched": stays, "on_release": toggle_stay},
+        "top": {
+            "label": "Top",
+            "enabled": in_menu,
+            "on_release": lambda ctx, event: [axidev_osk.state.set(path_var, None)],
+        },
+        "release": {
+            "label": "Release",
+            "enabled": keys.any_modifier_latched,
+            "on_release": lambda ctx, event: keys.release_modifiers(ctx.state),
+        },
+    }
+    unknown = sorted(set(center or {}) - set(CENTER))
+    if unknown:
+        raise ValueError(f"wheel center has no segment {', '.join(unknown)}; its segments are {', '.join(CENTER)}")
+
+    def center_button(index: int, name: str) -> axidev_osk.Map:
+        segment = dict(segments[name])
+        lit_properties = lit(latched=segment.pop("latched", False))["properties"]
+
+        def properties(state: Any) -> dict[str, Any]:
+            return {**lit_properties(state), "wheelItem": "center", "wheelCenter": name}
+
+        defaults = {
+            **segment,
+            "id": f"{wheel_id}:center:{name}",
+            "shape": lambda state: wedge(*ellipse(state), inner, 0.0, spacing, index, len(CENTER)),
+            "anchor": lambda state: middle(*ellipse(state), inner, 0.0, index, len(CENTER)),
+        }
+        return _button(defaults, {"properties": properties}, (center or {}).get(name))
+
+    children = [
+        *(slice_button(index) for index in range(slices)),
+        *(center_button(index, name) for index, name in enumerate(CENTER)),
+    ]
     return axidev_osk.canvas(**axidev_osk.merge(fields, {"children": children}))
 
 
-def wedge(radius_x: float, radius_y: float, inner: float, spacing: float, index: int, slices: int) -> Corners:
-    """Slice ``index`` of ``slices`` of the ellipse with radii ``radius_x`` and ``radius_y``, as canvas corners.
+def _button(defaults: Mapping[str, Any], style: axidev_osk.Map, opts: Mapping[str, Any] | None) -> axidev_osk.Map:
+    """A button from ``defaults`` with ``opts`` merged last and its ``style`` added to ``style``."""
 
-    The slice runs from the center's edge to the wheel's edge, slice 0 on
-    top and numbered clockwise; each of its sides sits ``spacing / 2`` pixels
-    inside the line between it and its neighbour, so neighbours stay
-    ``spacing`` apart.
+    extra = dict(opts or {})
+    merged_style = merge_style(style, extra.pop("style", None))
+    return axidev_osk.button(**axidev_osk.merge({**defaults, "style": merged_style}, extra))
+
+
+def wedge(radius_x: float, radius_y: float, outer: float, inner: float, spacing: float, index: int, slices: int) -> Corners:
+    """Slice ``index`` of ``slices`` of the ring between ``inner`` and ``outer`` times the ellipse with radii ``radius_x`` and ``radius_y``.
+
+    Slice 0 is on top and they are numbered clockwise; the corners are canvas
+    pixels. Each side sits ``spacing / 2`` pixels inside the line between the
+    slice and its neighbour, so neighbours stay ``spacing`` apart. A ring
+    inside another (``outer`` below 1) stays ``spacing / 2`` pixels inside it,
+    and one reaching the middle (``inner`` of 0) keeps a hole just large
+    enough for its sides to meet its inner arc.
     """
 
     gap = spacing / 2
     mid_angle = index * 2 * math.pi / slices
     half = math.pi / slices
-    outer = (radius_x, radius_y)
-    hole = (radius_x * inner + gap, radius_y * inner + gap)
+    rim_gap = gap if outer < 1 else 0.0
+    # Kept above zero, since a rim is divided by; only a wheel narrower than its gaps comes near.
+    rim = (max(radius_x * outer - rim_gap, 0.01), max(radius_y * outer - rim_gap, 0.01))
+    # Two sides ``gap`` inside their lines cross ``gap / sin(half)`` from the middle.
+    least = gap / math.sin(half) + 1 if half < math.pi / 2 else gap + 1
+    hole = (max(radius_x * inner + gap, least), max(radius_y * inner + gap, least))
+    # A wheel only a few pixels across leaves no room for the gaps; the hole then takes half the rim, so the slice stays whole.
+    hole = (min(hole[0], rim[0] / 2), min(hole[1], rim[1] / 2))
     sides = [_side(radius_x, radius_y, mid_angle, mid_angle + turn, gap) for turn in (-half, half)]
-    corners = _arc(outer, _meet(outer, *sides[0]), _meet(outer, *sides[1]), ARC_CORNERS)
-    corners += _arc(hole, _meet(hole, *sides[1]), _meet(hole, *sides[0]), max(2, round(ARC_CORNERS * inner)), backward=True)
+    reach = ARC_CORNERS * SLICES / slices
+    corners = _arc(rim, _meet(rim, *sides[0]), _meet(rim, *sides[1]), max(2, round(reach * outer)))
+    corners += _arc(hole, _meet(hole, *sides[1]), _meet(hole, *sides[0]), max(2, round(reach * inner)), backward=True)
     return [[radius_x + x, radius_y + y] for x, y in corners]
 
 
-def middle(radius_x: float, radius_y: float, inner: float, index: int, slices: int) -> list[float]:
-    """The point halfway between the center's edge and the wheel's edge along slice ``index``'s middle."""
+def middle(radius_x: float, radius_y: float, outer: float, inner: float, index: int, slices: int) -> list[float]:
+    """The point halfway across the ring between ``inner`` and ``outer`` along slice ``index``'s middle."""
 
     turn = index * 2 * math.pi / slices
-    reach = (1 + inner) / 2
+    reach = (outer + inner) / 2
     return [radius_x + radius_x * reach * math.sin(turn), radius_y - radius_y * reach * math.cos(turn)]
-
-
-def hub(radius_x: float, radius_y: float, inner: float, spacing: float) -> Corners:
-    """The center of the ellipse with radii ``radius_x`` and ``radius_y``, ``spacing / 2`` pixels inside the slices."""
-
-    gap = spacing / 2
-    reach_x, reach_y = max(1.0, radius_x * inner - gap), max(1.0, radius_y * inner - gap)
-    steps = ARC_CORNERS * 2
-    return [
-        [radius_x + reach_x * math.sin(turn), radius_y - reach_y * math.cos(turn)]
-        for turn in (step * 2 * math.pi / steps for step in range(steps))
-    ]
 
 
 def _side(radius_x: float, radius_y: float, mid_angle: float, edge: float, gap: float) -> tuple[tuple[float, float], tuple[float, float]]:

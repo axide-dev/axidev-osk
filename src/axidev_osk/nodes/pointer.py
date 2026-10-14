@@ -7,7 +7,9 @@ node meanwhile. Each event carries the node ID and the pointer position in
 the node's own pixels, so a profile can follow a swipe across a grid of keys.
 A press and its release also carry the mouse button (``left``, ``right``,
 ``middle``, ...); while one button holds the press, the others are not
-reported, and only that button's release ends it.
+reported, and only that button's release ends it. A release that never
+reaches the node, such as when its window hides mid-press, is noticed at the
+next press, which starts a new one.
 Reporting never takes the event away: the children under the pointer still
 get their presses and clicks.
 
@@ -25,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QChildEvent, QEvent, QObject, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
@@ -151,20 +153,46 @@ def register_pointer_events(dispatcher: Dispatcher) -> None:
     dispatcher.register_event(NODE_WHEEL, decode_node_wheel)
 
 
-class PointerReporter(QObject):
+class _SubtreeReporter(QObject):
+    """Filter the events of one widget and every descendant, including descendants added later."""
+
+    def __init__(self, widget: QWidget) -> None:
+        super().__init__(widget)
+        self._watch(widget)
+
+    def _watch(self, widget: QWidget) -> None:
+        for watched in (widget, *widget.findChildren(QWidget)):
+            self._prepare(watched)
+            # Installing a filter twice moves it to the front without running it twice.
+            watched.installEventFilter(self)
+
+    def _prepare(self, widget: QWidget) -> None:
+        """Set up a newly watched widget; nothing by default."""
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt override
+        if event.type() == QEvent.Type.ChildPolished and isinstance(event, QChildEvent):
+            child = event.child()
+            if isinstance(child, QWidget):
+                self._watch(child)
+        return self._observe(watched, event)
+
+    def _observe(self, watched: QObject, event: QEvent) -> bool:
+        raise NotImplementedError
+
+
+class PointerReporter(_SubtreeReporter):
     """Watch one node's widget and its descendants, and post its pointer events."""
 
     def __init__(self, node_id: str, widget: QWidget, dispatcher: Dispatcher) -> None:
-        super().__init__(widget)
         self._node_id = node_id
         self._widget = widget
         self._dispatcher = dispatcher
         self._button: str | None = None
+        self._held = Qt.MouseButton.NoButton
         self._last: tuple[QEvent.Type, int, float, float] | None = None
-        for watched in (widget, *widget.findChildren(QWidget)):
-            watched.installEventFilter(self)
+        super().__init__(widget)
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+    def _observe(self, watched: QObject, event: QEvent) -> bool:
         name = _EVENTS.get(event.type())
         if name is None or not isinstance(event, QMouseEvent):
             return False
@@ -181,9 +209,10 @@ class PointerReporter(QObject):
             self._dispatcher.post(node_pointer(name, self._node_id, point.x(), point.y()))
             return False
         if name == NODE_POINTER_PRESSED:
-            if self._button is not None:
+            if self._button is not None and self._still_held(event):
                 return False
             self._button = button
+            self._held = event.button()
         elif button != self._button:
             return False
         else:
@@ -191,22 +220,32 @@ class PointerReporter(QObject):
         self._dispatcher.post(node_pointer(name, self._node_id, point.x(), point.y(), button))
         return False
 
+    def _still_held(self, press: QMouseEvent) -> bool:
+        """Whether the press in progress goes on while ``press`` starts.
 
-class HoverReporter(QObject):
+        A release can miss the node, such as when its window hides during the
+        press. Pressing the held button again, or pressing another while Qt
+        no longer reports the held one down, shows that press is over.
+        """
+
+        return press.button() != self._held and bool(press.buttons() & self._held)
+
+
+class HoverReporter(_SubtreeReporter):
     """Watch one node's widget and its descendants, and post its hover movements and its leaving."""
 
     def __init__(self, node_id: str, widget: QWidget, dispatcher: Dispatcher) -> None:
-        super().__init__(widget)
         self._node_id = node_id
         self._widget = widget
         self._dispatcher = dispatcher
         self._last: tuple[int, float, float] | None = None
-        for watched in (widget, *widget.findChildren(QWidget)):
-            # Qt reports movement without a held button only to widgets that track the mouse.
-            watched.setMouseTracking(True)
-            watched.installEventFilter(self)
+        super().__init__(widget)
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+    def _prepare(self, widget: QWidget) -> None:
+        # Qt reports movement without a held button only to widgets that track the mouse.
+        widget.setMouseTracking(True)
+
+    def _observe(self, watched: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Leave and watched is self._widget:
             self._dispatcher.post(validated_event(NODE_POINTER_LEFT, {"node": self._node_id}, decode_node))
             return False
@@ -230,18 +269,16 @@ class HoverReporter(QObject):
         return False
 
 
-class WheelReporter(QObject):
+class WheelReporter(_SubtreeReporter):
     """Watch one node's widget and its descendants, and post each wheel turn over them."""
 
     def __init__(self, node_id: str, widget: QWidget, dispatcher: Dispatcher) -> None:
-        super().__init__(widget)
         self._node_id = node_id
         self._dispatcher = dispatcher
         self._last: tuple[int, int, int] | None = None
-        for watched in (widget, *widget.findChildren(QWidget)):
-            watched.installEventFilter(self)
+        super().__init__(widget)
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+    def _observe(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.Wheel or not isinstance(event, QWheelEvent):
             return False
         delta = event.angleDelta()

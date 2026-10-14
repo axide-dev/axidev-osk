@@ -284,6 +284,29 @@ class OverlayWindowControllerTests(unittest.TestCase):
 
         self.assertEqual((window.x(), window.y()), (700, 540))
 
+    def test_layer_shell_restored_position_is_kept_on_screen(self) -> None:
+        window = FakeWindow()
+        with patch.object(AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.WAYLAND_LAYER_SHELL):
+            controller = AlwaysOnTopWindowController(window)
+
+        with (
+            patch.object(controller, "_current_screen_geometry", return_value=QRect(0, 0, 800, 600)),
+            patch("axidev_osk.windows.overlay.always_on_top.apply_wayland_layer_shell", return_value=True),
+        ):
+            controller.restore_position(2000, 590)
+
+        self.assertEqual(controller._layer_shell_margins, QMargins(700, 0, 0, 0))
+
+    def test_a_floating_drag_against_the_edge_moves_the_window_once(self) -> None:
+        window = FakeWindow()
+        with patch.object(AlwaysOnTopWindowController, "_detect_backend", return_value=OverlayBackend.X11_UTILITY):
+            controller = AlwaysOnTopWindowController(window)
+
+        with patch.object(controller, "_current_screen_geometry", return_value=QRect(0, 0, 800, 600)):
+            controller.move_by(900, 0)
+
+        self.assertEqual(window.moves, [(700, 0)])
+
     def test_floating_window_starts_at_its_anchor(self) -> None:
         cases = {
             "top-right": (1000 - 100 - 16, 16),

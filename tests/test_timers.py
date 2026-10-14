@@ -5,8 +5,9 @@ from typing import Any
 
 from PySide6.QtTest import QTest
 
-from axidev_osk.messages import RuntimeAction
+from axidev_osk.messages import RuntimeAction, RuntimeEvent
 from axidev_osk.python_defaults import axidev_osk
+from axidev_osk.runtime.timers import TIMER_ELAPSED
 from support import RecordingBackend, make_test_engine, qt_app, start_test_profile
 
 
@@ -45,6 +46,23 @@ class TimerTests(unittest.TestCase):
         QTest.qWait(80)
 
         self.assertEqual(self.fired, [])
+
+    def test_a_fire_already_queued_before_a_cancel_or_restart_is_dropped(self) -> None:
+        elapsed: list[Any] = []
+        self.engine.dispatcher.add_raw_event_handler(TIMER_ELAPSED, lambda event: elapsed.append(event) or [])
+        self._send(axidev_osk.timer.start("hide", 0))
+        for _attempt in range(200):
+            if self.fired:
+                break
+            QTest.qWait(5)
+        self.assertEqual((self.fired, len(elapsed)), (["hide"], 1))
+
+        # A fire Qt queued before the cancel reaches the queue after it.
+        self._send(axidev_osk.timer.start("hide", 500))
+        self._send(axidev_osk.timer.cancel("hide"))
+        self.engine.dispatcher.dispatch(RuntimeEvent(TIMER_ELAPSED, elapsed[0]))
+
+        self.assertEqual(self.fired, ["hide"])
 
     def test_stopping_the_profile_drops_its_timers(self) -> None:
         self._send(axidev_osk.timer.start("tick", 10, repeat=True))

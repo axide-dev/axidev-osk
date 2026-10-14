@@ -133,6 +133,10 @@ profile = _Profile()
 
 
 def _node(kind: str, fields: Mapping[str, Any]) -> Map:
+    """A node map of ``kind``; each builder names its own kind, so ``fields`` cannot replace it."""
+
+    if "kind" in fields:
+        raise TypeError(f"axidev_osk.{kind}() builds a {kind} node; use the builder of the kind you want instead of 'kind'")
     return {"kind": kind, **fields}
 
 
@@ -142,6 +146,10 @@ def grid(**fields: Any) -> Map:
 
 def box(**fields: Any) -> Map:
     return _node("box", fields)
+
+
+def scroll(**fields: Any) -> Map:
+    return _node("scroll", fields)
 
 
 def stack(**fields: Any) -> Map:
