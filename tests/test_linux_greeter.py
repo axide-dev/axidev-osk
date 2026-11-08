@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -264,7 +265,7 @@ class NativeAdapterTests(unittest.TestCase):
             "}\n"
         )
 
-        managed = linux_greeter._plasma_lock_screen_ui_text(original)
+        managed = linux_greeter._plasma_lock_screen_ui_text(original, native_button=False)
 
         self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_IMPORT_PATCH, managed)
         self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, managed)
@@ -300,7 +301,7 @@ class NativeAdapterTests(unittest.TestCase):
         self.assertIn("function onSucceeded()", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertNotIn("target: root", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
         self.assertNotIn("Component.onDestruction", linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH)
-        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(managed), managed)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(managed, native_button=False), managed)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(managed), original)
 
         changed = managed.replace(
@@ -313,7 +314,7 @@ class NativeAdapterTests(unittest.TestCase):
             "                text: \"Axidev OSK\"\n",
             "                changed button\n",
         )
-        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(changed), managed)
+        self.assertEqual(linux_greeter._plasma_lock_screen_ui_text(changed, native_button=False), managed)
         self.assertEqual(linux_greeter._plasma_lock_screen_ui_without_patch(changed), original)
 
     def test_plasma_lock_screen_patch_migrates_v0173_block(self) -> None:
@@ -334,7 +335,7 @@ class NativeAdapterTests(unittest.TestCase):
             "        id: lockScreenRoot\n\n" + linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH,
         )
 
-        managed = linux_greeter._plasma_lock_screen_ui_text(v0173)
+        managed = linux_greeter._plasma_lock_screen_ui_text(v0173, native_button=False)
 
         self.assertNotIn(linux_greeter.PLASMA_LOCK_SCREEN_V0173_PATCH, managed)
         self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_IMPORT_PATCH, managed)
@@ -354,7 +355,7 @@ class NativeAdapterTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(linux.LinuxSetupError, "marker pair"):
-            linux_greeter._plasma_lock_screen_ui_text(changed)
+            linux_greeter._plasma_lock_screen_ui_text(changed, native_button=False)
         with self.assertRaisesRegex(linux.LinuxSetupError, "marker pair"):
             linux_greeter._plasma_lock_screen_ui_without_patch(changed)
 
@@ -480,7 +481,7 @@ class NativeAdapterTests(unittest.TestCase):
                 lock_screen_ui.write_text(original_lock_screen_ui, encoding="utf-8")
                 kwin_dropin.write_text("changed after setup\n", encoding="utf-8")
                 with patch.object(linux_greeter, "_runtime_launcher", return_value=launcher):
-                    self.assertTrue(linux_greeter._repair_plasma_lock_screen_patch(state))
+                    self.assertTrue(linux_greeter._repair_plasma_lock_screen_patch(native_button=False))
                 self.assertIn(
                     linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH,
                     lock_screen_ui.read_text(encoding="utf-8"),
@@ -500,6 +501,78 @@ class NativeAdapterTests(unittest.TestCase):
             self.assertEqual(kwinrc.read_text(encoding="utf-8"), original)
             self.assertFalse(input_method.exists())
             self.assertFalse(kwin_dropin.exists())
+            self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), original_lock_screen_ui)
+
+    def test_plasma_68_setup_leaves_the_keyboard_button_to_plasma(self) -> None:
+        # Plasma 6.8's own Virtual Keyboard button opens the input method, so
+        # setup adds only the visibility block, and setup run again removes the
+        # 6.7 button an earlier setup left behind.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_method = root / "axidev-osk-input-panel.desktop"
+            kwin_dropin = root / "50-axidev-osk.conf"
+            kwin_unit = root / "plasma-login-kwin_wayland.service"
+            kwinrc = root / "kwinrc"
+            lock_screen_ui = root / "LockScreenUi.qml"
+            state_path = root / "greeter.json"
+            original_lock_screen_ui = (
+                "Item {\n"
+                "    MouseArea {\n"
+                "        id: lockScreenRoot\n\n"
+                "        property bool uiVisible: false\n"
+                "    }\n"
+                "    RowLayout {\n"
+                "            PlasmaComponents3.ToolButton {\n"
+                "                id: virtualKeyboardButton\n"
+                "            }\n"
+                "    }\n"
+                "}\n"
+            )
+            kwinrc.write_text("[Wayland]\nUnmanaged=value\n", encoding="utf-8")
+            lock_screen_ui.write_text(original_lock_screen_ui, encoding="utf-8")
+            kwin_unit.write_text(self.PLASMA_KWIN_UNIT, encoding="utf-8")
+            launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+            account = linux.Account("plasmalogin", 981, 981, root)
+
+            with (
+                patch.object(linux_greeter, "PLASMA_INPUT_METHOD_PATH", input_method),
+                patch.object(linux_greeter, "PLASMA_KWIN_DROPIN_PATH", kwin_dropin),
+                patch.object(linux_greeter, "PLASMA_KWIN_UNIT_PATHS", (kwin_unit,)),
+                patch.object(linux_greeter, "KWIN_CONFIG_PATH", kwinrc),
+                patch.object(linux_greeter, "PLASMA_LOCK_SCREEN_UI_PATH", lock_screen_ui),
+                patch.object(linux_greeter, "STATE_PATH", state_path),
+                patch.object(linux_greeter, "_plasma_version", return_value=(6, 8, 2)),
+                patch.object(linux_greeter, "_installed_launcher", return_value=launcher),
+                patch.object(linux_greeter, "_runtime_launcher", return_value=launcher),
+                patch.object(linux_greeter, "_manager_installed", return_value=True),
+                patch.object(linux, "_resolve_account", return_value=account),
+                patch.object(linux, "_status_permissions", return_value=0),
+            ):
+                prepared_account, details = linux_greeter._prepare_plasma(launcher)
+                linux_greeter._install_manager(
+                    "plasma-login",
+                    linux_greeter._manager_adapter("plasma-login"),
+                    prepared_account,
+                    launcher,
+                    details,
+                )
+                installed = lock_screen_ui.read_text(encoding="utf-8")
+                self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, installed)
+                self.assertNotIn(linux_greeter.PLASMA_LOCK_SCREEN_BUTTON_PATCH_START, installed)
+                self.assertNotIn(linux_greeter.PLASMA_LOCK_SCREEN_IMPORT_PATCH_START, installed)
+
+                lock_screen_ui.write_text(
+                    linux_greeter._plasma_lock_screen_ui_text(original_lock_screen_ui, native_button=False),
+                    encoding="utf-8",
+                )
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(linux_greeter._setup(None), 0)
+                self.assertIn("already configured for plasma-login", output.getvalue())
+                self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), installed)
+
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                linux_greeter._remove_plasma(launcher, state)
+
             self.assertEqual(lock_screen_ui.read_text(encoding="utf-8"), original_lock_screen_ui)
 
     def test_v0173_plasma_remove_keeps_working(self) -> None:

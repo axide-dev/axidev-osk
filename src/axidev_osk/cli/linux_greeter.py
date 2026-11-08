@@ -72,6 +72,9 @@ PLASMA_LOCK_SCREEN_IMPORT_PATCH_START = "// BEGIN AXIDEV OSK IMPORT MANAGED"
 PLASMA_LOCK_SCREEN_IMPORT_PATCH_END = "// END AXIDEV OSK IMPORT MANAGED"
 PLASMA_LOCK_SCREEN_MIN_VERSION = (6, 7, 0)
 PLASMA_LOCK_SCREEN_MAX_VERSION = (7, 0, 0)
+PLASMA_NATIVE_KEYBOARD_VERSION = (6, 8, 0)
+"""From this version Plasma's own Virtual Keyboard button calls KWin's forceActivate,
+so setup adds no button and the lock supervisor prepares the panel when KWin activates it."""
 PLASMA_LOCK_SCREEN_V0173_PATCH = (
     "        // BEGIN AXIDEV OSK MANAGED\n"
     "        Connections {\n"
@@ -286,13 +289,15 @@ def _setup(requested_manager: str | None) -> int:
                 f"greeter integration already manages {existing['manager']}; remove it first"
             )
         if existing["manager"] == "plasma-login":
-            _require_supported_plasma_lock_screen_version()
+            version = _require_supported_plasma_lock_screen_version()
             upgraded_supervisor = _upgrade_plasma_supervisor_files(_installed_launcher())
             if upgraded_supervisor:
                 print("Migrated Plasma lock-screen supervision to the native launcher.")
-        repaired_lock_screen = _repair_plasma_lock_screen_patch(existing)
-        if repaired_lock_screen:
-            print("Restored the managed Plasma lock-screen visibility block.")
+            repaired_lock_screen = _repair_plasma_lock_screen_patch(
+                native_button=_plasma_has_native_keyboard_button(version)
+            )
+            if repaired_lock_screen:
+                print("Updated the managed Plasma lock-screen blocks for this Plasma version.")
         if _status_state(existing) == 0:
             print(f"Greeter startup is already configured for {existing['manager']}.")
             return 0
@@ -341,20 +346,18 @@ def _status_state(state: dict[str, Any]) -> int:
     return 0 if permission_status == 0 and all(passed for _, passed in checks) else 1
 
 
-def _repair_plasma_lock_screen_patch(state: dict[str, Any]) -> bool:
-    """Restore a missing managed QML block independently of other status checks."""
+def _repair_plasma_lock_screen_patch(*, native_button: bool) -> bool:
+    """Restore the managed QML blocks for this Plasma version, independently of other status checks."""
 
-    if _state_manager(state) != "plasma-login":
-        return False
     lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
-    if _plasma_lock_screen_patch_is_current(lock_screen_ui):
+    if _plasma_lock_screen_patch_is_current(lock_screen_ui, native_button=native_button):
         return False
     if lock_screen_ui is None:
         raise linux.LinuxSetupError(
             f"Plasma lock-screen QML does not exist: {PLASMA_LOCK_SCREEN_UI_PATH}"
         )
     _require_writable_regular_file(PLASMA_LOCK_SCREEN_UI_PATH)
-    managed = _plasma_lock_screen_ui_text(lock_screen_ui)
+    managed = _plasma_lock_screen_ui_text(lock_screen_ui, native_button=native_button)
     linux._write_atomic(
         PLASMA_LOCK_SCREEN_UI_PATH,
         managed,
@@ -517,7 +520,7 @@ def _installed_launcher() -> Path:
 
 
 def _prepare_plasma(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
-    _require_supported_plasma_lock_screen_version()
+    version = _require_supported_plasma_lock_screen_version()
     account = linux._resolve_account("plasmalogin", require_home=False)
     original_kwinrc = linux._read_text(KWIN_CONFIG_PATH)
     lock_screen_ui = linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)
@@ -526,7 +529,10 @@ def _prepare_plasma(launcher: Path) -> tuple[linux.Account, dict[str, Any]]:
             f"Plasma lock-screen QML does not exist: {PLASMA_LOCK_SCREEN_UI_PATH}"
         )
     managed_kwinrc = _plasma_kwin_config_text(original_kwinrc)
-    managed_lock_screen_ui = _plasma_lock_screen_ui_text(lock_screen_ui)
+    managed_lock_screen_ui = _plasma_lock_screen_ui_text(
+        lock_screen_ui,
+        native_button=_plasma_has_native_keyboard_button(version),
+    )
     _require_compatible_file(
         PLASMA_INPUT_METHOD_PATH,
         _plasma_input_method_text(launcher),
@@ -659,6 +665,7 @@ def _install_greetd(
 
 
 def _check_plasma(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool]]:
+    version = _plasma_version()
     version_check = (
         "Plasma version >=6.7.0,<7.0.0",
         _plasma_lock_screen_version_supported(),
@@ -697,7 +704,10 @@ def _check_plasma(launcher: Path, state: dict[str, Any]) -> list[tuple[str, bool
         ),
         (
             str(PLASMA_LOCK_SCREEN_UI_PATH),
-            _plasma_lock_screen_patch_is_current(linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH)),
+            _plasma_lock_screen_patch_is_current(
+                linux._read_text(PLASMA_LOCK_SCREEN_UI_PATH),
+                native_button=_plasma_has_native_keyboard_button(version),
+            ),
         ),
     ]
 
@@ -995,20 +1005,33 @@ def _plasma_kwin_config_text(original: str | None) -> str:
     return "".join(lines)
 
 
-def _plasma_lock_screen_patch_is_current(text: str | None) -> bool:
-    """Return whether QML contains both unmodified managed blocks."""
+def _plasma_lock_screen_patch_is_current(text: str | None, *, native_button: bool) -> bool:
+    """Return whether QML holds exactly the unmodified managed blocks its Plasma version needs.
 
-    return bool(
-        text is not None
-        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH) == 1
-        and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH) == 1
-        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH) == 1
-        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH_START) == 1
-        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH_END) == 1
+    With Plasma's own keyboard button that is the visibility block alone;
+    before it, the import and button blocks too.
+    """
+
+    if text is None:
+        return False
+    root_current = (
+        text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH) == 1
         and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_START) == 1
         and text.count(PLASMA_LOCK_SCREEN_ROOT_PATCH_END) == 1
-        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_START) == 1
-        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH_END) == 1
+    )
+    button_markers = (
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+        PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+    )
+    if native_button:
+        return root_current and not any(marker in text for marker in button_markers)
+    return (
+        root_current
+        and text.count(PLASMA_LOCK_SCREEN_IMPORT_PATCH) == 1
+        and text.count(PLASMA_LOCK_SCREEN_BUTTON_PATCH) == 1
+        and all(text.count(marker) == 1 for marker in button_markers)
     )
 
 
@@ -1106,7 +1129,7 @@ def _plasma_lock_screen_version_supported() -> bool:
     )
 
 
-def _require_supported_plasma_lock_screen_version() -> None:
+def _require_supported_plasma_lock_screen_version() -> tuple[int, int, int]:
     version = _plasma_version()
     if version is None:
         raise linux.LinuxSetupError("cannot determine the installed Plasma version")
@@ -1115,10 +1138,22 @@ def _require_supported_plasma_lock_screen_version() -> None:
         raise linux.LinuxSetupError(
             f"Plasma lock-screen integration supports versions >=6.7.0 and <7.0.0; found {rendered}"
         )
+    return version
 
 
-def _plasma_lock_screen_ui_text(original: str) -> str:
-    """Add the managed always-visible unlock UI block to Plasma QML."""
+def _plasma_has_native_keyboard_button(version: tuple[int, int, int] | None) -> bool:
+    """Whether Plasma's own Virtual Keyboard button opens the input method on its lock screen."""
+
+    return version is not None and version >= PLASMA_NATIVE_KEYBOARD_VERSION
+
+
+def _plasma_lock_screen_ui_text(original: str, *, native_button: bool) -> str:
+    """Add the managed always-visible unlock UI block to Plasma QML.
+
+    Before Plasma 6.8 it also adds the Axidev OSK button, which prepares the
+    panel over D-Bus. From 6.8 Plasma's own Virtual Keyboard button does that
+    job, so the button and its imports are removed instead of added.
+    """
 
     if PLASMA_LOCK_SCREEN_V0173_PATCH in original:
         original = original.replace("\n" + PLASMA_LOCK_SCREEN_V0173_PATCH, "", 1)
@@ -1128,17 +1163,41 @@ def _plasma_lock_screen_ui_text(original: str) -> str:
     ):
         raise linux.LinuxSetupError("refusing to replace a changed Axidev 0.17.3 QML block")
 
-    managed, has_import = _replace_managed_block(
-        original,
-        PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
-        PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
-        PLASMA_LOCK_SCREEN_IMPORT_PATCH,
-    )
     managed, has_root = _replace_managed_block(
-        managed,
+        original,
         PLASMA_LOCK_SCREEN_ROOT_PATCH_START,
         PLASMA_LOCK_SCREEN_ROOT_PATCH_END,
         PLASMA_LOCK_SCREEN_ROOT_PATCH,
+    )
+    root_anchor = "    MouseArea {\n        id: lockScreenRoot\n"
+    if not has_root and managed.count(root_anchor) != 1:
+        raise linux.LinuxSetupError(
+            "Plasma lock-screen QML does not contain the supported lockScreenRoot structure"
+        )
+    if not has_root:
+        managed = managed.replace(
+            root_anchor,
+            root_anchor + "\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH,
+            1,
+        )
+    if native_button:
+        managed, _ = _remove_managed_block(
+            managed,
+            PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
+            PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
+        )
+        managed, _ = _remove_managed_block(
+            managed,
+            PLASMA_LOCK_SCREEN_BUTTON_PATCH_START,
+            PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
+        )
+        return managed
+
+    managed, has_import = _replace_managed_block(
+        managed,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_START,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH_END,
+        PLASMA_LOCK_SCREEN_IMPORT_PATCH,
     )
     managed, has_button = _replace_managed_block(
         managed,
@@ -1146,21 +1205,10 @@ def _plasma_lock_screen_ui_text(original: str) -> str:
         PLASMA_LOCK_SCREEN_BUTTON_PATCH_END,
         PLASMA_LOCK_SCREEN_BUTTON_PATCH,
     )
-    root_anchor = "    MouseArea {\n        id: lockScreenRoot\n"
     button_anchor = "            PlasmaComponents3.ToolButton {\n                id: virtualKeyboardButton\n"
-    if not has_root and managed.count(root_anchor) != 1:
-        raise linux.LinuxSetupError(
-            "Plasma lock-screen QML does not contain the supported lockScreenRoot structure"
-        )
     if not has_button and managed.count(button_anchor) != 1:
         raise linux.LinuxSetupError(
             "Plasma lock-screen QML does not contain the supported virtualKeyboardButton structure"
-        )
-    if not has_root:
-        managed = managed.replace(
-            root_anchor,
-            root_anchor + "\n" + PLASMA_LOCK_SCREEN_ROOT_PATCH,
-            1,
         )
     if not has_button:
         managed = managed.replace(

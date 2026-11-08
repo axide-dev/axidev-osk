@@ -15,6 +15,18 @@ const START_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
+// From Plasma 6.8 the lock screen's own Virtual Keyboard button calls KWin's
+// forceActivate, and KWin shows a mapped input-method panel once it is allowed.
+// The supervisor then prepares the panel itself while the screen is locked and
+// KWin's input method is active, instead of waiting for the Axidev OSK button
+// that setup adds to Plasma 6.7's lock-screen QML.
+const NATIVE_KEYBOARD_VERSION: (u32, u32) = (6, 8);
+const KWIN_SERVICE: &str = "org.kde.KWin";
+const KWIN_VIRTUAL_KEYBOARD_PATH: &str = "/VirtualKeyboard";
+const KWIN_VIRTUAL_KEYBOARD_INTERFACE: &str = "org.kde.kwin.VirtualKeyboard";
+const SCREEN_SAVER_SERVICE: &str = "org.freedesktop.ScreenSaver";
+const SCREEN_SAVER_PATH: &str = "/ScreenSaver";
+const SCREEN_SAVER_INTERFACE: &str = "org.freedesktop.ScreenSaver";
 
 fn required_path(path: PathBuf, label: &str) -> PathBuf {
     if !path.exists() {
@@ -197,6 +209,171 @@ impl LockScreenService {
     }
 }
 
+/// Keeps the worker's panel prepared exactly while the screen is locked and
+/// KWin's input method is active; KWin decides whether the prepared panel shows.
+struct PanelFollower {
+    prepared: bool,
+}
+
+impl PanelFollower {
+    fn new() -> Self {
+        Self { prepared: false }
+    }
+
+    fn follow(&mut self, service: &LockScreenService, input_method_active: bool, locked: bool) {
+        let wanted = input_method_active && locked;
+        if wanted == self.prepared {
+            return;
+        }
+        if wanted {
+            service.request("PREPARE", "PREPARED");
+        } else {
+            service.request("RELEASE", "RELEASED");
+        }
+        self.prepared = wanted;
+    }
+}
+
+fn parse_plasma_version(text: &str) -> Option<(u32, u32)> {
+    let version = text.split_whitespace().last()?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+fn plasma_has_native_keyboard_button() -> bool {
+    // plasmashell must not reach KWin's privileged connection, so it gets no
+    // Wayland or X11 display and Qt's offscreen platform.
+    let output = Command::new("plasmashell")
+        .arg("--version")
+        .env_remove("WAYLAND_SOCKET")
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .env("QT_QPA_PLATFORM", "offscreen")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let version = match output {
+        Ok(output) if output.status.success() => {
+            parse_plasma_version(&String::from_utf8_lossy(&output.stdout))
+        }
+        Ok(output) => {
+            eprintln!(
+                "axidev-osk: plasmashell --version exited with {}",
+                output.status
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!("axidev-osk: cannot run plasmashell --version: {error}");
+            None
+        }
+    };
+    match version {
+        Some(version) => version >= NATIVE_KEYBOARD_VERSION,
+        None => {
+            eprintln!("axidev-osk: unknown Plasma version; waiting for the lock-screen button");
+            false
+        }
+    }
+}
+
+/// A state that cannot be read counts as false, so the panel is released rather than left prepared.
+fn or_false(label: &str, value: zbus::Result<bool>) -> bool {
+    value.unwrap_or_else(|error| {
+        eprintln!("axidev-osk: cannot read {label}: {error}");
+        false
+    })
+}
+
+fn input_method_active(connection: &zbus::blocking::Connection) -> bool {
+    let value = connection
+        .call_method(
+            Some(KWIN_SERVICE),
+            KWIN_VIRTUAL_KEYBOARD_PATH,
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &(KWIN_VIRTUAL_KEYBOARD_INTERFACE, "active"),
+        )
+        .and_then(|reply| {
+            let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+            bool::try_from(value).map_err(zbus::Error::from)
+        });
+    or_false("whether KWin's input method is active", value)
+}
+
+fn screen_locked(connection: &zbus::blocking::Connection) -> bool {
+    let value = connection
+        .call_method(
+            Some(SCREEN_SAVER_SERVICE),
+            SCREEN_SAVER_PATH,
+            Some(SCREEN_SAVER_INTERFACE),
+            "GetActive",
+            &(),
+        )
+        .and_then(|reply| reply.body().deserialize::<bool>());
+    or_false("whether the screen is locked", value)
+}
+
+fn watch_signal(
+    connection: &zbus::blocking::Connection,
+    interface: &'static str,
+    member: &'static str,
+    wake: mpsc::Sender<()>,
+) -> Result<(), String> {
+    // Matched by interface and member, not sender, so the watch holds even
+    // when the service registers its name after the supervisor starts.
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface(interface)
+        .and_then(|builder| builder.member(member))
+        .map_err(|error| format!("invalid D-Bus match for {interface}.{member}: {error}"))?
+        .build();
+    let messages = zbus::blocking::MessageIterator::for_match_rule(rule, connection, None)
+        .map_err(|error| format!("cannot watch {interface}.{member}: {error}"))?;
+    thread::spawn(move || {
+        for message in messages {
+            if message.is_err() || wake.send(()).is_err() {
+                break;
+            }
+        }
+        recover_through_kwin(&format!("D-Bus watch of {interface}.{member} ended"));
+    });
+    Ok(())
+}
+
+fn follow_kwin_input_method(
+    connection: &zbus::blocking::Connection,
+    service: LockScreenService,
+) -> Result<(), String> {
+    let (wake, woken) = mpsc::channel();
+    watch_signal(
+        connection,
+        KWIN_VIRTUAL_KEYBOARD_INTERFACE,
+        "activeChanged",
+        wake.clone(),
+    )?;
+    watch_signal(connection, SCREEN_SAVER_INTERFACE, "ActiveChanged", wake)?;
+    let connection = connection.clone();
+    thread::spawn(move || {
+        let mut follower = PanelFollower::new();
+        loop {
+            follower.follow(
+                &service,
+                input_method_active(&connection),
+                screen_locked(&connection),
+            );
+            if woken.recv().is_err() {
+                break;
+            }
+            // Signals that arrived meanwhile describe the state read next.
+            while woken.try_recv().is_ok() {}
+        }
+    });
+    Ok(())
+}
+
 #[zbus::interface(name = "org.axidev.OSK.LockScreen")]
 impl LockScreenService {
     #[zbus(name = "prepare")]
@@ -223,11 +400,12 @@ fn run_lock_supervisor(root: &Path) -> Result<(), String> {
     if env::var_os("WAYLAND_SOCKET").is_none() {
         return Err("KWin did not provide WAYLAND_SOCKET".to_string());
     }
+    let native_keyboard_button = plasma_has_native_keyboard_button();
     let worker = Arc::new(Mutex::new(Worker::start(root)?));
     let interface = LockScreenService {
         worker: Arc::clone(&worker),
     };
-    let _connection = zbus::blocking::connection::Builder::session()
+    let connection = zbus::blocking::connection::Builder::session()
         .map_err(|error| format!("cannot connect to the session bus: {error}"))?
         .name(SERVICE_NAME)
         .map_err(|error| format!("cannot own D-Bus service {SERVICE_NAME}: {error}"))?
@@ -235,6 +413,14 @@ fn run_lock_supervisor(root: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot export {INTERFACE_NAME}: {error}"))?
         .build()
         .map_err(|error| format!("cannot start D-Bus service {SERVICE_NAME}: {error}"))?;
+    if native_keyboard_button {
+        follow_kwin_input_method(
+            &connection,
+            LockScreenService {
+                worker: Arc::clone(&worker),
+            },
+        )?;
+    }
 
     loop {
         thread::sleep(PING_INTERVAL);
@@ -279,10 +465,13 @@ mod tests {
         fs::create_dir_all(root.join("lib/python")).unwrap();
         fs::write(
             root.join("libexec/launch.py"),
-            r#"import sys
+            r#"import pathlib, sys
+received = pathlib.Path(__file__).resolve().parent.parent / "received"
 print("AXIDEV_OSK READY", flush=True)
 responses = {"PING": "PONG", "PREPARE": "PREPARED", "RELEASE": "RELEASED"}
 for line in sys.stdin:
+    with received.open("a") as log:
+        log.write(line)
     print("AXIDEV_OSK " + responses.get(line.strip(), "ERROR"), flush=True)
 "#,
         )
@@ -318,6 +507,46 @@ for line in sys.stdin:
             .unwrap();
 
         drop(worker);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plasma_version_selects_the_native_keyboard_button_from_6_8() {
+        assert_eq!(parse_plasma_version("plasmashell 6.8.2\n"), Some((6, 8)));
+        assert_eq!(parse_plasma_version("plasmashell 6.7.5"), Some((6, 7)));
+        assert!(parse_plasma_version("plasmashell 6.7.5").unwrap() < NATIVE_KEYBOARD_VERSION);
+        assert!(parse_plasma_version("plasmashell 6.8.0").unwrap() >= NATIVE_KEYBOARD_VERSION);
+        assert!(parse_plasma_version("plasmashell 7.0.0").unwrap() >= NATIVE_KEYBOARD_VERSION);
+        assert_eq!(parse_plasma_version("plasmashell"), None);
+        assert_eq!(parse_plasma_version(""), None);
+    }
+
+    #[test]
+    fn panel_is_prepared_only_while_locked_and_kwin_activates_the_input_method() {
+        let root = fake_payload();
+        let service = LockScreenService {
+            worker: Arc::new(Mutex::new(Worker::start(&root).unwrap())),
+        };
+        let mut follower = PanelFollower::new();
+
+        // Desktop text field: KWin activates the input method, nothing is locked.
+        follower.follow(&service, true, false);
+        // Lock screen before its password field takes focus.
+        follower.follow(&service, false, true);
+        // Password field focused on the lock screen, reported twice.
+        follower.follow(&service, true, true);
+        follower.follow(&service, true, true);
+        // KWin deactivates, for example when the Virtual Keyboard button hides it.
+        follower.follow(&service, false, true);
+        follower.follow(&service, true, true);
+        // Unlocked while the input method is still active.
+        follower.follow(&service, true, false);
+
+        drop(service);
+        assert_eq!(
+            fs::read_to_string(root.join("received")).unwrap(),
+            "PREPARE\nRELEASE\nPREPARE\nRELEASE\n"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
