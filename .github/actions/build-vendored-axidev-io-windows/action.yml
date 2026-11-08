@@ -15,7 +15,6 @@ runs:
       run: |
         python build.py clean
         python build.py test
-        python build.py example
 
     - name: Package vendored axidev-io release archive
       shell: pwsh
