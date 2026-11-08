@@ -11,6 +11,7 @@ from typing import Generic, TypeVar, cast
 
 from ..messages import DataMap, MessageResult, RuntimeAction, RuntimeEvent, RuntimeMessage, copy_data_map
 from .decoding import map_value, require_keys, string_value
+from .event_fields import samples
 
 
 DecodedT = TypeVar("DecodedT")
@@ -22,6 +23,9 @@ Wake = Callable[[], None]
 _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
 
+CHECK_HINT = "Run `axidev-osk check` to find configuration problems before they happen."
+"""Added to the log line of every failed action, callback, and binding; the events themselves carry no advice."""
+
 ACTION_FAILED = "action.failed"
 
 
@@ -29,11 +33,11 @@ ACTION_FAILED = "action.failed"
 class ActionFailedArguments:
     """What the dispatcher reports when an action cannot be looked up, decoded, or run."""
 
-    action: str
-    arguments: DataMap
-    stage: str
-    exception_type: str
-    message: str
+    action: str = samples("window.show")
+    arguments: DataMap = samples({})
+    stage: str = samples("lookup", "decode", "execute")
+    exception_type: str = samples("ValueError")
+    message: str = samples("example failure")
 
 
 def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
@@ -154,6 +158,28 @@ class Dispatcher:
 
     def has_event(self, name: str) -> bool:
         return name in self._events
+
+    def action_names(self) -> frozenset[str]:
+        """Every registered action name."""
+
+        return frozenset(self._actions)
+
+    def event_names(self) -> frozenset[str]:
+        """Every registered event name."""
+
+        return frozenset(self._events)
+
+    def action_decoder(self, name: str) -> Decoder[object] | None:
+        """The decoder registered for an action, or ``None`` when the name is not registered."""
+
+        definition = self._actions.get(name)
+        return definition.decoder if definition is not None else None
+
+    def event_decoder(self, name: str) -> Decoder[object] | None:
+        """The decoder registered for an event, or ``None`` when the name is not registered."""
+
+        definition = self._events.get(name)
+        return definition.decoder if definition is not None else None
 
     def close(self) -> None:
         """Drop every waiting message and refuse later ones; used once the app shuts down."""
@@ -288,12 +314,13 @@ class Dispatcher:
 
     def _fail_action(self, action: RuntimeAction, *, stage: str, error: Exception) -> None:
         _logger.error(
-            "Action %s failed during %s with arguments %r: %s: %s",
+            "Action %s failed during %s with arguments %r: %s: %s. %s",
             action.action,
             stage,
             action.arguments,
             type(error).__name__,
             error,
+            CHECK_HINT,
         )
         if self._closed:
             return

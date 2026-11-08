@@ -21,6 +21,7 @@ from PySide6.QtCore import QTimer
 from ..messages import DataMap, MessageResult, RuntimeEvent
 from .decoding import bool_value, int_value, non_empty_string_value, require_keys, validated_event
 from .dispatcher import Dispatcher
+from .event_fields import samples
 
 TIMER_START = "timer.start"
 TIMER_CANCEL = "timer.cancel"
@@ -37,7 +38,7 @@ class TimerStartArguments:
 
 @dataclass(frozen=True, slots=True)
 class TimerArguments:
-    id: str
+    id: str = samples("example")
 
 
 def decode_timer_start(arguments: DataMap) -> TimerStartArguments:
@@ -54,8 +55,8 @@ def decode_timer_start(arguments: DataMap) -> TimerStartArguments:
 
 @dataclass(frozen=True, slots=True)
 class TimerElapsedArguments:
-    id: str
-    generation: int
+    id: str = samples("example")
+    generation: int = samples(1)
 
 
 def decode_timer_elapsed(arguments: DataMap) -> TimerElapsedArguments:

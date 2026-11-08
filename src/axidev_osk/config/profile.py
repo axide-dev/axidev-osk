@@ -127,6 +127,7 @@ class NodeConfig:
     pointer, hover, and wheel events (``nodes/pointer.py``), and
     ``report_geometry`` makes the engine write its place in its window to
     ``nodes.<id>.position`` and ``nodes.<id>.size``.
+    ``path`` is the node's config path, such as ``config.profiles.default.windows[0].content``.
     """
 
     kind: str
@@ -141,6 +142,7 @@ class NodeConfig:
     reports_hover: bool = False
     reports_wheel: bool = False
     report_geometry: bool = False
+    path: str = ""
 
     def walk(self) -> "list[NodeConfig]":
         nodes: list[NodeConfig] = [self]
@@ -242,7 +244,9 @@ class ProfileConfig:
 
     ``state`` holds the profile's own variable declarations, which reset when
     it starts. ``shared`` holds the root config's declarations, which every
-    profile shares and which survive a profile switch.
+    profile shares and which survive a profile switch. ``check_depth`` is how
+    many units ``axidev-osk check`` lets differ from the start state when it
+    explores this profile; nothing else reads it.
     """
 
     id: str
@@ -252,6 +256,7 @@ class ProfileConfig:
     windows: tuple[WindowConfig, ...]
     attachments: tuple[AttachmentConfig, ...]
     on: Mapping[str, tuple[FunctionRef, ...]]
+    check_depth: int = 1
 
     def window(self, window_id: str) -> WindowConfig:
         for window in self.windows:
@@ -310,7 +315,7 @@ class ConfigDecoder:
         reader.finish()
         decoded: dict[str, ProfileConfig] = {}
         for name, value in profiles:
-            profile_reader = ConfigReader(value, _profile_path(name), self._functions)
+            profile_reader = ConfigReader(value, profile_path(name), self._functions)
             decoded[name] = profile_reader.decode(
                 lambda profile_data, name=name: self._decode_profile(name, profile_data, shared)
             )
@@ -349,6 +354,7 @@ class ConfigDecoder:
                     raise ConfigError(f"{reader.field_path('on')}.{event_name}[{index}] must be a function")
                 refs.append(self._functions.register(function))
             on[event_name] = tuple(refs)
+        check_depth = reader.integer("check_depth", 1, minimum=0)
         profile = ProfileConfig(
             id=profile_id,
             state=state,
@@ -357,6 +363,7 @@ class ConfigDecoder:
             windows=windows,
             attachments=attachments,
             on=on,
+            check_depth=check_depth,
         )
         _require_unique((window.id for window in windows), f"{reader.path}.windows")
         _require_unique((node.id for node in profile.nodes()), f"{reader.path} nodes")
@@ -446,6 +453,7 @@ class ConfigDecoder:
             reports_hover=reader.boolean("reports_hover", False),
             reports_wheel=reader.boolean("reports_wheel", False),
             report_geometry=reader.boolean("report_geometry", False),
+            path=reader.path,
         )
 
     def _decode_attachment(self, reader: ConfigReader, resolver: Resolver) -> AttachmentConfig:
@@ -562,7 +570,7 @@ def _decode_chrome(reader: ConfigReader) -> ChromeConfig:
     return ChromeConfig(enabled=reader.boolean("enabled", ChromeConfig().enabled))
 
 
-def _profile_path(name: str) -> str:
+def profile_path(name: str) -> str:
     """Config path of one profile; a name containing dots is quoted so the path stays readable."""
 
     return f"config.profiles[{name!r}]" if "." in name else f"config.profiles.{name}"

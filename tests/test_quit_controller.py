@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from axidev_osk.application.quit_controller import ApplicationQuitController
+from axidev_osk.runtime.app_messages import QuitReason
 from support import qt_app
 
 
@@ -25,7 +26,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
-            controller.request_quit("signal")
+            controller.request_quit(QuitReason.SIGNAL)
 
         send_quit.assert_called_once_with()
         callback.assert_not_called()
@@ -52,7 +53,7 @@ class ApplicationQuitControllerTests(unittest.TestCase):
         controller.register_quit_callback(callback)
 
         with patch.object(app, "exit") as exit_app:
-            controller.request_quit("signal")
+            controller.request_quit(QuitReason.SIGNAL)
             ask.assert_called_once_with("signal")
             callback.assert_not_called()
             exit_app.assert_not_called()

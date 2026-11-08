@@ -4,17 +4,19 @@ import colorsys
 import unittest
 from typing import Any
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
 from axidev_osk.messages import DataMap, RuntimeEvent
 from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
 from axidev_osk.python_defaults import axidev_osk
 from axidev_osk.python_defaults.axidev_osk import std
-from axidev_osk.python_defaults.axidev_osk.std import controls, keys, layouts, locator, prompts, wheel, windows
+from axidev_osk.python_defaults.axidev_osk.std import controls, failures, keys, layouts, locator, prompts, wheel, windows
 from axidev_osk.config.variables import decode_state
-from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
-from axidev_osk.runtime.profile_runtime import state_set
+from axidev_osk.runtime.dispatcher import ACTION_FAILED
+from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset, window_state_changed
+from axidev_osk.runtime.profile_runtime import callback_failed, state_set
 from axidev_osk.runtime.state import StateTree
 from support import (
     RecordingBackend,
@@ -631,6 +633,125 @@ class WindowHelperTests(unittest.TestCase):
         self.assertEqual(run(visible=True, minimized=True), ["window.show"])
         self.assertEqual(run(visible=True), ["window.hide"])
         self.assertEqual(run(), ["window.show"])
+
+
+class FailureNoticeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._start()
+
+    def _start(self, content: axidev_osk.Map | None = None, on: axidev_osk.Map | None = None) -> None:
+        self.engine = make_test_engine(RecordingBackend())
+        self.actions = record_app_actions(self.engine.dispatcher)
+        root = axidev_osk.config(
+            active_profile="p",
+            profiles={
+                "p": axidev_osk.profile(
+                    windows=[
+                        axidev_osk.window(id="pad", title="Pad", content=content or axidev_osk.box(id="root")),
+                        failures.notice_window(),
+                    ],
+                    state=std.with_state({"mode": axidev_osk.var("string", "a")}),
+                    on=std.with_handlers(on, failure_notice=True),
+                )
+            },
+        )
+        self.profile = start_test_profile(self.engine, root)
+
+    def _action_failed(self, action: str, arguments: DataMap) -> RuntimeEvent:
+        return RuntimeEvent(
+            ACTION_FAILED,
+            {"action": action, "arguments": arguments, "stage": "execute", "exception_type": "RuntimeError", "message": "gone"},
+        )
+
+    def test_the_notice_lists_each_distinct_failure_once_with_its_repeats_until_ok(self) -> None:
+        qt_app()
+        width = callback_failed(None, "binding", "node:root", ValueError("bad width"), None)
+        self.engine.dispatcher.dispatch(width)
+        self.engine.dispatcher.dispatch(
+            window_state_changed(
+                failures.NOTICE,
+                visible=True,
+                minimized=False,
+                x=0,
+                y=0,
+                width=460,
+                height=120,
+                content_width=460,
+                content_height=120,
+            ),
+            self._action_failed("window.hide", {"window": "pad"}),
+            width,
+        )
+
+        self.assertEqual(self.actions, [("window.show", {"window": failures.NOTICE})])
+        self.assertEqual(
+            self.engine.profile.state.get(("std", "failure")),
+            {
+                "entries": [
+                    "A binding of node:root failed: ValueError: bad width",
+                    "The action window.hide failed while it was run: RuntimeError: gone",
+                ],
+                "counts": {
+                    "A binding of node:root failed: ValueError: bad width": 2,
+                    "The action window.hide failed while it was run: RuntimeError: gone": 1,
+                },
+            },
+        )
+        window = build_window(self, self.profile.window(failures.NOTICE), self.engine)
+        message = find_node(window, f"{failures.NOTICE}:message")
+        self.assertEqual(
+            message.text(),  # type: ignore[attr-defined]
+            "A binding of node:root failed: ValueError: bad width \u00d72\n"
+            "The action window.hide failed while it was run: RuntimeError: gone",
+        )
+        self.assertEqual(find_node(window, f"{failures.NOTICE}:hint").text(), failures.HINT)  # type: ignore[attr-defined]
+
+        QTest.mouseClick(find_node(window, f"{failures.NOTICE}:ok"), Qt.MouseButton.LeftButton)
+        self.engine.dispatcher.process_pending()
+
+        self.assertEqual(self.actions[-1], ("window.hide", {"window": failures.NOTICE}))
+        self.assertEqual(self.engine.profile.state.get(("std", "failure")), {"entries": [], "counts": {}})
+
+    def test_a_notice_that_cannot_show_does_not_report_itself(self) -> None:
+        self.engine.dispatcher.dispatch(self._action_failed("window.show", {"window": failures.NOTICE}))
+        self.engine.dispatcher.dispatch(callback_failed(None, "callback", "action.failed", KeyError("arguments"), None))
+
+        self.assertEqual(self.actions, [])
+
+    def test_a_state_change_handler_that_always_fails_is_shown_once_not_in_a_loop(self) -> None:
+        calls: list[object] = []
+
+        def broken(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+            calls.append(event["path"])
+            if len(calls) > 50:
+                return []  # Stops a loop the notice failed to break, so the test fails instead of hanging.
+            raise RuntimeError("always")
+
+        self._start(on={"state.changed": broken})
+        self.engine.dispatcher.dispatch(state_set("mode", "b"))
+
+        text = "A callback of state.changed failed: RuntimeError: always"
+        self.assertEqual(self.engine.profile.state.get(("std", "failure")), {"entries": [text], "counts": {text: 1}})
+        self.assertEqual(self.actions, [("window.show", {"window": failures.NOTICE})])
+
+    def test_a_binding_that_fails_on_the_notice_state_is_not_shown_in_a_loop(self) -> None:
+        qt_app()
+        calls: list[object] = []
+
+        def label(state: Any) -> str:
+            if not axidev_osk.read(state, "std.failure.entries"):
+                return "fine"
+            calls.append(None)
+            if len(calls) > 50:
+                return "stopped"  # Stops a loop the notice failed to break, so the test fails instead of hanging.
+            raise RuntimeError("cannot show failures")
+
+        self._start(content=axidev_osk.label(id="status", text=label))
+        build_window(self, self.profile.window("pad"), self.engine)
+        self.engine.dispatcher.dispatch(state_set("mode", "b"), callback_failed(None, "callback", "elsewhere", ValueError("first"), None))
+
+        text = "A callback of elsewhere failed: ValueError: first"
+        self.assertEqual(self.engine.profile.state.get(("std", "failure")), {"entries": [text], "counts": {text: 1}})
 
 
 def _rect(x: int, y: int, width: int = 48, height: int = 48) -> dict[str, int]:

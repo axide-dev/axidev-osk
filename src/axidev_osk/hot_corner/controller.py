@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from enum import Enum
 from typing import Protocol, cast
 
 from PySide6.QtCore import QMargins, QObject, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
@@ -48,6 +47,7 @@ from ..platform.layer_shell import (
 from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
 from ..runtime.app_messages import hot_corner_entered, hot_corner_left, hot_corner_triggered
 from ..runtime.dispatcher import Dispatcher
+from ..runtime.names import ScreenCorner
 
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:
@@ -224,15 +224,6 @@ class HotCornerOverlayController:
         if screen is None:
             return QRect(0, 0, 1920, 1080)
         return screen.geometry()
-
-
-class ScreenCorner(str, Enum):
-    """Stable IDs for screen corners that can trigger dwell actions."""
-
-    TOP_LEFT = "top_left"
-    TOP_RIGHT = "top_right"
-    BOTTOM_LEFT = "bottom_left"
-    BOTTOM_RIGHT = "bottom_right"
 
 
 class HotCornerOverlay(Protocol):

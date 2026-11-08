@@ -112,28 +112,31 @@ class KeyboardService:
         """Hold a key down until ``release`` names the same key.
 
         Pressing a held key again releases the earlier press first. A failure
-        raises, so the action reports ``action.failed``. A key stays recorded
-        as held until its release succeeds, so a later release or reset can
-        still let go of it.
+        raises, so the action reports ``action.failed``; that includes a key
+        or modifier name that is not axidev_io's official spelling, which is
+        refused instead of typed. A key stays recorded as held until its
+        release succeeds, so a later release or reset can still let go of it.
         """
 
-        canonical = self._backend.canonical_key(key)
-        self._release_canonical(canonical)
-        self._held[canonical] = self._backend.press(canonical, mods, repeat)
+        self._backend.check_names(key, mods)
+        self._release_held(key)
+        self._held[key] = self._backend.press(key, mods, repeat)
 
     def release(self, key: str) -> None:
         """Release a key held by ``press``; releasing an unheld key does nothing."""
 
-        self._release_canonical(self._backend.canonical_key(key))
+        self._backend.check_names(key, ())
+        self._release_held(key)
 
-    def _release_canonical(self, canonical: str) -> None:
-        handle = self._held.get(canonical)
+    def _release_held(self, key: str) -> None:
+        handle = self._held.get(key)
         if handle is not None:
             self._backend.key_up(handle)
-            del self._held[canonical]
+            del self._held[key]
 
     def tap(self, key: str, mods: tuple[str, ...]) -> None:
-        self._backend.tap(self._backend.canonical_key(key), mods)
+        self._backend.check_names(key, mods)
+        self._backend.tap(key, mods)
 
     def type_text(self, text: str) -> None:
         self._backend.type_text(text)
@@ -141,11 +144,11 @@ class KeyboardService:
     def reset_state(self) -> None:
         """Release every held key and report ``keyboard.reset``; a key that fails to release is logged and kept."""
 
-        for canonical in tuple(self._held):
+        for key in tuple(self._held):
             try:
-                self._release_canonical(canonical)
+                self._release_held(key)
             except Exception:
-                _logger.exception("Failed to release %s during reset", canonical)
+                _logger.exception("Failed to release %s during reset", key)
         if self._dispatcher is not None:
             self._dispatcher.dispatch(keyboard_reset())
 

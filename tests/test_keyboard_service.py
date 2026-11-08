@@ -11,11 +11,8 @@ from axidev_osk.runtime.engine_messages import (
     KEYBOARD_STATUS_CHANGED,
 )
 from axidev_osk.services.keyboard.io import KeyObservation, KeyPressHandle
+from axidev_osk.services.keyboard.names import KeyNameError, KeyNames
 from support import RecordingBackend, make_keyboard_test_engine
-
-
-def _upper_letters(key: str) -> str:
-    return key.upper() if len(key) == 1 else key
 
 
 class RefusingKeyboardBackend(RecordingBackend):
@@ -38,7 +35,7 @@ class FailingReleaseBackend(RecordingBackend):
 
 class KeyboardServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.backend = RecordingBackend(canonical=_upper_letters)
+        self.backend = RecordingBackend(KeyNames.load())
         self.engine, self.service = make_keyboard_test_engine(self.backend)
         self.events: list[tuple[str, DataMap]] = []
         for name in (INPUT_KEY, KEYBOARD_RESET, KEYBOARD_STATUS_CHANGED, KEYBOARD_PERMISSION_REQUIRED):
@@ -62,9 +59,9 @@ class KeyboardServiceTests(unittest.TestCase):
         self.assertEqual(len(self.backend.observers), 1)
         self.assertEqual(self.events, [])
 
-    def test_press_and_release_send_canonical_key_with_explicit_mods_and_repeat(self) -> None:
-        self.service.press("a", ("Shift",), False)
-        self.service.release("a")
+    def test_press_and_release_send_the_key_with_explicit_mods_and_repeat(self) -> None:
+        self.service.press("A", ("Shift",), False)
+        self.service.release("A")
 
         self.assertEqual(
             self.backend.sent,
@@ -72,17 +69,17 @@ class KeyboardServiceTests(unittest.TestCase):
         )
 
     def test_releasing_an_unheld_key_does_nothing(self) -> None:
-        self.service.release("a")
-        self.service.press("a", (), True)
-        self.service.release("a")
-        self.service.release("a")
+        self.service.release("A")
+        self.service.press("A", (), True)
+        self.service.release("A")
+        self.service.release("A")
 
         self.assertEqual(self.backend.sent, [("down", "A", (), True), ("up", "A")])
 
     def test_pressing_a_held_key_again_releases_the_previous_press(self) -> None:
-        self.service.press("a", (), True)
+        self.service.press("A", (), True)
         self.service.press("A", ("Shift",), True)
-        self.service.release("a")
+        self.service.release("A")
 
         self.assertEqual(
             self.backend.sent,
@@ -95,26 +92,36 @@ class KeyboardServiceTests(unittest.TestCase):
         )
 
     def test_refused_press_holds_nothing(self) -> None:
-        backend = RefusingKeyboardBackend(canonical=_upper_letters)
+        backend = RefusingKeyboardBackend(KeyNames.load())
         service = make_keyboard_test_engine(backend)[1]
 
         with self.assertRaisesRegex(RuntimeError, "not ready"):
-            service.press("a", (), True)
-        service.release("a")
+            service.press("A", (), True)
+        service.release("A")
 
         self.assertEqual(backend.sent, [("down", "A", (), True)])
 
     def test_a_key_whose_release_failed_stays_held_until_a_release_succeeds(self) -> None:
-        backend = FailingReleaseBackend(canonical=_upper_letters)
+        backend = FailingReleaseBackend(KeyNames.load())
         service = make_keyboard_test_engine(backend)[1]
-        service.press("a", (), True)
+        service.press("A", (), True)
 
         with self.assertRaisesRegex(RuntimeError, "key_up failed"):
-            service.release("a")
+            service.release("A")
         service.reset_state()
         service.reset_state()
 
         self.assertEqual(backend.sent, [("down", "A", (), True), ("up", "A")])
+
+    def test_names_that_are_not_the_official_spelling_are_refused_instead_of_typed(self) -> None:
+        with self.assertRaisesRegex(KeyNameError, "use 'Escape'"):
+            self.service.press("esc", (), True)
+        with self.assertRaisesRegex(KeyNameError, "use 'Ctrl'"):
+            self.service.tap("Enter", ("control",))
+        with self.assertRaisesRegex(KeyNameError, "Unknown key name"):
+            self.service.release("NoSuchKey")
+
+        self.assertEqual(self.backend.sent, [])
 
     def test_tap_and_type_text_pass_through_to_the_backend(self) -> None:
         self.service.tap("Enter", ("Ctrl",))
@@ -123,17 +130,17 @@ class KeyboardServiceTests(unittest.TestCase):
         self.assertEqual(self.backend.sent, [("tap", "Enter", ("Ctrl",)), ("type", "moo")])
 
     def test_reset_releases_held_keys_and_reports_reset(self) -> None:
-        self.service.press("a", (), True)
+        self.service.press("A", (), True)
         self.service.press("ShiftLeft", (), False)
 
         self.service.reset_state()
-        self.service.release("a")
+        self.service.release("A")
 
         self.assertEqual(self.backend.sent[2:], [("up", "A"), ("up", "ShiftLeft")])
         self.assertEqual(self._event_names(), [KEYBOARD_RESET])
 
     def test_shutdown_stops_listening_then_releases_held_keys_and_runs_once(self) -> None:
-        self.service.press("a", (), True)
+        self.service.press("A", (), True)
 
         self.service.shutdown()
         self.service.shutdown()
