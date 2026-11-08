@@ -6,7 +6,7 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
-from axidev_osk.runtime.events import PointerMotionObserved
+from axidev_osk.runtime.app_messages import pointer_motion_observed
 
 if sys.platform.startswith("linux"):
     import axidev_osk.services.wayland_relative_pointer as relative_pointer
@@ -18,10 +18,10 @@ if sys.platform.startswith("linux"):
 class WaylandRelativePointerServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = WaylandRelativePointerService()
-        self.context = Mock()
+        self.dispatcher = Mock()
 
     def _activate_drag(self) -> None:
-        self.service._context = self.context
+        self.service._dispatcher = self.dispatcher
         self.service.begin_drag()
 
     def _make_wayland_library(self) -> Mock:
@@ -84,16 +84,16 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
 
         self.service._on_motion(0, 0, 0, 1_000, 384, -640, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_called_once_with(
-            PointerMotionObserved(dx=1.5, dy=-2.5)
+        self.dispatcher.dispatch.assert_called_once_with(
+            pointer_motion_observed(1.5, -2.5)
         )
 
     def test_motion_outside_drag_is_ignored(self) -> None:
-        self.service._context = self.context
+        self.service._dispatcher = self.dispatcher
 
         self.service._on_motion(0, 0, 0, 1_000, 384, -640, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_not_called()
+        self.dispatcher.dispatch.assert_not_called()
 
     def test_close_motions_are_aggregated_until_timer_runs(self) -> None:
         callbacks: list[object] = []
@@ -110,8 +110,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         single_shot.assert_called_once()
         callbacks[0]()
         self.assertEqual(
-            self.context.dispatcher.dispatch_event.call_args_list[-1].args[0],
-            PointerMotionObserved(dx=2.0, dy=1.0),
+            self.dispatcher.dispatch.call_args_list[-1].args[0],
+            pointer_motion_observed(2.0, 1.0),
         )
 
     def test_motion_timestamp_flushes_aggregated_delta(self) -> None:
@@ -123,8 +123,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
             self.service._on_motion(0, 0, 0, 5_000, 512, 0, 0, 0)
 
         self.assertEqual(
-            self.context.dispatcher.dispatch_event.call_args_list[-1].args[0],
-            PointerMotionObserved(dx=3.0, dy=0.0),
+            self.dispatcher.dispatch.call_args_list[-1].args[0],
+            pointer_motion_observed(3.0, 0.0),
         )
 
     def test_drag_end_invalidates_scheduled_motion(self) -> None:
@@ -140,7 +140,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         self.service.end_drag()
         callbacks[0]()
 
-        self.context.dispatcher.dispatch_event.assert_not_called()
+        self.dispatcher.dispatch.assert_not_called()
 
     def test_new_drag_discards_motion_buffered_by_previous_drag(self) -> None:
         callbacks: list[object] = []
@@ -156,8 +156,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         callbacks[0]()
         self.service._on_motion(0, 0, 0, 3_000, 512, 0, 0, 0)
 
-        self.context.dispatcher.dispatch_event.assert_called_once_with(
-            PointerMotionObserved(dx=2.0, dy=0.0)
+        self.dispatcher.dispatch.assert_called_once_with(
+            pointer_motion_observed(2.0, 0.0)
         )
 
     def test_commit_uses_current_surface_without_retaining_it(self) -> None:
@@ -183,8 +183,8 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
 
         library.wl_display_roundtrip.side_effect = roundtrip
         with self._native_environment(library):
-            self.service.start(self.context)
-            self.assertIs(self.service._context, self.context)
+            self.service.start(self.dispatcher)
+            self.assertIs(self.service._dispatcher, self.dispatcher)
             self.assertEqual(self.service._relative_pointer, 41)
             self.service.stop()
 
@@ -197,12 +197,12 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         library = self._make_wayland_library()
 
         with self._native_environment(library):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
             marshal_count = library.wl_proxy_marshal_flags.call_count
             self.service.begin_drag()
             self.service.commit_surface(123)
 
-        self.assertIsNone(self.service._context)
+        self.assertIsNone(self.service._dispatcher)
         self.assertIsNone(self.service._registry)
         self.assertEqual(library.wl_proxy_marshal_flags.call_count, marshal_count)
         self.assertEqual(self._cleanup_operations(library), [("registry", 21)])
@@ -214,7 +214,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         with self._native_environment(library), self.assertRaisesRegex(
             RuntimeError, "registry listener registration failed"
         ):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
 
         self.assertIsNone(self.service._registry)
         self.assertEqual(self._cleanup_operations(library), [("registry", 21)])
@@ -226,7 +226,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         with self._native_environment(library), self.assertRaisesRegex(
             RuntimeError, "registry roundtrip failed"
         ):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
 
         self.assertIsNone(self.service._registry)
         self.assertEqual(self._cleanup_operations(library), [("registry", 21)])
@@ -242,7 +242,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         with self._native_environment(library), self.assertRaisesRegex(
             RuntimeError, "registry roundtrip failed"
         ):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
 
         self.assertEqual(
             self._cleanup_operations(library),
@@ -264,7 +264,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         with self._native_environment(library), self.assertRaisesRegex(
             RuntimeError, "relative pointer creation failed"
         ):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
 
         self.assertIsNone(self.service._manager)
         self.assertIsNone(self.service._registry)
@@ -285,7 +285,7 @@ class WaylandRelativePointerServiceTests(unittest.TestCase):
         with self._native_environment(library), self.assertRaisesRegex(
             RuntimeError, "relative-pointer listener registration failed"
         ):
-            self.service.start(self.context)
+            self.service.start(self.dispatcher)
 
         self.assertIsNone(self.service._relative_pointer)
         self.assertIsNone(self.service._manager)

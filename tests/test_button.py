@@ -2,72 +2,227 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QContextMenuEvent, QFontInfo, QFontMetrics, QPainterPath, QPolygonF, QRegion
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
-from axidev_osk.components.button import Button, ButtonInteractionState
-from axidev_osk.components.grid.keyboard import KeyboardWidget
-from axidev_osk.config.defaults import build_default_app_config
-from axidev_osk.config.defaults.us_iso import build_us_iso_layout_config
-from axidev_osk.models import KeySpec
-from axidev_osk.runtime.events import ComponentPressed, ComponentReleased, PromptResolved
-from axidev_osk.runtime.testing import make_test_context
+from axidev_osk.components.button import Button
+from axidev_osk.messages import DataMap, MessageResult
+from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
+from axidev_osk.runtime.profile_runtime import state_set
 from axidev_osk.windows.chrome import OverlayTitleBar
-
-
-class FakeKeyboardBackend:
-    ready = True
-    status_text = ""
-    needs_permission_setup = False
-
-    def add_modifier_state_listener(self, listener):
-        return lambda: None
-
-    def add_key_state_listener(self, listener: object) -> object:
-        del listener
-        return lambda: None
-
-    def is_key_down(self, key_name: str) -> bool:
-        del key_name
-        return False
-
-    def key_name_for_spec(self, spec: KeySpec) -> str | None:
-        return spec.io_key or (spec.label if len(spec.label) == 1 else None)
-
-    def key_down(self, spec: KeySpec, latched_keys: object) -> object:
-        del latched_keys
-        return spec
-
-    def key_up(self, press_handle: object) -> None:
-        del press_handle
-
-    def sync_latched_key(
-        self,
-        spec: KeySpec,
-        latched: bool,
-        press_handle: object = None,
-    ) -> object:
-        del spec, latched
-        return press_handle
-
-
-def _app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+from support import RecordingBackend, build_window, find_node, make_test_engine, qt_app, start_test_profile
 
 
 class ButtonTests(unittest.TestCase):
-    def test_right_click_has_the_same_signal_and_state_cycle_as_left_click(self) -> None:
-        _app()
+    def test_labels_shrink_to_fit_but_never_grow_past_the_style_size(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 18px; padding: 0px; border: none; }")
+        button.resize(60, 40)
+        button.show()
+        area = button.rect()
+
+        self.assertEqual(QFontInfo(button.fitted_font("a", area)).pixelSize(), 18)
+        long = button.fitted_font("Backspace Backspace", area)
+        self.assertLess(QFontInfo(long).pixelSize(), 18)
+        self.assertLessEqual(QFontMetrics(long).horizontalAdvance("Backspace Backspace"), area.width())
+
+        # A clipped button fits its label inside the clipped shape, not its rectangle.
+        button.setMask(QRegion(QRect(20, 10, 20, 20)))
+        clipped = button.fitted_font("Back", area)
+        self.assertLessEqual(QFontMetrics(clipped).horizontalAdvance("Back"), 20)
+
+    def test_a_label_never_shrinks_below_its_smallest_size(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 18px; padding: 0px; border: none; }")
+        button.resize(60, 40)
+        button.show()
+        text = "Backspace Backspace Backspace"
+
+        self.assertLess(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+        button.set_label_min_px(12)
+
+        self.assertEqual(QFontInfo(button.fitted_font(text, button.rect())).pixelSize(), 12)
+
+    def test_state_text_colors_apply_even_to_a_label_that_shrinks(self) -> None:
+        qt_app()
+        button = Button("Backspace")
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { font-size: 40px; color: #ffffff; background: #000000; border: none; padding: 0px; }"
+            "QPushButton:pressed { color: #0000ff; }"
+        )
+        button.resize(60, 30)
+        button.show()
+
+        def text_color() -> tuple[float, float]:
+            """The text's average red and blue; an average, because subpixel smoothing tints single edge pixels."""
+
+            image = button.grab().toImage()
+            text: list[QColor] = [
+                image.pixelColor(x, y)
+                for x in range(image.width())
+                for y in range(image.height())
+                if image.pixelColor(x, y).lightness() > 60
+            ]
+            self.assertTrue(text)
+            return sum(color.red() for color in text) / len(text), sum(color.blue() for color in text) / len(text)
+
+        idle_red, _idle_blue = text_color()
+        button.setDown(True)
+        pressed_red, pressed_blue = text_color()
+
+        self.assertGreater(idle_red, 100)
+        self.assertLess(pressed_red, 40)
+        self.assertGreater(pressed_blue, 120)
+
+    def test_a_shaped_button_draws_its_border_along_its_shape(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { background: #000000; border: 1px solid #ff0000; border-radius: 0px; }")
+        button.resize(100, 100)
+        triangle = QPainterPath()
+        triangle.addPolygon(QPolygonF([QPointF(0, 0), QPointF(100, 0), QPointF(0, 100)]))
+        triangle.closeSubpath()
+        button.set_shape(triangle)
+        button.show()
+
+        image = button.grab().toImage()
+
+        # Just inside the long side, the border shows; well inside, only the background does.
+        edge = image.pixelColor(49, 49)
+        inside = image.pixelColor(20, 20)
+        self.assertGreater(edge.red(), 120)
+        self.assertLess(inside.red(), 40)
+
+    def test_a_shaped_border_follows_style_properties_and_a_set_outline_color(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { background: #000000; border: 1px solid #ff0000; border-radius: 0px; }"
+            'QPushButton[latched="true"] { border-color: #00ff00; }'
+        )
+        button.resize(100, 100)
+        triangle = QPainterPath()
+        triangle.addPolygon(QPolygonF([QPointF(0, 0), QPointF(100, 0), QPointF(0, 100)]))
+        triangle.closeSubpath()
+        button.set_shape(triangle)
+        button.show()
+
+        def edge() -> QColor:
+            return button.grab().toImage().pixelColor(49, 49)
+
+        self.assertGreater(edge().red(), 120)
+        # Restyled the way the node builder applies a style property.
+        button.setProperty("latched", True)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        latched = edge()
+        self.assertGreater(latched.green(), 120)
+        self.assertLess(latched.red(), 40)
+        button.set_outline_color("#0000ff")
+        self.assertGreater(edge().blue(), 120)
+
+    def test_parts_are_spread_inside_the_shape_in_order(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 14px; padding: 0px; border: none; }")
+        button.resize(120, 120)
+        button.setMask(QRegion(QPolygonF([QPointF(0, 0), QPointF(120, 0), QPointF(60, 120)]).toPolygon()))
+        button.show()
+        parts = ("q", "w", "e", "r", "t", "y", "u", "i", "o", "p")
+
+        _font, placed = button.spread(parts, button.rect())
+
+        self.assertEqual([part for _box, part in placed], list(parts))
+        mask = button.mask()
+        for box, part in placed:
+            with self.subTest(part):
+                self.assertEqual(mask.intersected(box), QRegion(box))
+        rows = [box.top() for box, _part in placed]
+        self.assertEqual(rows, sorted(rows))
+
+    def test_parts_never_land_in_a_gap_of_a_dented_shape(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet("QPushButton { font-size: 14px; padding: 0px; border: none; }")
+        button.resize(200, 200)
+        # A U: two arms joined at the bottom, with a gap between them.
+        u_shape = QRegion(QRect(0, 0, 60, 200)) + QRegion(QRect(140, 0, 60, 200)) + QRegion(QRect(0, 140, 200, 60))
+        button.setMask(u_shape)
+        button.show()
+
+        for parts in (("Hello", "World"), ("a", "b", "c", "d")):
+            _font, placed = button.spread(parts, button.rect())
+            with self.subTest(parts):
+                self.assertEqual([part for _box, part in placed], list(parts))
+                for box, _part in placed:
+                    self.assertEqual(u_shape.intersected(box), QRegion(box))
+
+    def test_state_text_colors_apply_to_label_parts(self) -> None:
+        qt_app()
+        button = Button()
+        self.addCleanup(button.close)
+        button.setStyleSheet(
+            "QPushButton { font-size: 20px; color: #ffffff; background: #000000; border: none; padding: 0px; }"
+            "QPushButton:pressed { color: #0000ff; }"
+        )
+        button.resize(120, 60)
+        button.set_parts(("Ab", "Cd"))
+        button.show()
+        button.setDown(True)
+
+        image = button.grab().toImage()
+        text = [
+            image.pixelColor(x, y)
+            for x in range(image.width())
+            for y in range(image.height())
+            if image.pixelColor(x, y).lightness() > 60
+        ]
+
+        self.assertTrue(text)
+        self.assertTrue(all(color.red() < 80 and color.blue() > 120 for color in text))
+
+    def test_a_list_label_that_empties_shows_nothing(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        content = {"kind": "button", "id": "menu", "label": lambda state: list(state.parts)}
+        profile = start_test_profile(
+            engine,
+            {
+                "active_profile": "p",
+                "profiles": {
+                    "p": {
+                        "state": {"parts": {"var": {"list": "string"}, "default": ["a", "b"]}},
+                        "windows": [{"id": "pad", "title": "Pad", "content": content}],
+                    }
+                },
+            },
+        )
+        button = find_node(build_window(self, profile.window("pad"), engine), "menu")
+        self.assertEqual(button.text(), "a b")  # type: ignore[attr-defined]
+
+        engine.dispatcher.dispatch(state_set("parts", []))
+
+        self.assertEqual(button.text(), "")  # type: ignore[attr-defined]
+
+    def test_right_click_has_the_same_signal_cycle_as_left_click(self) -> None:
+        qt_app()
         button = Button("Test")
         self.addCleanup(button.close)
         button.show()
-        events: list[tuple[str, object]] = []
-        button.pressed.connect(lambda: events.append(("pressed", button.state)))
-        button.released.connect(lambda: events.append(("released", button.state)))
+        events: list[object] = []
+        button.pressed.connect(lambda: events.append("pressed"))
+        button.released.connect(lambda: events.append("released"))
         button.clicked.connect(lambda checked: events.append(("clicked", checked)))
 
         QTest.mouseClick(button, Qt.MouseButton.LeftButton)
@@ -75,81 +230,77 @@ class ButtonTests(unittest.TestCase):
         events.clear()
         QTest.mouseClick(button, Qt.MouseButton.RightButton)
 
+        self.assertEqual(left_events, ["pressed", "released", ("clicked", False)])
         self.assertEqual(events, left_events)
-        self.assertEqual(button.state, ButtonInteractionState.IDLE)
 
-    def test_right_click_toggles_a_latchable_button(self) -> None:
-        _app()
-        button = Button("Test", latchable=True)
+    def test_a_mouse_button_with_no_name_presses_and_is_reported_as_other(self) -> None:
+        qt_app()
+        button = Button("Test")
         self.addCleanup(button.close)
         button.show()
-
-        QTest.mouseClick(button, Qt.MouseButton.RightButton)
-
-        self.assertEqual(button.state, ButtonInteractionState.LATCHED)
-        self.assertTrue(button.isChecked())
-
-        QTest.mouseClick(button, Qt.MouseButton.RightButton)
-
-        self.assertEqual(button.state, ButtonInteractionState.IDLE)
-        self.assertFalse(button.isChecked())
-
-    def test_right_click_dispatches_a_built_key_press_and_release(self) -> None:
-        _app()
-        context = make_test_context(FakeKeyboardBackend())
-        keyboard = KeyboardWidget(
-            layout_config=build_us_iso_layout_config(),
-            context=context,
-        )
-        self.addCleanup(keyboard.close)
-        keyboard.show()
         events: list[object] = []
-        context.dispatcher.add_event_handler(
-            lambda event: events.append(event)
-            if isinstance(event, (ComponentPressed, ComponentReleased))
-            else None,
-        )
-        button = next(
-            child
-            for child in keyboard.findChildren(Button)
-            if child.property("ioKey") == "A"
-        )
+        button.pressed.connect(lambda: events.append(("pressed", button.pressed_with)))
+        button.clicked.connect(lambda checked: events.append("clicked"))
 
-        QTest.mouseClick(button, Qt.MouseButton.RightButton)
+        QTest.mouseClick(button, Qt.MouseButton.ExtraButton5)
 
-        self.assertEqual(
-            [type(event) for event in events],
-            [ComponentPressed, ComponentReleased],
-        )
+        self.assertEqual(events, [("pressed", "other"), "clicked"])
 
-    def test_right_click_resolves_a_prompt(self) -> None:
-        _app()
-        config = build_default_app_config()
-        context = make_test_context(FakeKeyboardBackend(), config=config)
-        resolved: list[PromptResolved] = []
-        context.dispatcher.add_event_handler(
-            lambda event: resolved.append(event) if isinstance(event, PromptResolved) else None,
+    def test_context_menu_event_is_suppressed(self) -> None:
+        qt_app()
+        button = Button("Test")
+        self.addCleanup(button.close)
+        event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(1, 1), QPoint(1, 1))
+        event.ignore()
+
+        QApplication.sendEvent(button, event)
+
+        self.assertTrue(event.isAccepted())
+
+    def test_right_click_on_a_profile_button_dispatches_press_and_release(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        events: list[tuple[str, DataMap]] = []
+
+        def recorder(name: str):
+            def record(arguments: DataMap) -> MessageResult:
+                events.append((name, arguments))
+                return []
+
+            return record
+
+        engine.dispatcher.add_raw_event_handler(BUTTON_PRESSED, recorder(BUTTON_PRESSED))
+        engine.dispatcher.add_raw_event_handler(BUTTON_RELEASED, recorder(BUTTON_RELEASED))
+        profile = start_test_profile(
+            engine,
+            {
+                "active_profile": "p",
+                "profiles": {
+                    "p": {
+                        "windows": [
+                            {
+                                "id": "pad",
+                                "title": "Pad",
+                                "content": {"kind": "button", "id": "moo", "label": "Moo"},
+                            }
+                        ]
+                    }
+                },
+            },
         )
-        window = QWidget()
-        self.addCleanup(window.close)
-        prompt = context.components.build(config.quit_prompt, context, host=window)
-        prompt.setParent(window)
+        window = build_window(self, profile.window("pad"), engine)
         window.show()
-        button = next(
-            child
-            for child in prompt.findChildren(Button)
-            if child.property("role") == "accepted"
-        )
 
-        QTest.mouseClick(button, Qt.MouseButton.RightButton)
+        QTest.mouseClick(find_node(window, "moo"), Qt.MouseButton.RightButton)
+        self.assertEqual(events, [])
+        engine.dispatcher.process_pending()
 
         self.assertEqual(
-            resolved,
-            [PromptResolved(prompt_id=config.quit_prompt.id, result="accepted")],
+            events, [(BUTTON_PRESSED, {"node": "moo", "button": "right"}), (BUTTON_RELEASED, {"node": "moo", "button": "right"})]
         )
 
     def test_title_bar_close_control_uses_the_shared_button(self) -> None:
-        _app()
+        qt_app()
         title_bar = OverlayTitleBar("Test")
         self.addCleanup(title_bar.close)
         title_bar.show()
@@ -157,8 +308,11 @@ class ButtonTests(unittest.TestCase):
         close_button = title_bar.findChild(Button, "layerShellCloseButton")
 
         self.assertIsNotNone(close_button)
+        assert close_button is not None
+        pressed: list[str] = []
+        title_bar.closePressed.connect(pressed.append)
         QTest.mouseClick(close_button, Qt.MouseButton.RightButton)
-        self.assertFalse(title_bar.isVisible())
+        self.assertEqual(pressed, ["right"])
 
 
 if __name__ == "__main__":

@@ -1,21 +1,41 @@
-"""Serializable configuration DTOs for windows, surfaces, grids, and components."""
+"""Typed settings records for engine windows and attachments."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Literal
-
-from ..models import KeySpec
-from ..runtime.identity import validate_unique_ids
 
 
-class OverlayPlacement(str, Enum):
-    """Placement preset for an overlay-backed window."""
+@dataclass(frozen=True, slots=True)
+class Anchor:
+    """Where a window starts on its screen, as a point of the space the window leaves free there.
 
-    CENTER = "center"
-    TOP_RIGHT = "top-right"
+    ``x`` runs from 0 at the left edge to 1 at the right edge, and ``y`` from 0
+    at the top to 1 at the bottom, each edge kept ``screen_margin`` away; 0.5
+    centers the window on that axis.
+
+    Placement is an anchor rather than a position because on Wayland a
+    layer-shell window can only be placed by screen edges and margins, so an
+    anchor is what every platform can honor: X11 and Windows place the window
+    at the point it names, and Wayland turns it into margins. KWin places its
+    input panel itself, so there the anchor does nothing.
+    """
+
+    x: float
+    y: float
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.x <= 1.0 and 0.0 <= self.y <= 1.0):
+            raise ValueError("An anchor's x and y must be between 0 and 1")
+
+
+ANCHORS = {
+    f"{vertical}{horizontal}".strip("-") or "center": Anchor(x, y)
+    for vertical, y in (("top-", 0.0), ("", 0.5), ("bottom-", 1.0))
+    for horizontal, x in (("left", 0.0), ("", 0.5), ("right", 1.0))
+}
+"""The engine's named anchors: ``top-left``, ``top``, ``top-right``, ``left``, ``center``, ``right``,
+``bottom-left``, ``bottom``, and ``bottom-right``."""
 
 
 @dataclass(slots=True)
@@ -23,15 +43,18 @@ class AlwaysOnTopWindowConfig:
     """Platform-agnostic overlay placement policy.
 
     Attributes:
-        placement: Preset describing where the overlay should be anchored.
-        screen_margin: Pixel margin from the chosen screen edge.
+        placement: Where the window starts on its screen.
+        screen_margin: Pixel margin from the screen edges the anchor keeps.
         manage_position: Whether the overlay controller should keep the
             window placed; ``False`` lets the host owner manage geometry.
+        keep_on_screen: Whether a floating window that grows past its
+            screen's edge is moved back inside it.
     """
 
-    placement: OverlayPlacement = OverlayPlacement.TOP_RIGHT
+    placement: Anchor = ANCHORS["top-right"]
     screen_margin: int = 16
     manage_position: bool = True
+    keep_on_screen: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +86,7 @@ class DwellClickConfig:
     """Pointer dwell activation policy for one window.
 
     Attributes:
-        enabled: Whether resting the pointer clicks inside the window.
+        enabled: Whether resting the pointer inside the window reports ``dwell.completed``.
         delay_ms: Base time required to activate the current target.
         dead_zone_px: Movement required to rearm after activation.
         full_speed_px_s: Highest speed that advances at the maximum rate.
@@ -72,11 +95,31 @@ class DwellClickConfig:
         indicator_start_progress: Progress required before feedback appears.
         direction_reversal_progress_factor: Progress retained after a clear
             reversal inside the same target.
+        direction_reversal_angle_deg: How far, in degrees, the pointer must
+            turn between two samples for the turn to count as a reversal.
         movement_penalty_px: Distance that removes one full dwell of progress.
         distance_curve_full_px: Travel distance at which slowdown uses the
             normal rather than short-distance curve.
         velocity_release_ms: Time for remembered speed to fall from the stop
             threshold to zero after movement ends.
+        acceleration_exponent_near: How strongly slowing down speeds a dwell
+            up right after a click; smaller values speed it up sooner.
+        acceleration_exponent_far: How strongly slowing down speeds a dwell up
+            after ``distance_curve_full_px`` of travel, or before any click.
+        poll_interval_ms: How often the pointer is sampled.
+        pause_while_pressed: Whether a held mouse button discards the current
+            dwell and keeps a new one from starting until it is released.
+        indicator_size_px: Width and height of the progress indicator.
+        indicator_min_dot_px: Dot diameter when progress starts.
+        indicator_max_dot_px: Dot diameter at full progress.
+        indicator_fade_ms: How long the dot fades after a cancel or a click.
+        indicator_opacity: Opacity of the growing dot and of the dot that fades
+            after a cancel or a click.
+        indicator_track_opacity: Opacity of the full-size dot drawn behind the
+            growing one.
+
+    The dot's colors come from the window's palette: ``Mid`` while it grows and
+    when it fades after a cancel, ``Highlight`` when it fades after a click.
     """
 
     enabled: bool = False
@@ -87,9 +130,20 @@ class DwellClickConfig:
     maximum_progress_rate: float = 1.75
     indicator_start_progress: float = 0.25
     direction_reversal_progress_factor: float = 0.5
+    direction_reversal_angle_deg: float = 120.0
     movement_penalty_px: float = 15.0
     distance_curve_full_px: float = 200.0
     velocity_release_ms: int = 100
+    acceleration_exponent_near: float = 0.25
+    acceleration_exponent_far: float = 0.5
+    poll_interval_ms: int = 16
+    pause_while_pressed: bool = True
+    indicator_size_px: int = 30
+    indicator_min_dot_px: int = 4
+    indicator_max_dot_px: int = 24
+    indicator_fade_ms: int = 250
+    indicator_opacity: float = 0.94
+    indicator_track_opacity: float = 0.51
 
     def __post_init__(self) -> None:
         """Reject timing and distance values that cannot define a dwell."""
@@ -150,24 +204,44 @@ class DwellClickConfig:
             raise ValueError(
                 "Dwell click velocity release must be at least 1 millisecond"
             )
+        if self.indicator_size_px < 1:
+            raise ValueError("Dwell click indicator size must be at least 1 pixel")
+        if not 0 <= self.indicator_min_dot_px <= self.indicator_max_dot_px <= self.indicator_size_px:
+            raise ValueError(
+                "Dwell click indicator dots must satisfy 0 <= minimum <= maximum <= indicator size"
+            )
+        if self.indicator_fade_ms < 0:
+            raise ValueError("Dwell click indicator fade must be at least 0 milliseconds")
+        if not 0 < self.direction_reversal_angle_deg <= 180:
+            raise ValueError("Dwell click direction reversal angle must be over 0 and at most 180 degrees")
+        if not 0 < self.acceleration_exponent_near <= self.acceleration_exponent_far:
+            raise ValueError("Dwell click acceleration exponents must satisfy 0 < near <= far")
+        if self.poll_interval_ms < 1:
+            raise ValueError("Dwell click poll interval must be at least 1 millisecond")
+        for opacity in (self.indicator_opacity, self.indicator_track_opacity):
+            if not 0 <= opacity <= 1:
+                raise ValueError("Dwell click indicator opacities must be between 0 and 1")
 
 
 @dataclass(frozen=True, slots=True)
 class PointerLocatorConfig:
-    """Component-aware pointer feedback configured as a surface component.
+    """Pointer glow settings for one pointer_locator attachment.
 
     Attributes:
-        id: Deterministic component ID.
+        id: Attachment ID.
+        gap_color: Glow color while the pointer is between buttons.
         radius_percent: Glow radius as a percentage of the surface's shorter side.
         maximum_opacity_percent: Glow opacity at the pointer position.
         radius_standard_deviations: Number of Gaussian standard deviations inside the radius.
+        poll_interval_ms: How often the pointer is sampled while it is over the window.
     """
 
     id: str
-    radius_percent: float
-    maximum_opacity_percent: float
-    radius_standard_deviations: float
-    kind: Literal["pointer-locator"] = "pointer-locator"
+    gap_color: str
+    radius_percent: float = 30.0
+    maximum_opacity_percent: float = 60.0
+    radius_standard_deviations: float = 3.0
+    poll_interval_ms: int = 16
 
     def __post_init__(self) -> None:
         """Reject values that cannot define a visible glow."""
@@ -178,322 +252,67 @@ class PointerLocatorConfig:
             raise ValueError("Pointer locator maximum opacity percent must be greater than 0 and at most 100")
         if not math.isfinite(self.radius_standard_deviations) or self.radius_standard_deviations < 0.1:
             raise ValueError("Pointer locator radius standard deviations must be finite and at least 0.1")
-
-
-@dataclass(frozen=True, slots=True)
-class KeyConfig:
-    """Declarative key component placement and behavior.
-
-    Attributes:
-        id: Deterministic component ID used by events, state, and Qt properties.
-        spec: Keyboard key semantics and grid placement inherited from the prototype model.
-    """
-
-    id: str
-    spec: KeySpec
-    kind: Literal["key"] = "key"
-
-
-@dataclass(frozen=True, slots=True)
-class SpacerConfig:
-    """Declarative spacer component used to reserve grid cells.
-
-    Attributes:
-        id: Deterministic component ID used by validation and Qt properties.
-        spec: Spacer geometry stored in the same unit system as keys.
-    """
-
-    id: str
-    spec: KeySpec
-    kind: Literal["spacer"] = "spacer"
-
-
-@dataclass(frozen=True, slots=True)
-class ButtonConfig:
-    """Declarative push-button component for prompt actions.
-
-    Attributes:
-        id: Deterministic component ID used by events and Qt properties.
-        label: Visible text shown on the button.
-        role: Semantic action emitted by the button.
-        object_name: Optional Qt object name for existing QSS/tests.
-        style_sheet: Optional local stylesheet for prompt buttons.
-    """
-
-    id: str
-    label: str
-    role: str
-    object_name: str | None = None
-    style_sheet: str | None = None
-    kind: Literal["button"] = "button"
-
-
-@dataclass(frozen=True, slots=True)
-class GridConfig:
-    """Declarative grid containing keys or other grid-positioned components.
-
-    Attributes:
-        id: Deterministic grid ID.
-        components: Components placed inside the grid.
-        nav_start_column: Sparse-column start for the navigation block in US ISO data.
-        body_row_count: Number of keyboard rows that should receive stretch.
-    """
-
-    id: str
-    components: tuple[KeyConfig | SpacerConfig, ...]
-    nav_start_column: int
-    body_row_count: int = 6
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the grid composition boundary."""
-
-        validate_unique_ids((component.id for component in self.components), scope=f"grid {self.id!r} components")
-
-
-@dataclass(frozen=True, slots=True)
-class LayoutConfig:
-    """Declarative layout composed from one or more grids.
-
-    Attributes:
-        id: Deterministic layout ID.
-        name: Stable layout name suitable for future config selection.
-        grids: Grid DTOs instantiated by component builders.
-    """
-
-    id: str
-    name: str
-    grids: tuple[GridConfig, ...]
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the layout composition boundary."""
-
-        validate_unique_ids((grid.id for grid in self.grids), scope=f"layout {self.id!r} grids")
-
-
-@dataclass(frozen=True, slots=True)
-class PromptConfig:
-    """Declarative prompt component for confirmation windows.
-
-    Attributes:
-        id: Deterministic prompt component ID.
-        window_id: Deterministic transient window ID used when hosting this prompt.
-        surface_id: Deterministic transient surface ID used when hosting this prompt.
-        title: User-visible transient window title.
-        message: Primary prompt text.
-        buttons: Prompt action buttons.
-        prompt_glyph: Badge glyph displayed beside the message.
-        hint: Optional secondary explanatory copy.
-        danger: Whether the prompt should use danger styling.
-        margins: Qt layout margins in pixels ordered left, top, right, bottom.
-        spacing: Qt layout spacing in pixels.
-        minimum_size: Optional lower bound for startup size as ``(width, height)``.
-    """
-
-    id: str
-    window_id: str
-    surface_id: str
-    title: str
-    message: str
-    buttons: tuple[ButtonConfig, ...]
-    prompt_glyph: str = "!"
-    hint: str | None = None
-    danger: bool = False
-    margins: tuple[int, int, int, int] = (18, 18, 18, 16)
-    spacing: int = 14
-    minimum_size: tuple[int, int] = (460, 120)
-    kind: Literal["prompt"] = "prompt"
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the prompt composition boundary."""
-
-        validate_unique_ids((button.id for button in self.buttons), scope=f"prompt {self.id!r} buttons")
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardMetrics:
-    """Pixel-level dimensions for keyboard grid cells.
-
-    Attributes:
-        key_unit_px: Edge length of a single 1u key cell, in pixels.
-        grid_gap_px: Gap between adjacent cells, in pixels. Used when a
-            key spans multiple rows so the spanned cells visually merge.
-    """
-
-    key_unit_px: int = 48
-    grid_gap_px: int = 4
-
-    def span_width(self, units: float) -> int:
-        """Return pixel width for a key spanning ``units`` columns."""
-
-        return max(self.key_unit_px, round(self.key_unit_px * units))
-
-    def span_height(self, units: int) -> int:
-        """Return pixel height for a key spanning ``units`` rows including gaps."""
-
-        return (self.key_unit_px * units) + (self.grid_gap_px * (units - 1))
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardGridConfig:
-    """Declarative keyboard grid component.
-
-    Attributes:
-        id: Deterministic component ID.
-        layout: Keyboard layout data used by the grid component.
-        metrics: Pixel metrics applied to keys in this grid.
-    """
-
-    id: str
-    layout: LayoutConfig
-    metrics: KeyboardMetrics = field(default_factory=KeyboardMetrics)
-    kind: Literal["keyboard-grid"] = "keyboard-grid"
-
-
-@dataclass(frozen=True, slots=True)
-class KeyboardStatusConfig:
-    """Declarative keyboard backend status component.
-
-    Attributes:
-        id: Deterministic component ID.
-    """
-
-    id: str
-    kind: Literal["keyboard-status"] = "keyboard-status"
-
-
-ComponentConfig = (
-    KeyConfig
-    | SpacerConfig
-    | ButtonConfig
-    | PromptConfig
-    | KeyboardGridConfig
-    | KeyboardStatusConfig
-    | PointerLocatorConfig
-)
+        if self.poll_interval_ms < 1:
+            raise ValueError("Pointer locator poll interval must be at least 1 millisecond")
 
 
 @dataclass(frozen=True, slots=True)
 class HotCornerConfig:
-    """Hot-corner trigger behavior and runtime window bindings.
+    """Hot-corner sensor timing, size, and indicator colors.
+
+    The colors have no defaults: the profile gives them, as the engine owns no
+    colors. Each is drawn with its own alpha, so ``#AARRGGBB`` sets how
+    transparent it is.
 
     Attributes:
+        enabled: Whether the corners are watched at all.
+        fires_on_rest: Whether the built-in trigger runs: a corner fires
+            ``hot_corner.triggered`` once the pointer rests in it for
+            ``dwell_ms``, while the indicator shows the progress. Without it,
+            ``hot_corner.entered`` and ``hot_corner.left`` are still reported,
+            so a profile can decide on its own when a corner fires.
+        indicator_background: Fill of the indicator disc.
+        indicator_track: Color of the ring the progress runs along.
+        indicator_progress: Color of the progress arc.
+        indicator_center: Fill of the center once the dwell completes.
         dwell_ms: Cursor dwell time required before a corner triggers.
         poll_interval_ms: Cursor/sensor polling interval in milliseconds.
         corner_size_px: Edge length of each hot-corner sensor region.
         indicator_size_px: Edge length of the visual dwell indicator.
         indicator_margin_px: Pixel margin between the indicator and screen edges.
-        bindings: Mapping of corner ID to managed window IDs toggled by the runtime.
+        indicator_disc_inset_px: Space between the indicator's edge and its disc.
+        indicator_ring_inset_px: Space between the indicator's edge and its ring.
+        indicator_center_inset_px: Space between the indicator's edge and its center.
+        indicator_track_width_px: Line width of the ring.
+        indicator_progress_width_px: Line width of the progress arc.
+        indicator_center_start_opacity: Share of ``indicator_center``'s alpha
+            the center has when a dwell starts; it reaches the full alpha as the
+            dwell completes.
     """
 
+    indicator_background: str
+    indicator_track: str
+    indicator_progress: str
+    indicator_center: str
+    enabled: bool = True
+    fires_on_rest: bool = True
     dwell_ms: int = 200
     poll_interval_ms: int = 25
     corner_size_px: int = 20
     indicator_size_px: int = 52
     indicator_margin_px: int = 14
-    bindings: dict[str, list[str]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class SurfaceConfig:
-    """Generic root content surface hosted by a window.
-
-    Attributes:
-        id: Deterministic surface ID.
-        kind: Surface builder key.
-        components: Child components mounted into the surface.
-        background_components: Components painted behind the surface content.
-        margins: Qt layout margins in pixels ordered left, top, right, bottom.
-        spacing: Qt layout spacing in pixels.
-        minimum_size: Optional lower bound for startup size as ``(width, height)``.
-    """
-
-    id: str
-    components: tuple[ComponentConfig, ...]
-    background_components: tuple[ComponentConfig, ...] = ()
-    kind: Literal["surface"] = "surface"
-    margins: tuple[int, int, int, int] = (10, 10, 10, 10)
-    spacing: int = 8
-    minimum_size: tuple[int, int] = (0, 0)
+    indicator_disc_inset_px: int = 2
+    indicator_ring_inset_px: int = 6
+    indicator_center_inset_px: int = 16
+    indicator_track_width_px: int = 4
+    indicator_progress_width_px: int = 5
+    indicator_center_start_opacity: float = 0.54
 
     def __post_init__(self) -> None:
-        """Validate IDs at the surface composition boundary."""
+        """Reject insets that leave nothing of the indicator to draw."""
 
-        validate_unique_ids(
-            (component.id for component in (*self.background_components, *self.components)),
-            scope=f"surface {self.id!r} components",
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class WindowConfig:
-    """Window declaration consumed by the generic window builder.
-
-    Attributes:
-        id: Deterministic window ID used by the window manager.
-        title: User-visible window title.
-        surface: Root surface content declaration.
-        overlay: Overlay behavior for this window.
-        chrome: Optional custom chrome policy.
-        dwell_click: Optional pointer dwell activation policy.
-        opacity: Normal window opacity from zero through one.
-    """
-
-    id: str
-    title: str
-    surface: SurfaceConfig
-    overlay: OverlayConfig = field(default_factory=OverlayConfig)
-    chrome: ChromeConfig = field(default_factory=ChromeConfig)
-    dwell_click: DwellClickConfig = field(default_factory=DwellClickConfig)
-    opacity: float = 1.0
-
-    def __post_init__(self) -> None:
-        """Validate window presentation values."""
-
-        if not 0.0 <= self.opacity <= 1.0:
-            raise ValueError("Window opacity must be between 0.0 and 1.0")
-
-
-@dataclass(frozen=True, slots=True)
-class AppConfig:
-    """Root application configuration owned by the runtime.
-
-    Attributes:
-        windows: Windows available to the runtime, keyed by deterministic IDs.
-        startup_window_ids: IDs of windows shown during startup.
-        keyboard_window_id: ID of the default keyboard surface.
-        quit_prompt: Declarative quit confirmation prompt.
-        linux_permission_prompt: Declarative Linux permission setup prompt.
-        hot_corner: Hot-corner trigger behavior and window bindings.
-    """
-
-    windows: tuple[WindowConfig, ...]
-    startup_window_ids: tuple[str, ...]
-    keyboard_window_id: str
-    quit_prompt: PromptConfig
-    linux_permission_prompt: PromptConfig
-    hot_corner: HotCornerConfig = field(default_factory=HotCornerConfig)
-
-    def __post_init__(self) -> None:
-        """Validate IDs at the root app composition boundary."""
-
-        validate_unique_ids((window.id for window in self.windows), scope="app windows")
-        validate_unique_ids(
-            (window.surface.id for window in self.windows),
-            scope="app window surfaces",
-        )
-        validate_unique_ids(
-            (
-                *(window.id for window in self.windows),
-                self.quit_prompt.window_id,
-                self.linux_permission_prompt.window_id,
-            ),
-            scope="app window and prompt window IDs",
-        )
-        validate_unique_ids(
-            (
-                *(window.surface.id for window in self.windows),
-                self.quit_prompt.surface_id,
-                self.linux_permission_prompt.surface_id,
-            ),
-            scope="app surface and prompt surface IDs",
-        )
+        for inset in (self.indicator_disc_inset_px, self.indicator_ring_inset_px, self.indicator_center_inset_px):
+            if not 0 <= inset * 2 < self.indicator_size_px:
+                raise ValueError("Hot corner indicator insets must be at least 0 and under half the indicator size")
+        if not 0.0 <= self.indicator_center_start_opacity <= 1.0:
+            raise ValueError("Hot corner indicator center start opacity must be between 0 and 1")

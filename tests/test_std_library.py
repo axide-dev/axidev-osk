@@ -1,0 +1,736 @@
+from __future__ import annotations
+
+import colorsys
+import unittest
+from typing import Any
+
+from PySide6.QtCore import QEvent
+from PySide6.QtWidgets import QWidget
+
+from axidev_osk.messages import DataMap, RuntimeEvent
+from axidev_osk.nodes import BUTTON_PRESSED, BUTTON_RELEASED
+from axidev_osk.python_defaults import axidev_osk
+from axidev_osk.python_defaults.axidev_osk import std
+from axidev_osk.python_defaults.axidev_osk.std import controls, keys, layouts, locator, prompts, wheel, windows
+from axidev_osk.config.variables import decode_state
+from axidev_osk.runtime.engine_messages import OBSERVED_VARIABLES, input_key, keyboard_reset
+from axidev_osk.runtime.profile_runtime import state_set
+from axidev_osk.runtime.state import StateTree
+from support import (
+    RecordingBackend,
+    build_window,
+    find_node,
+    make_test_engine,
+    nodes_by_id,
+    qt_app,
+    record_app_actions,
+    start_test_profile,
+    wait_until,
+)
+
+
+class StdHarness:
+    def __init__(
+        self,
+        test: unittest.TestCase,
+        children: list[axidev_osk.Map],
+        *,
+        on: dict[str, Any] | None = None,
+        state: dict[str, Any] | None = None,
+        also: list[dict[str, Any]] | None = None,
+        **window_fields: Any,
+    ) -> None:
+        qt_app()
+        self.backend = RecordingBackend()
+        self.engine = make_test_engine(self.backend)
+        self.window_actions = record_app_actions(self.engine.dispatcher)
+        root = axidev_osk.config(
+            active_profile="p",
+            profiles={
+                "p": axidev_osk.profile(
+                    windows=[axidev_osk.window(id="pad", title="Pad", content=axidev_osk.box(id="root", children=children), **window_fields)],
+                    state=std.with_state(state),
+                    on=std.with_handlers(on, also or []),
+                )
+            },
+        )
+        self.profile = start_test_profile(self.engine, root)
+        self.window = build_window(test, self.profile.window("pad"), self.engine)
+
+    def tap(self, node_id: str) -> None:
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": node_id, "button": "left"}))
+        self.engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": node_id, "button": "left"}))
+
+    def observe(self, key: str, pressed: bool, modifiers: tuple[str, ...] = ()) -> None:
+        self.engine.dispatcher.dispatch(input_key(key, None, modifiers, pressed))
+
+    def widget(self, node_id: str) -> QWidget:
+        return find_node(self.window, node_id)
+
+    def state(self, *path: str) -> object:
+        return self.engine.profile.state.get(path)
+
+
+class KeyTests(unittest.TestCase):
+    def test_letter_sends_its_key_and_legend_follows_shift_and_caps(self) -> None:
+        harness = StdHarness(self, [keys.letter("a")])
+        key = harness.widget("key:A")
+
+        harness.tap("key:A")
+        self.assertEqual(harness.backend.sent, [("down", "A", (), True), ("up", "A")])
+        self.assertEqual(key.text(), "a")  # type: ignore[attr-defined]
+
+        harness.observe("ShiftLeft", True)
+        self.assertEqual(key.text(), "A")  # type: ignore[attr-defined]
+        harness.observe("ShiftLeft", True, ("CapsLock",))
+        self.assertEqual(key.text(), "a")  # type: ignore[attr-defined]
+
+    def test_held_modifier_holds_its_key_from_first_tap_to_second(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft")])
+        shift = harness.widget("key:ShiftLeft")
+
+        harness.tap("key:ShiftLeft")
+        self.assertEqual(harness.backend.sent, [("down", "ShiftLeft", (), True)])
+        self.assertTrue(shift.property("latched"))
+
+        harness.tap("key:ShiftLeft")
+        self.assertEqual(harness.backend.sent[-1], ("up", "ShiftLeft"))
+        self.assertFalse(shift.property("latched"))
+
+    def test_one_shot_modifier_applies_to_the_next_key_only(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
+
+        harness.tap("key:ShiftLeft")
+        self.assertEqual(harness.widget("key:A").text(), "A")  # type: ignore[attr-defined]
+        harness.tap("key:A")
+        harness.tap("key:A")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [
+                ("down", "ShiftLeft", (), False),
+                ("down", "A", (), True),
+                ("up", "A"),
+                ("up", "ShiftLeft"),
+                ("down", "A", (), True),
+                ("up", "A"),
+            ],
+        )
+
+    def test_a_key_releases_the_one_shot_its_press_held_even_if_cancelled_meanwhile(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
+        dispatch = harness.engine.dispatcher.dispatch
+
+        harness.tap("key:ShiftLeft")
+        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A", "button": "left"}))
+        harness.tap("key:ShiftLeft")
+        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A", "button": "left"}))
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), False), ("down", "A", (), True), ("up", "A"), ("up", "ShiftLeft")],
+        )
+        self.assertEqual(harness.state("std", "held"), {})
+
+    def test_a_one_shot_set_while_a_key_is_down_waits_for_the_next_key(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft", {"mode": "one_shot"}), keys.letter("a")])
+        dispatch = harness.engine.dispatcher.dispatch
+
+        dispatch(RuntimeEvent(BUTTON_PRESSED, {"node": "key:A", "button": "left"}))
+        harness.tap("key:ShiftLeft")
+        dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "key:A", "button": "left"}))
+        harness.tap("key:A")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [
+                ("down", "A", (), True),
+                ("up", "A"),
+                ("down", "ShiftLeft", (), False),
+                ("down", "A", (), True),
+                ("up", "A"),
+                ("up", "ShiftLeft"),
+            ],
+        )
+
+    def test_options_set_to_none_count_as_absent(self) -> None:
+        harness = StdHarness(
+            self,
+            [keys.key("A", "A", {"repeat": None}), keys.modifier("Ctrl", "CtrlLeft", {"mode": None, "repeat": None})]
+        )
+
+        harness.tap("key:A")
+        harness.tap("key:CtrlLeft")
+
+        self.assertEqual(harness.backend.sent, [("down", "A", (), True), ("up", "A"), ("down", "CtrlLeft", (), True)])
+
+    def test_one_shot_altgr_holds_the_real_altgr_key(self) -> None:
+        harness = StdHarness(self, [keys.modifier("AltGr", "AltRight", {"mode": "one_shot"}), keys.key("E", "E")])
+
+        harness.tap("key:AltRight")
+        harness.tap("key:E")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "AltRight", (), False), ("down", "E", (), True), ("up", "E"), ("up", "AltRight")],
+        )
+
+    def test_left_and_right_twins_share_a_latch_and_release_the_original_press(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Shift", "ShiftLeft"), keys.modifier("Shift", "ShiftRight")])
+
+        harness.tap("key:ShiftLeft")
+        self.assertTrue(harness.widget("key:ShiftRight").property("latched"))
+        harness.tap("key:ShiftRight")
+
+        self.assertEqual(harness.backend.sent, [("down", "ShiftLeft", (), True), ("up", "ShiftLeft")])
+        self.assertFalse(harness.widget("key:ShiftLeft").property("latched"))
+
+    def test_twins_that_differ_keep_separate_latches_unless_one_is_named(self) -> None:
+        harness = StdHarness(
+            self,
+            [
+                keys.modifier("Alt", "AltLeft"),
+                keys.modifier("AltGr", "AltRight"),
+                keys.modifier("Ctrl", "CtrlLeft", {"latch": "chord"}),
+                keys.modifier("Super", "SuperLeft", {"latch": "chord"}),
+            ]
+        )
+
+        harness.tap("key:AltLeft")
+        harness.tap("key:AltRight")
+        harness.tap("key:CtrlLeft")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "AltLeft", (), True), ("down", "AltRight", (), True), ("down", "CtrlLeft", (), True)],
+        )
+        self.assertTrue(harness.widget("key:SuperLeft").property("latched"))
+
+    def test_lock_key_taps_without_repeat_and_lights_from_the_system(self) -> None:
+        harness = StdHarness(self, [keys.lock("Caps", "CapsLock")])
+        caps = harness.widget("key:CapsLock")
+
+        harness.tap("key:CapsLock")
+        self.assertEqual(harness.backend.sent, [("down", "CapsLock", (), False), ("up", "CapsLock")])
+        self.assertFalse(caps.property("latched"))
+
+        harness.observe("CapsLock", True, ("CapsLock",))
+        self.assertTrue(caps.property("latched"))
+
+    def test_reset_clears_latches(self) -> None:
+        harness = StdHarness(self, [keys.modifier("Ctrl", "CtrlLeft")])
+        harness.tap("key:CtrlLeft")
+
+        harness.engine.dispatcher.dispatch(keyboard_reset())
+
+        self.assertEqual(harness.state("std", "latched"), {})
+        self.assertFalse(harness.widget("key:CtrlLeft").property("latched"))
+
+    def test_keys_whose_names_contain_dots_work(self) -> None:
+        harness = StdHarness(self, [keys.shifted(".", ">", "."), keys.modifier("Dot mod", ".", {"id": "dot.mod"})])
+
+        harness.observe(".", True)
+        harness.tap("dot.mod")
+
+        self.assertTrue(harness.widget("key:.").property("pressed"))
+        self.assertTrue(harness.widget("dot.mod").property("latched"))
+
+    def test_reading_through_a_plain_value_gives_none(self) -> None:
+        harness = StdHarness(self, [keys.letter("a")])
+        harness.engine.profile.set_observed(("keyboard", "status"), "plain")
+
+        self.assertIsNone(axidev_osk.read(harness.engine.profile.state.view(), "keyboard.status.inner"))
+        self.assertEqual(axidev_osk.read(harness.engine.profile.state.view(), "keyboard.status"), "plain")
+
+    def test_any_field_can_be_overridden(self) -> None:
+        def custom(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+            return [axidev_osk.keyboard.type_text("moo")]
+
+        node = keys.letter("a", {"id": "cow", "on_release": custom, "cell": {"row": 0, "column": 0}})
+
+        self.assertEqual((node["id"], node["on_release"], node["cell"]), ("cow", custom, {"row": 0, "column": 0}))
+
+
+class LayoutTests(unittest.TestCase):
+    def test_a_layout_missing_a_position_is_rejected_when_built(self) -> None:
+        tables = {"one": {"AD01": layouts.letter("q")}, "two": {}}
+
+        with self.assertRaisesRegex(ValueError, "Layout 'two' has no entry for AD01"):
+            keys.at("AD01", tables, lambda state: "one")
+
+    def test_a_position_key_shows_and_sends_whatever_the_active_layout_puts_there(self) -> None:
+        tables = {"one": {"AD01": layouts.letter("q")}, "two": {"AD01": layouts.shifted("&", "1", "&")}}
+        harness = StdHarness(
+            self,
+            [keys.at("AD01", tables, lambda state: axidev_osk.read(state, "layout"))],
+            state={"layout": axidev_osk.var("string", "one")},
+        )
+        key = harness.widget("key:AD01")
+
+        harness.tap("key:AD01")
+        self.assertEqual(key.text(), "q")  # type: ignore[attr-defined]
+
+        harness.engine.dispatcher.dispatch(state_set("layout", "two"))
+        harness.tap("key:AD01")
+        harness.observe("ShiftLeft", True)
+
+        self.assertEqual(key.text(), "1")  # type: ignore[attr-defined]
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "Q", (), True), ("up", "Q"), ("down", "&", (), True), ("up", "&")],
+        )
+
+
+class WheelTests(unittest.TestCase):
+    def _harness(self) -> StdHarness:
+        return StdHarness(self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us")])
+
+    def test_picking_slices_opens_menus_then_sends_the_key_and_returns_to_the_top(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:9")
+        self.assertEqual(harness.widget("w:slice:8").text(), "w")  # type: ignore[attr-defined]
+        harness.tap("w:slice:8")
+        harness.tap("w:slice:5")
+
+        # A key slice holds its key like a key button does, repeating until released.
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "W", (), True), ("up", "W"), ("down", "Space", (), True), ("up", "Space")],
+        )
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+
+    def test_a_modifier_latches_until_picked_again(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        self.assertTrue(harness.widget("w:slice:7").property("latched"))
+        harness.tap("w:center:top")
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), True), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
+        )
+
+    def test_top_goes_back_to_the_top_from_any_menu(self) -> None:
+        harness = self._harness()
+
+        self.assertFalse(harness.widget("w:center:top").isEnabled())
+        harness.tap("w:slice:3")
+        harness.tap("w:slice:8")
+        harness.tap("w:center:top")
+
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+        self.assertEqual(harness.widget("w:slice:6").text(), "Shift Ctrl Super Alt AltGr Super Ctrl Shift")  # type: ignore[attr-defined]
+        self.assertEqual(harness.backend.sent, [])
+
+    def test_back_goes_up_one_menu(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:slice:3")
+        harness.tap("w:slice:8")
+        harness.tap("w:center:back")
+        self.assertEqual(harness.state("std", "wheels", "w"), [3])
+        harness.tap("w:center:back")
+
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+        self.assertFalse(harness.widget("w:center:back").isEnabled())
+
+    def test_stay_keeps_the_menu_open_after_each_key_until_turned_off(self) -> None:
+        harness = self._harness()
+
+        harness.tap("w:center:stay")
+        self.assertTrue(harness.widget("w:center:stay").property("latched"))
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:8")
+        self.assertEqual(harness.state("std", "wheels", "w"), [9])
+        harness.tap("w:center:stay")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "Q", (), True), ("up", "Q"), ("down", "W", (), True), ("up", "W"), ("down", "Q", (), True), ("up", "Q")],
+        )
+        self.assertIsNone(harness.state("std", "wheels", "w"))
+
+    def test_release_lets_go_of_every_latched_modifier(self) -> None:
+        harness = self._harness()
+
+        self.assertFalse(harness.widget("w:center:release").isEnabled())
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:8")
+        harness.tap("w:center:release")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), True), ("down", "CtrlLeft", (), True), ("up", "CtrlLeft"), ("up", "ShiftLeft")],
+        )
+        self.assertFalse(harness.widget("w:slice:7").property("latched"))
+        self.assertFalse(harness.widget("w:center:release").isEnabled())
+
+    def test_slice_and_center_styles_add_to_the_wheels_own(self) -> None:
+        harness = StdHarness(
+            self,
+            [
+                wheel.wheel(
+                    "w",
+                    wheel.TKL,
+                    layouts.LAYOUTS,
+                    lambda state: "us",
+                    slice_opts={"style": {"classes": ["mine"], "properties": {"extra": True}}},
+                    center={"stay": {"label": "Hold", "style": {"properties": {"extra": True}}}},
+                )
+            ],
+        )
+
+        piece = harness.widget("w:slice:4")
+        self.assertEqual((piece.property("wheelItem"), piece.property("extra"), piece.property("classes")), ("key", True, ["mine"]))
+        harness.tap("w:center:stay")
+        stay = harness.widget("w:center:stay")
+        self.assertEqual(stay.text(), "Hold")  # type: ignore[attr-defined]
+        self.assertEqual((stay.property("wheelCenter"), stay.property("latched"), stay.property("extra")), ("stay", True, True))
+
+    def test_key_opts_make_the_wheels_modifiers_one_shot(self) -> None:
+        harness = StdHarness(self, [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", key_opts={"mode": "one_shot"})])
+
+        harness.tap("w:slice:6")
+        harness.tap("w:slice:7")
+        harness.tap("w:slice:9")
+        harness.tap("w:slice:7")
+
+        self.assertEqual(
+            harness.backend.sent,
+            [("down", "ShiftLeft", (), False), ("down", "Q", (), True), ("up", "Q"), ("up", "ShiftLeft")],
+        )
+
+    def test_a_wheel_refuses_to_stop_reporting_its_size(self) -> None:
+        with self.assertRaisesRegex(ValueError, "needs report_geometry"):
+            wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"report_geometry": False})
+
+    def test_shapes_stay_inside_a_wheel_before_its_first_size_report(self) -> None:
+        # Without a minimum size, the radii fall back to half a pixel until the canvas reports.
+        for outer, inner, slices in ((1.0, 0.25, wheel.SLICES), (0.25, 0.0, len(wheel.CENTER))):
+            for index in range(slices):
+                with self.subTest(outer=outer, index=index):
+                    corners = wheel.wedge(0.5, 0.5, outer, inner, 0, index, slices)
+                    self.assertTrue(all(-0.01 <= x <= 1.01 and -0.01 <= y <= 1.01 for x, y in corners), corners)
+
+    def test_a_wheel_menu_with_another_slice_count_is_rejected_when_built(self) -> None:
+        short = wheel.menu({0: ["AD01", "AD02"]})
+
+        with self.assertRaisesRegex(ValueError, r"wheel menu \[0\] has 2 slices; every menu needs 10"):
+            wheel.wheel("w", short, layouts.LAYOUTS, lambda state: "us")
+
+    def test_the_slices_fill_the_wheel_whatever_size_it_takes(self) -> None:
+        for canvas_id in ("w", "renamed"):
+            with self.subTest(canvas_id=canvas_id):
+                self._check_slices_fill(canvas_id)
+
+    def _check_slices_fill(self, canvas_id: str) -> None:
+        harness = StdHarness(
+            self,
+            [wheel.wheel("w", wheel.TKL, layouts.LAYOUTS, lambda state: "us", {"id": canvas_id, "min_width": 200, "min_height": 200})],
+        )
+        harness.window.show()
+        canvas = harness.widget(canvas_id)
+        for width, height in ((200, 200), (500, 260)):
+            harness.window.resize(width + 100, height + 100)
+            qt_app().processEvents()
+            slices = [harness.widget(f"w:slice:{index}").geometry() for index in range(wheel.SLICES)]
+            with self.subTest(size=(canvas.width(), canvas.height())):
+                self.assertGreater(canvas.width(), canvas.height() if width > height else 0)
+                self.assertLessEqual(min(rect.left() for rect in slices), 1)
+                self.assertLessEqual(min(rect.top() for rect in slices), 1)
+                self.assertGreaterEqual(max(rect.right() for rect in slices), canvas.width() - 2)
+                self.assertGreaterEqual(max(rect.bottom() for rect in slices), canvas.height() - 2)
+
+
+class ControlTests(unittest.TestCase):
+    def test_checkbox_flips_its_variable_and_lights_while_true(self) -> None:
+        harness = StdHarness(self, [controls.checkbox("on", "On", "on")], state={"on": axidev_osk.var("boolean", False)})
+
+        harness.tap("on")
+        self.assertIs(harness.state("on"), True)
+        self.assertTrue(harness.widget("on").property("latched"))
+
+        harness.tap("on")
+        self.assertIs(harness.state("on"), False)
+        self.assertFalse(harness.widget("on").property("latched"))
+
+    def test_stepper_moves_by_exact_steps_and_stops_at_its_bounds(self) -> None:
+        harness = StdHarness(
+            self,
+            [controls.stepper("level", "level", minimum=0.3, maximum=1.0, step=0.05, label="Level")],
+            state={"level": axidev_osk.var("number", 0.85)},
+        )
+        up = harness.widget("level:up")
+
+        for _tap in range(4):
+            harness.tap("level:up")
+        self.assertEqual(harness.state("level"), 1.0)
+        self.assertEqual(harness.widget("level:value").text(), "1")  # type: ignore[attr-defined]
+        self.assertFalse(up.isEnabled())
+
+        harness.tap("level:down")
+        self.assertEqual(harness.state("level"), 0.95)
+        self.assertTrue(up.isEnabled())
+
+    def test_linked_steppers_never_cross(self) -> None:
+        harness = StdHarness(
+            self,
+            [
+                controls.stepper("low", "low", minimum=0, maximum=lambda state: state.high - 5, step=5),
+                controls.stepper("high", "high", minimum=lambda state: state.low + 5, maximum=100, step=5),
+            ],
+            state={"low": axidev_osk.var("integer", 0), "high": axidev_osk.var("integer", 15)},
+        )
+
+        for _tap in range(5):
+            harness.tap("low:up")
+        self.assertEqual(harness.state("low"), 10)
+        self.assertFalse(harness.widget("high:down").isEnabled())
+
+        harness.tap("high:up")
+        harness.tap("low:up")
+        self.assertEqual((harness.state("low"), harness.state("high")), (15, 20))
+
+    def test_dropdown_opens_inline_and_picking_a_choice_runs_on_select_and_closes_it(self) -> None:
+        mode, mode_panel = controls.dropdown(
+            "mode",
+            [("a", "Alpha"), ("b", "Beta")],
+            value=lambda state: state.mode,
+            on_select=lambda ctx, value: [axidev_osk.state.set("mode", value)],
+            label="Mode",
+            group="g",
+        )
+        other, other_panel = controls.menu("other", "Other", [axidev_osk.label(id="other:text", text="hi")], group="g")
+        harness = StdHarness(self, [mode_panel, other_panel, mode, other], state={"mode": axidev_osk.var("string", "a")})
+        panel = harness.widget("mode:panel")
+        self.assertEqual(harness.widget("mode").text(), "Mode: Alpha ▾")  # type: ignore[attr-defined]
+        self.assertTrue(panel.isHidden())
+
+        harness.tap("mode")
+        self.assertFalse(panel.isHidden())
+        self.assertTrue(harness.widget("mode:choice:0").property("latched"))
+
+        harness.tap("mode:choice:1")
+        self.assertEqual(harness.state("mode"), "b")
+        self.assertTrue(panel.isHidden())
+        self.assertEqual(harness.widget("mode").text(), "Mode: Beta ▾")  # type: ignore[attr-defined]
+
+        harness.tap("mode")
+        harness.tap("other")
+        self.assertTrue(panel.isHidden())
+        self.assertFalse(harness.widget("other:panel").isHidden())
+
+    def test_strip_shows_only_its_toggle_until_opened_and_closes_its_menus_with_it(self) -> None:
+        group = controls.strip_group("s")
+        more, more_panel = controls.menu("more", "More", [axidev_osk.label(id="more:text", text="hi")], group=group)
+        harness = StdHarness(self, [controls.strip("s", [more], panels=[more_panel])])
+        controls_row, panel = harness.widget("s:controls"), harness.widget("more:panel")
+        self.assertTrue(controls_row.isHidden())
+
+        harness.tap("s:toggle")
+        self.assertFalse(controls_row.isHidden())
+        harness.tap("more")
+        self.assertFalse(panel.isHidden())
+        self.assertFalse(controls_row.isHidden())
+
+        harness.tap("s:toggle")
+        self.assertTrue(controls_row.isHidden())
+        harness.tap("s:toggle")
+        self.assertTrue(panel.isHidden())
+
+    def test_a_window_with_a_strip_gives_its_spare_height_to_its_content(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        content = axidev_osk.grid(id="keys", children=[axidev_osk.button(id="key", label="A", cell={"row": 0, "column": 0})])
+        window = controls.with_strip(axidev_osk.window(id="pad", title="Pad", content=content), controls.strip("s", []))
+        root = axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[window], state=std.with_state(None))})
+        built = build_window(self, start_test_profile(engine, root).window("pad"), engine)
+        built.show()
+        key, strip = find_node(built, "key"), find_node(built, "s")
+        key_height, strip_height = key.height(), strip.height()
+
+        built.resize(built.width(), built.height() + 200)
+        qt_app().processEvents()
+
+        self.assertEqual(key.height(), key_height + 200)
+        self.assertEqual(strip.height(), strip_height)
+
+
+class WindowHelperTests(unittest.TestCase):
+    def test_ghost_button_fades_blocks_and_restores(self) -> None:
+        harness = StdHarness(
+            self,
+            [windows.ghost_button("pad"), keys.letter("a")],
+            opacity=windows.ghost_opacity("pad", 0.85),
+            input_blocked=windows.ghost_blocked("pad"),
+        )
+        press = QEvent(QEvent.Type.MouseButtonPress)
+
+        harness.tap("ghost:pad")
+
+        self.assertIs(harness.state("std", "ghosted", "pad"), True)
+        self.assertAlmostEqual(harness.window.windowOpacity(), windows.GHOST_OPACITY, delta=0.005)
+        blocker = harness.window._input_blocker
+        assert blocker is not None
+        self.assertTrue(blocker.eventFilter(harness.widget("key:A"), press))
+        self.assertFalse(blocker.eventFilter(harness.widget("ghost:pad"), press))
+
+        harness.tap("ghost:pad")
+
+        self.assertIsNone(harness.state("std", "ghosted", "pad"))
+        self.assertAlmostEqual(harness.window.windowOpacity(), 0.85, delta=0.005)
+        self.assertIsNone(harness.window._input_blocker)
+        self.assertEqual(harness.window_actions, [])
+
+    def test_drags_and_finished_dwells_get_their_usual_meaning(self) -> None:
+        harness = StdHarness(self, [keys.letter("a")])
+
+        harness.engine.dispatcher.dispatch(
+            RuntimeEvent("window.dragged", {"window": "pad", "dx": 3, "dy": -4, "button": "left"}),
+            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 5, "dy": 6, "button": "left"}),
+            # Other mouse buttons are left for the profile to give a meaning.
+            RuntimeEvent("window.dragged", {"window": "pad", "dx": 1, "dy": 1, "button": "right"}),
+            RuntimeEvent("window.resize_dragged", {"window": "pad", "dx": 1, "dy": 1, "button": "middle"}),
+            RuntimeEvent("dwell.completed", {"window": "pad", "x": 70, "y": 80}),
+        )
+
+        self.assertEqual(
+            harness.window_actions,
+            [
+                ("window.move_by", {"window": "pad", "dx": 3, "dy": -4}),
+                ("window.resize_by", {"window": "pad", "dx": 5, "dy": 6}),
+                ("window.click", {"window": "pad", "x": 70, "y": 80, "button": "left"}),
+            ],
+        )
+
+    def test_corner_toggle_brings_back_ghosted_and_minimized_windows(self) -> None:
+        def run(**window: bool) -> list[str]:
+            state = StateTree()
+            state.declare(OBSERVED_VARIABLES, "engine")
+            state.declare(decode_state(std.with_state(), "test"), "profile")
+            ghosted = window.pop("ghosted", False)
+            if ghosted:
+                state.set(("std", "ghosted", "pad"), True)
+            if window:
+                state.set(("windows", "pad"), window)
+            return [item["action"] for item in windows.corner_toggle(state.view(), "pad")]
+
+        self.assertEqual(run(visible=True, ghosted=True), ["state.set", "window.show"])
+        self.assertEqual(run(visible=True, minimized=True), ["window.show"])
+        self.assertEqual(run(visible=True), ["window.hide"])
+        self.assertEqual(run(), ["window.show"])
+
+
+def _rect(x: int, y: int, width: int = 48, height: int = 48) -> dict[str, int]:
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+class LocatorTests(unittest.TestCase):
+    def test_keys_alternate_warm_and_cool_like_a_checkerboard(self) -> None:
+        rects = [_rect(column * 52, row * 52) for row in range(3) for column in range(4)]
+
+        colors = locator.palette(rects)
+
+        for index, color in enumerate(colors):
+            row, column = divmod(index, 4)
+            hue = _hue(color)
+            if (row + column) % 2 == 0:
+                self.assertTrue(hue >= 329 or hue <= 61, (row, column, color))
+            else:
+                self.assertTrue(149 <= hue <= 271, (row, column, color))
+
+    def test_nearby_keys_get_different_colors(self) -> None:
+        row = [_rect(column * 52, 0) for column in range(3)]
+
+        self.assertEqual(len(set(locator.palette(row))), 3)
+
+    def test_colors_do_not_depend_on_the_order_keys_come_in(self) -> None:
+        rects = [_rect(column * 52, row * 52) for row in range(2) for column in range(5)]
+
+        forward = locator.palette(rects)
+        backward = locator.palette(list(reversed(rects)))
+
+        self.assertEqual(forward, list(reversed(backward)))
+
+    def test_opts_choose_the_hues_and_how_far_nearby_reaches(self) -> None:
+        rects = [_rect(column * 52, 0) for column in range(4)]
+
+        colors = locator.palette(rects, {"warm": [0.0, 0.0], "cool": [240.0, 0.0], "nearby_sizes": 0})
+
+        self.assertEqual(colors, ["#ff0000", "#0000ff", "#ff0000", "#0000ff"])
+
+    def test_colored_buttons_glow_the_pattern_of_where_they_are(self) -> None:
+        buttons = [axidev_osk.button(id=name, label=name, min_width=48, min_height=48) for name in ("a", "b", "c")]
+        harness = StdHarness(self, locator.colored(buttons), also=[locator.on(buttons)])
+        harness.window.show()
+        widgets = nodes_by_id(harness.window)
+
+        wait_until(lambda: all(widgets[name].property("locatorColor") for name in ("a", "b", "c")))
+
+        rects = []
+        for name in ("a", "b", "c"):
+            corner = widgets[name].mapTo(harness.window.centralWidget(), widgets[name].rect().topLeft())
+            rects.append(_rect(corner.x(), corner.y(), widgets[name].width(), widgets[name].height()))
+        self.assertEqual([widgets[name].property("locatorColor") for name in ("a", "b", "c")], locator.palette(rects))
+
+
+def _hue(color: str) -> float:
+    red, green, blue = (int(color[index : index + 2], 16) / 255 for index in (1, 3, 5))
+    return colorsys.rgb_to_hsv(red, green, blue)[0] * 360
+
+
+class PromptTests(unittest.TestCase):
+    def test_an_empty_hint_still_gets_its_row_as_lua_would(self) -> None:
+        prompt = prompts.prompt_window("p", title="T", message="M", buttons=[], hint="")
+
+        rows = [row["id"] for row in prompt["content"]["children"]]
+
+        self.assertIn("p:hint", rows)
+
+    def test_prompt_window_builds_with_button_callbacks_and_takes_opts(self) -> None:
+        qt_app()
+        engine = make_test_engine(RecordingBackend())
+        answers: list[str] = []
+
+        def answer(ctx: Any, event: DataMap) -> None:
+            answers.append(str(event["node"]))
+
+        prompt = prompts.prompt_window(
+            "quit",
+            title="Close?",
+            message="Close it?",
+            hint="Hide it instead.",
+            danger=True,
+            buttons=[
+                prompts.prompt_button("quit:yes", "Yes", answer, accept=True),
+                prompts.prompt_button("quit:no", "No", answer, accept=False, opts={"label": "Keep"}),
+            ],
+            opts={"minimum_size": [500, 200]},
+        )
+        profile = start_test_profile(engine, axidev_osk.config(active_profile="p", profiles={"p": axidev_osk.profile(windows=[prompt])}))
+        window = build_window(self, profile.window("quit"), engine)
+        engine.dispatcher.dispatch(RuntimeEvent(BUTTON_RELEASED, {"node": "quit:no", "button": "left"}))
+
+        widgets = nodes_by_id(window)
+        self.assertEqual(widgets["quit:message"].text(), "Close it?")  # type: ignore[attr-defined]
+        self.assertEqual(widgets["quit:no"].text(), "Keep")  # type: ignore[attr-defined]
+        self.assertEqual(widgets["quit:yes"].objectName(), "confirmAcceptButton")
+        self.assertEqual(answers, ["quit:no"])
+        self.assertFalse(profile.window("quit").show_on_start)
+        self.assertEqual(profile.window("quit").values.initial.minimum_size, (500, 200))
+
+
+if __name__ == "__main__":
+    unittest.main()
