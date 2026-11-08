@@ -31,10 +31,11 @@ from PySide6.QtCore import QChildEvent, QEvent, QObject, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
-from ..components.mouse_buttons import MOUSE_BUTTONS, OTHER_BUTTON, mouse_button_name
+from ..components.mouse_buttons import mouse_button_name
 from ..messages import DataMap, RuntimeEvent
 from ..runtime.decoding import int_value, non_empty_string_value, number_value, require_keys, validated_event
 from ..runtime.event_fields import profile_node, samples
+from ..runtime.names import MOUSE_BUTTON_NAMES, OTHER_BUTTON
 
 if TYPE_CHECKING:
     from ..runtime.dispatcher import Dispatcher
@@ -79,7 +80,7 @@ class NodePointerPressArguments:
     node: str = profile_node()
     x: float = samples(0.0)
     y: float = samples(0.0)
-    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
+    button: str = samples(*MOUSE_BUTTON_NAMES, OTHER_BUTTON)
 
 
 def decode_node_pointer_press(arguments: DataMap) -> NodePointerPressArguments:

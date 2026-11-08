@@ -20,6 +20,7 @@ from axidev_osk.runtime.profile_runtime import (
     ProfileRuntime,
     StateChangedArguments,
     register_profile_events,
+    state_add,
     state_append,
     state_set,
 )
@@ -452,6 +453,27 @@ class ProfileRuntimeTests(unittest.TestCase):
             [("state.append", "VariableError"), ("state.append", "VariableError")],
         )
 
+    def test_state_add_reads_the_value_when_it_runs_so_additions_queued_together_all_count(self) -> None:
+        self._start(state={"counts": var({"map": "integer"}), "level": var("number", 0.5), "mode": var("string", "a")})
+        self.changes.clear()
+
+        self.dispatcher.dispatch(
+            state_add(["counts", "a.b"], 1),
+            state_add(["counts", "a.b"], 2),
+            state_add("level", 0.25),
+            state_add(["counts", "a.b"], 0.5),
+            state_add("mode", 1),
+        )
+
+        # An absent map entry counts from 0; a key with dots is one entry.
+        self.assertEqual(self.state.get(("counts",)), {"a.b": 3})
+        self.assertEqual(self.state.get(("level",)), 0.75)
+        self.assertEqual(self.changes, [("counts", "a.b"), ("counts", "a.b"), ("level",)])
+        self.assertEqual(
+            [(failure.action, failure.exception_type) for failure in self.failed_actions],
+            [("state.add", "VariableError"), ("state.add", "VariableError")],
+        )
+
     def test_restarting_resets_profile_state_and_keeps_shared_and_observed_state(self) -> None:
         shared = {"opacity": var("number", 0.85)}
         self._start(shared, state={"mode": var("string", "a"), "gone": var("boolean", True)})
@@ -500,7 +522,10 @@ class ProfileRuntimeTests(unittest.TestCase):
 
         self.dispatcher.dispatch(RuntimeEvent("hot_corner.triggered", {"corner": "top_left"}))
 
-        self.assertEqual([failure.message for failure in self.failures], ["boom"])
+        self.assertEqual(
+            [(failure.message, failure.during) for failure in self.failures],
+            [("boom", {"event": "hot_corner.triggered", "arguments": {"corner": "top_left"}})],
+        )
         self.assertEqual(self.state.get(("ok",)), True)
 
     def test_unknown_on_event_fails_at_decode_even_when_inactive(self) -> None:
@@ -539,7 +564,8 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.dispatcher.dispatch(state_set("mode", "abc"))
 
         self.assertEqual(applied, ["?", "ABC"])
-        self.assertEqual([(failure.kind, failure.source) for failure in self.failures], [("binding", "node:a.label")])
+        # It failed as it was bound, not while handling an event.
+        self.assertEqual([(failure.kind, failure.source, failure.during) for failure in self.failures], [("binding", "node:a.label", None)])
         self.assertIsNotNone(self.failures[0].function)
 
     def test_invalid_values_keep_the_last_value_and_report_without_a_function(self) -> None:
@@ -558,7 +584,10 @@ class ProfileRuntimeTests(unittest.TestCase):
         self.dispatcher.dispatch(state_set("size", 2))
 
         self.assertEqual(applied, [1, 2])
-        self.assertEqual([(failure.function, failure.message) for failure in self.failures], [(None, "test.size must be at least 0")])
+        self.assertEqual(
+            [(failure.function, failure.message, failure.during) for failure in self.failures],
+            [(None, "test.size must be at least 0", {"event": "state.changed", "arguments": {"path": ["size"]}})],
+        )
 
 
     def test_apply_gets_the_values_it_applied_before(self) -> None:

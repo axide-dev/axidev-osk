@@ -34,7 +34,6 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPaintEven
 from PySide6.QtWidgets import QWidget
 
 from ..config.models import HotCornerConfig
-from ..runtime.app_messages import ScreenCorner
 from ..platform.layer_shell import (
     ANCHOR_BOTTOM,
     ANCHOR_LEFT,
@@ -48,6 +47,7 @@ from ..platform.layer_shell import (
 from ..platform.overlay import OverlayBackend, qt_platform_name, read_selected_overlay_backend
 from ..runtime.app_messages import hot_corner_entered, hot_corner_left, hot_corner_triggered
 from ..runtime.dispatcher import Dispatcher
+from ..runtime.names import ScreenCorner
 
 
 def _configure_hot_corner_window(window: QWidget, *, accepts_input: bool) -> None:

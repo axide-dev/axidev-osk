@@ -1,6 +1,6 @@
 """Run one profile's functions against the central state tree.
 
-``ProfileRuntime`` owns the state registry, the ``state.set`` action, and the
+``ProfileRuntime`` owns the state registry, the ``state.*`` actions, and the
 profile ``on`` table. ``BindingTracker`` decodes values that may follow state
 (node, window, theme, and attachment values) and decodes them again only when a
 state path one of their bindings read changes.
@@ -19,7 +19,9 @@ from ..config.variables import Variable
 from ..function_registry import FunctionRef, FunctionRegistry
 from ..messages import DataMap, DataValue, MessageResult, RuntimeAction, RuntimeEvent, data_equal
 from .decoding import (
+    map_value,
     non_empty_string_value,
+    number_value,
     optional_string_value,
     require_keys,
     string_list_value,
@@ -42,6 +44,7 @@ _logger = logging.getLogger(__name__)
 
 STATE_SET = "state.set"
 STATE_APPEND = "state.append"
+STATE_ADD = "state.add"
 STATE_CHANGED = "state.changed"
 CALLBACK_FAILED = "callback.failed"
 
@@ -59,6 +62,12 @@ class StateAppendArguments:
 
 
 @dataclass(frozen=True, slots=True)
+class StateAddArguments:
+    path: StatePath
+    amount: int | float
+
+
+@dataclass(frozen=True, slots=True)
 class StateChangedArguments:
     path: StatePath = samples(["app", "profile"])
 
@@ -70,7 +79,8 @@ class CallbackFailedArguments:
     source: str = samples("example")
     exception_type: str = samples("ValueError")
     message: str = samples("example failure")
-    hint: str = samples(CHECK_HINT)
+    during: DataMap | None = samples(None, {"event": "state.changed", "arguments": {"path": ["app", "profile"]}})
+    """The event the failing function was handling, as ``event`` and ``arguments``; ``None`` when a binding failed as it was bound."""
 
 
 def state_set(path: str | list[str], value: DataValue) -> RuntimeAction:
@@ -83,12 +93,22 @@ def state_append(path: str | list[str], value: DataValue) -> RuntimeAction:
     return validated_action(STATE_APPEND, {"path": raw_path, "value": value}, decode_state_append)
 
 
+def state_add(path: str | list[str], amount: int | float) -> RuntimeAction:
+    raw_path: DataValue = list(path) if isinstance(path, list) else path
+    return validated_action(STATE_ADD, {"path": raw_path, "amount": amount}, decode_state_add)
+
+
 def state_changed(path: StatePath) -> RuntimeEvent:
     return validated_event(STATE_CHANGED, {"path": list(path)}, decode_state_changed)
 
 
-def callback_failed(ref: FunctionRef | None, kind: str, source: str, error: Exception) -> RuntimeEvent:
-    """Report a failed callback or binding; ``ref`` is ``None`` when a binding's result was invalid."""
+def callback_failed(
+    ref: FunctionRef | None, kind: str, source: str, error: Exception, during: tuple[str, DataMap] | None
+) -> RuntimeEvent:
+    """Report a failed callback or binding; ``ref`` is ``None`` when a binding's result was invalid.
+
+    ``during`` is the name and arguments of the event the function was handling.
+    """
 
     return validated_event(
         CALLBACK_FAILED,
@@ -98,7 +118,7 @@ def callback_failed(ref: FunctionRef | None, kind: str, source: str, error: Exce
             "source": source,
             "exception_type": type(error).__name__,
             "message": str(error),
-            "hint": CHECK_HINT,
+            "during": {"event": during[0], "arguments": during[1]} if during is not None else None,
         },
         decode_callback_failed,
     )
@@ -120,6 +140,17 @@ def decode_state_append(arguments: DataMap) -> StateAppendArguments:
     return StateAppendArguments(path=_state_path(arguments), value=arguments["value"])
 
 
+def decode_state_add(arguments: DataMap) -> StateAddArguments:
+    """Decode ``state.add``; ``amount`` is added to the integer or number at ``path`` when the action runs."""
+
+    require_keys(arguments, ("path", "amount"))
+    number_value(arguments, "amount")
+    # Kept as given, since an integer variable only accepts an integer amount.
+    amount = arguments["amount"]
+    assert isinstance(amount, (int, float))
+    return StateAddArguments(path=_state_path(arguments), amount=amount)
+
+
 def _state_path(arguments: DataMap) -> StatePath:
     if isinstance(arguments["path"], list):
         return string_list_value(arguments, "path", non_empty=True)
@@ -132,14 +163,20 @@ def decode_state_changed(arguments: DataMap) -> StateChangedArguments:
 
 
 def decode_callback_failed(arguments: DataMap) -> CallbackFailedArguments:
-    require_keys(arguments, ("kind", "source", "exception_type", "message", "hint"), optional=("function",))
+    require_keys(arguments, ("kind", "source", "exception_type", "message"), optional=("function", "during"))
+    during = arguments.get("during")
+    if during is not None:
+        during = map_value(arguments, "during")
+        require_keys(during, ("event", "arguments"))
+        non_empty_string_value(during, "event")
+        map_value(during, "arguments")
     return CallbackFailedArguments(
         function=optional_string_value(arguments, "function") if "function" in arguments else None,
         kind=non_empty_string_value(arguments, "kind"),
         source=string_value(arguments, "source"),
         exception_type=string_value(arguments, "exception_type"),
         message=string_value(arguments, "message"),
-        hint=string_value(arguments, "hint"),
+        during=during,
     )
 
 
@@ -165,6 +202,7 @@ class ProfileRuntime:
         self._stop_hooks: list[Callable[[], None]] = []
         dispatcher.register_action(STATE_SET, decode_state_set, self._handle_state_set)
         dispatcher.register_action(STATE_APPEND, decode_state_append, self._handle_state_append)
+        dispatcher.register_action(STATE_ADD, decode_state_add, self._handle_state_add)
 
     def when_stopped(self, hook: Callable[[], None]) -> None:
         """Run ``hook`` whenever the running profile stops, to drop what it owned, such as its timers."""
@@ -244,14 +282,14 @@ class ProfileRuntime:
         for hook in self._stop_hooks:
             hook()
 
-    def run_callback(self, ref: FunctionRef, source: str, event: DataMap) -> MessageResult:
-        """Run one profile callback, turning failures into ``callback.failed``."""
+    def run_callback(self, ref: FunctionRef, source: str, event_name: str, event: DataMap) -> MessageResult:
+        """Run one profile callback for one event, turning failures into ``callback.failed``."""
 
         try:
             return list(call_callback(self._functions, ref, self._state, event))
         except Exception as exc:
             _logger.exception("Profile callback %s failed for %s. %s", ref.id, source, CHECK_HINT)
-            return [callback_failed(ref, "callback", source, exc)]
+            return [callback_failed(ref, "callback", source, exc, (event_name, event))]
 
     def set_observed(self, path: StatePath, value: DataValue) -> MessageResult:
         """Write an engine-observed variable, which profiles may read but not set."""
@@ -268,7 +306,7 @@ class ProfileRuntime:
         def run(arguments: DataMap) -> MessageResult:
             messages: MessageResult = []
             for ref in refs:
-                messages.extend(self.run_callback(ref, event_name, arguments))
+                messages.extend(self.run_callback(ref, event_name, event_name, arguments))
             return messages
 
         return run
@@ -283,7 +321,7 @@ class ProfileRuntime:
             ref = refs_by_node.get(node_id) if isinstance(node_id, str) else None
             if ref is None:
                 return []
-            return self.run_callback(ref, f"{node_id}.{event_name}", arguments)
+            return self.run_callback(ref, f"{node_id}.{event_name}", event_name, arguments)
 
         return run
 
@@ -298,6 +336,12 @@ class ProfileRuntime:
             raise ValueError(f"Profiles cannot set engine-observed state {path_text(arguments.path)!r}")
         self._state.append(arguments.path, arguments.value)
         return [state_changed(arguments.path)]
+
+    def _handle_state_add(self, arguments: StateAddArguments) -> MessageResult:
+        # The value is read when the action runs, so additions queued together all count.
+        if self._state.owner(arguments.path) == ENGINE:
+            raise ValueError(f"Profiles cannot set engine-observed state {path_text(arguments.path)!r}")
+        return [state_changed(arguments.path)] if self._state.add(arguments.path, arguments.amount) else []
 
 
 class BindingFailed(ConfigError):
@@ -375,7 +419,7 @@ class BindingTracker:
             if binding in self._bindings:
                 self._bindings.remove(binding)
 
-        failure = self._evaluate(binding)
+        failure = self._evaluate(binding, None)
         if failure is not None:
             if not binding.applied:
                 try:
@@ -392,13 +436,16 @@ class BindingTracker:
         messages: MessageResult = []
         for binding in tuple(self._bindings):
             if any(paths_overlap(event.path, read) for read in binding.reads):
-                failure = self._evaluate(binding)
+                failure = self._evaluate(binding, (STATE_CHANGED, {"path": list(event.path)}))
                 if failure is not None:
                     messages.append(failure)
         return messages
 
-    def _evaluate(self, binding: _Binding[object]) -> RuntimeEvent | None:
-        """Decode and apply one value set; a failure keeps the last value and the reads made so far."""
+    def _evaluate(self, binding: _Binding[object], during: tuple[str, DataMap] | None) -> RuntimeEvent | None:
+        """Decode and apply one value set; a failure keeps the last value and the reads made so far.
+
+        ``during`` is the event that made the binding decode again, reported with a failure.
+        """
 
         recorder = ReadRecorder()
         try:
@@ -411,10 +458,10 @@ class BindingTracker:
                 binding.applied = True
         except BindingFailed as exc:
             _logger.exception("Binding %s failed for %s. %s", exc.ref.id, binding.source, CHECK_HINT)
-            return callback_failed(exc.ref, "binding", binding.source, exc)
+            return callback_failed(exc.ref, "binding", binding.source, exc, during)
         except Exception as exc:
             _logger.exception("Values of %s are invalid. %s", binding.source, CHECK_HINT)
-            return callback_failed(None, "binding", binding.source, exc)
+            return callback_failed(None, "binding", binding.source, exc, during)
         finally:
             binding.reads = recorder.paths
         return None

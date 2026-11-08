@@ -54,6 +54,7 @@ from .app_messages import (
 from .decoding import EmptyArguments
 from .dispatcher import Dispatcher, Unsubscribe
 from .engine import build_engine
+from .engine_messages import running_profile
 from .event_handlers import PointerDragRouter, RelativePointer, register_display_recovery, register_window_actions
 from .qt_wake import QtDispatcherWake
 from .registries import ServiceRegistry
@@ -160,9 +161,6 @@ class ApplicationRuntime:
             self._quit_controller.register_quit_callback(service.stop)
         self._quit_controller.register_quit_callback(self._window_manager.close_all)
         try:
-            self._dispatcher.dispatch(
-                *self.engine.profile.set_observed(("app", "profiles"), list(self._root.profiles))
-            )
             self._activate(self._profile)
             for service in self._services.autostart_services():
                 service.start(self._dispatcher)
@@ -192,7 +190,8 @@ class ApplicationRuntime:
         self._profile = profile
         engine = self.engine
         engine.profile.start(profile)
-        self._dispatcher.dispatch(*engine.profile.set_observed(("app", "profile"), profile.id))
+        for path, value in running_profile(list(self._root.profiles), profile.id).items():
+            self._dispatcher.dispatch(*engine.profile.set_observed(path, value))
         theme = profile.theme
         self._unbind_theme = engine.bindings.bind(
             theme.decode,

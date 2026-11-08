@@ -128,6 +128,32 @@ class ExplorationTests(unittest.TestCase):
         self.assertIn("state.append log", problem.message)
         self.assertEqual(problem.trail, ())
 
+    def test_an_add_to_a_value_that_is_not_a_number_is_reported(self) -> None:
+        report = check_config(
+            _root(
+                [axidev_osk.button(id="count", label="Count", on_release=lambda ctx, event: [axidev_osk.state.add("mode", 1)])],
+                state={"mode": axidev_osk.var("string", "a")},
+            )
+        )
+
+        problem = _problem(report, f"{PAD}.children[0].on_release")
+        self.assertIn("state.add mode", problem.message)
+
+    def test_a_node_callback_gets_every_sample_of_its_event_for_its_own_node(self) -> None:
+        heard: set[tuple[str, str]] = set()
+
+        def on_press(ctx: Any, event: Any) -> list[axidev_osk.Map]:
+            heard.add((event["node"], event["button"]))
+            if event["button"] == "right":
+                raise ValueError("right is not handled")
+            return []
+
+        report = check_config(_root([axidev_osk.button(id="key", label="K", on_press=on_press), axidev_osk.button(id="other")]))
+
+        self.assertIn(("key", "left"), heard)
+        self.assertEqual({node for node, _button in heard}, {"key"})
+        self.assertIn("right is not handled", _problem(report, f"{PAD}.children[0].on_press").message)
+
     def test_the_depth_bounds_how_many_units_may_differ_and_a_given_depth_overrides_the_profile(self) -> None:
         def fails_when(*names: str) -> Any:
             def label(state: Any) -> str:

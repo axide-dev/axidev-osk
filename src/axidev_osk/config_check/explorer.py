@@ -16,9 +16,10 @@ that read nothing that changed returns what it returned before. A record or
 callback already run with the same values of the units it reads is not run
 again.
 
-A returned ``state.append`` is checked in the state its callback ran in (its
-path is a declared list and its value fits the list), but the states it leads
-to are not explored, since a list can grow forever.
+A returned ``state.append`` or ``state.add`` is checked in the state its
+callback ran in (its path is a declared list, integer, or number, and its value
+fits), but the states it leads to are not explored, since a list or a count can
+grow forever.
 
 Each failure is reported once, with the shortest trail of callbacks and state
 changes from the start state that reaches it.
@@ -40,10 +41,12 @@ from ..runtime.profile_runtime import (
     ENGINE,
     PROFILE,
     SHARED,
+    STATE_ADD,
     STATE_APPEND,
     STATE_SET,
     BindingFailed,
     StateSetArguments,
+    decode_state_add,
     decode_state_append,
     decode_state_set,
 )
@@ -270,8 +273,8 @@ class ProfileExplorer:
                     except Exception:
                         continue
                     sets.append((arguments.path, freeze(arguments.value)))
-                elif action.action == STATE_APPEND:
-                    problem = self._append_problem(action.arguments)
+                elif action.action in (STATE_APPEND, STATE_ADD):
+                    problem = self._in_place_problem(action.action, action.arguments)
                     if problem is not None:
                         self._report(source, problem, state)
         if not sets:
@@ -284,21 +287,27 @@ class ProfileExplorer:
             self._writes.append(self._plan(changes))
         return number
 
-    def _append_problem(self, arguments: DataMap) -> str | None:
-        """Why a ``state.append`` would fail in the tree's current state, or ``None`` when it would land."""
+    def _in_place_problem(self, name: str, arguments: DataMap) -> str | None:
+        """Why a ``state.append`` or ``state.add`` would fail in the tree's current state, or ``None`` when it would land."""
 
         try:
-            path = decode_state_append(arguments).path
+            if name == STATE_APPEND:
+                path = decode_state_append(arguments).path
+                change: Callable[[], object] = lambda: self._tree.append(path, arguments["value"])  # noqa: E731
+            else:
+                added = decode_state_add(arguments)
+                path = added.path
+                change = lambda: self._tree.add(path, added.amount)  # noqa: E731
         except Exception:
             return None  # The action rules already report arguments that do not decode.
         try:
             if self._tree.owner(path) == ENGINE:
-                return f"state.append {path_text(path)}: profiles cannot set engine-observed state"
+                return f"{name} {path_text(path)}: profiles cannot set engine-observed state"
             before = self._tree.get(path)
-            self._tree.append(path, arguments["value"])
+            change()
             self._tree.set(path, before)
         except Exception as exc:
-            return f"state.append {path_text(path)}: {exc}"
+            return f"{name} {path_text(path)}: {exc}"
         return None
 
     def _apply(self, changes: int, state: State) -> tuple[State, tuple[str, ...]]:
@@ -441,7 +450,8 @@ def profile_items(
     """Every binding record and callback of ``profile``, named by config path.
 
     ``callback_fields`` maps a node kind to its callback fields by event, and
-    ``samples`` lists every event a profile handler of that event can receive.
+    ``samples`` lists every event a handler of that event can receive; a node's
+    callback receives those with ``node`` set to its own node.
     """
 
     base = profile_path(profile.id)
@@ -457,7 +467,13 @@ def profile_items(
         fields = callback_fields(node.kind)
         for event, ref in node.callbacks.items():
             source = f"{node.path}.{fields.get(event, event)}"
-            callbacks.append(Callback(((ref, source),), source, event, {"node": node.id}))
+            # A node's callback only hears its own node, so every sample is tried with that node.
+            own: list[DataMap] = []
+            for arguments in samples(event):
+                fixed = {**arguments, "node": node.id}
+                if fixed not in own:
+                    own.append(fixed)
+                    callbacks.append(Callback(((ref, source),), source, event, fixed))
     for event, refs in profile.on.items():
         calls = tuple((ref, f"{base}.on.{event}[{index}]") for index, ref in enumerate(refs))
         for arguments in samples(event):

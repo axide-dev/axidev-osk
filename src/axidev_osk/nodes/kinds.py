@@ -26,13 +26,13 @@ from PySide6.QtWidgets import (
 
 from ..components.button.widget import Button
 from ..components.canvas import Canvas
-from ..components.mouse_buttons import MOUSE_BUTTONS, OTHER_BUTTON
 from ..components.scroll.widget import SCROLLBAR_CHOICES, ScrollArea
 from ..config.profile import NodeConfig
 from ..config.reader import ConfigError, ConfigReader
 from ..messages import DataMap
 from ..runtime.decoding import non_empty_string_value, require_keys
 from ..runtime.event_fields import profile_node, samples
+from ..runtime.names import MOUSE_BUTTON_NAMES, OTHER_BUTTON
 from ..widget_properties import COMPONENT_ID, LOCATOR_COLOR
 from .registry import NodeBuilder, NodeKind, NodeKindRegistry
 
@@ -47,7 +47,7 @@ class ButtonPressArguments:
     """A press or release, with the mouse button behind it (``left``, ``right``, ``middle``, ...)."""
 
     node: str = profile_node()
-    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
+    button: str = samples(*MOUSE_BUTTON_NAMES, OTHER_BUTTON)
 
 
 def decode_button_press(arguments: DataMap) -> ButtonPressArguments:

@@ -16,6 +16,7 @@ from ..config.variables import (
     ListOf,
     MapOf,
     Record,
+    Scalar,
     Slot,
     StatePath,
     Variable,
@@ -159,6 +160,16 @@ class StateTree:
         current = self.get(path)
         assert isinstance(current, list)
         return self.set(path, [*current, value])
+
+    def add(self, path: StatePath, amount: int | float) -> bool:
+        """Add ``amount`` to the integer or number at ``path``; an absent map entry counts as 0."""
+
+        slot = self.slot(path)
+        if not (isinstance(slot.type, Scalar) and slot.type.name in ("integer", "number")):
+            raise VariableError(f"{path_text(path)} is not an integer or a number")
+        current = self.get(path)
+        assert current is None or isinstance(current, (int, float))
+        return self.set(path, (current or 0) + amount)
 
     def view(self, recorder: "ReadRecorder | None" = None) -> "StateView":
         """Return a read-only view, optionally recording which paths are read."""

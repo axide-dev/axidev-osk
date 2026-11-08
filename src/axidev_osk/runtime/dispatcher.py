@@ -24,7 +24,7 @@ _logger = logging.getLogger(__name__)
 _DRAIN_WARNING_INTERVAL = 10_000
 
 CHECK_HINT = "Run `axidev-osk check` to find configuration problems before they happen."
-"""Carried as ``hint`` by every ``action.failed`` and ``callback.failed``, and added to their log lines."""
+"""Added to the log line of every failed action, callback, and binding; the events themselves carry no advice."""
 
 ACTION_FAILED = "action.failed"
 
@@ -38,18 +38,16 @@ class ActionFailedArguments:
     stage: str = samples("lookup", "decode", "execute")
     exception_type: str = samples("ValueError")
     message: str = samples("example failure")
-    hint: str = samples(CHECK_HINT)
 
 
 def decode_action_failed(arguments: DataMap) -> ActionFailedArguments:
-    require_keys(arguments, ("action", "arguments", "stage", "exception_type", "message", "hint"))
+    require_keys(arguments, ("action", "arguments", "stage", "exception_type", "message"))
     return ActionFailedArguments(
         action=string_value(arguments, "action"),
         arguments=map_value(arguments, "arguments"),
         stage=string_value(arguments, "stage"),
         exception_type=string_value(arguments, "exception_type"),
         message=string_value(arguments, "message"),
-        hint=string_value(arguments, "hint"),
     )
 
 
@@ -335,7 +333,6 @@ class Dispatcher:
                     "stage": stage,
                     "exception_type": type(error).__name__,
                     "message": str(error),
-                    "hint": CHECK_HINT,
                 },
             )
         )

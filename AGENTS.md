@@ -53,6 +53,7 @@ A feature starts in a profile. One that most profiles need is promoted to the st
 - `runtime/engine_messages.py`: messages the engine handles itself: keyboard, processes, logging, and observations.
 - `runtime/timers.py`: timers profiles start and cancel.
 - `runtime/app_messages.py`: messages the application runtime handles or sends, and `APP_ACTION_DECODERS`, the one table of its action decoders.
+- `runtime/names.py`: the fixed names events use for screen corners and mouse buttons, free of Qt.
 - `runtime/application.py`: startup, the running profile, and shutdown. `runtime/event_handlers.py`: the window actions and the Wayland title-bar drag.
 - `nodes/`: node kinds and their events. `attachments/`: attachment kinds.
 - `windows/`: building windows, their chrome, and dwell. `components/`: the widgets nodes build.

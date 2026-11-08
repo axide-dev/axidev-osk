@@ -247,6 +247,15 @@ class state:  # noqa: N801 - mirrors the Lua ``axidev_osk.state`` table
 
         return {"action": "state.append", "arguments": {"path": path if isinstance(path, str) else list(path), "value": value}}
 
+    @staticmethod
+    def add(path: str | list[str], amount: int | float) -> Map:
+        """Add ``amount`` to a declared integer or number, or to a map entry that may be absent (counted as 0).
+
+        The value is read when the action runs, so additions queued together all count.
+        """
+
+        return {"action": "state.add", "arguments": {"path": path if isinstance(path, str) else list(path), "amount": amount}}
+
 
 class keyboard:  # noqa: N801
     @staticmethod

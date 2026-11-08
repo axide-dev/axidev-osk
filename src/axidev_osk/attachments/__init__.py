@@ -15,7 +15,7 @@ from typing import Protocol, TypeVar
 from ..config.models import DwellClickConfig, HotCornerConfig, PointerLocatorConfig
 from ..config.reader import ConfigError, ConfigReader
 from ..kind_registry import KindRegistry
-from ..runtime.app_messages import HOT_CORNERS
+from ..runtime.names import HOT_CORNERS
 
 CORNERS = frozenset(HOT_CORNERS)
 

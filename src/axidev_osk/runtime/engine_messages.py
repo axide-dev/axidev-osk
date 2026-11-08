@@ -71,6 +71,12 @@ def _record(**fields: Variable) -> Variable:
     return Variable(record, record_default(record))
 
 
+def running_profile(profiles: Sequence[str], profile: str) -> dict[StatePath, DataValue]:
+    """What the engine records when a profile starts: every profile's ID, and the one now running."""
+
+    return {("app", "profiles"): list(profiles), ("app", "profile"): profile}
+
+
 # Variables the engine writes from observations; profiles read them but cannot set them. A value a
 # binding can set, such as a window's opacity, has no setter action and no copy here: the variable
 # its binding reads is its only source.

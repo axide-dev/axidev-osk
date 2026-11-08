@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from ..components.mouse_buttons import MOUSE_BUTTONS, OTHER_BUTTON
 from ..messages import DataMap, RuntimeAction, RuntimeEvent
 from .decoding import (
     bool_value,
@@ -30,6 +29,7 @@ from .decoding import (
     validated_event,
 )
 from .event_fields import profile_window, samples
+from .names import HOT_CORNERS, MOUSE_BUTTON_NAMES, OTHER_BUTTON
 
 if TYPE_CHECKING:
     from .dispatcher import Dispatcher
@@ -66,18 +66,6 @@ WINDOW_MOVE_TO = "window.move_to"
 WINDOW_RESIZE_BY = "window.resize_by"
 WINDOW_RESIZE_TO = "window.resize_to"
 WINDOW_SHOW = "window.show"
-
-
-class ScreenCorner(str, Enum):
-    """The screen corners a ``hot_corners`` attachment watches and ``hot_corner.triggered`` names."""
-
-    TOP_LEFT = "top_left"
-    TOP_RIGHT = "top_right"
-    BOTTOM_LEFT = "bottom_left"
-    BOTTOM_RIGHT = "bottom_right"
-
-
-HOT_CORNERS = tuple(corner.value for corner in ScreenCorner)
 
 
 class QuitReason(str, Enum):
@@ -152,7 +140,7 @@ class WindowDragArguments:
     window_id: str = profile_window(key="window")
     dx: int = samples(0)
     dy: int = samples(0)
-    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
+    button: str = samples(*MOUSE_BUTTON_NAMES, OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +148,7 @@ class WindowButtonArguments:
     """A window and the mouse button behind what happened to it."""
 
     window_id: str = profile_window(key="window")
-    button: str = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
+    button: str = samples(*MOUSE_BUTTON_NAMES, OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +157,7 @@ class WindowCloseRequestedArguments:
     when the system asked."""
 
     window_id: str = profile_window(key="window")
-    button: str | None = samples(*MOUSE_BUTTONS.values(), OTHER_BUTTON)
+    button: str | None = samples(*MOUSE_BUTTON_NAMES, OTHER_BUTTON)
 
 
 @dataclass(frozen=True, slots=True)

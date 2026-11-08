@@ -1,22 +1,27 @@
-"""The names events give to mouse buttons, so profiles never see Qt's values."""
+"""Qt's mouse buttons mapped onto the names events give them, so profiles never see Qt's values."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-MOUSE_BUTTONS = {
-    Qt.MouseButton.LeftButton: "left",
-    Qt.MouseButton.RightButton: "right",
-    Qt.MouseButton.MiddleButton: "middle",
-    Qt.MouseButton.BackButton: "back",
-    Qt.MouseButton.ForwardButton: "forward",
-}
+from ..runtime.names import MOUSE_BUTTON_NAMES, OTHER_BUTTON
+
+MOUSE_BUTTONS: dict[Qt.MouseButton, str] = dict(
+    zip(
+        (
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.MiddleButton,
+            Qt.MouseButton.BackButton,
+            Qt.MouseButton.ForwardButton,
+        ),
+        MOUSE_BUTTON_NAMES,
+        strict=True,
+    )
+)
 """Each Qt mouse button an event reports, by the name it reports it with."""
 
 BUTTONS_BY_NAME = {name: button for button, name in MOUSE_BUTTONS.items()}
-
-OTHER_BUTTON = "other"
-"""The name of a mouse button ``MOUSE_BUTTONS`` does not list."""
 
 
 def mouse_button_name(button: Qt.MouseButton) -> str:

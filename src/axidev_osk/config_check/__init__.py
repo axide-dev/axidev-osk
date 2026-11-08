@@ -21,6 +21,7 @@ from ..messages import DataMap
 from ..runtime.app_messages import APP_ACTION_DECODERS
 from ..runtime.dispatcher import Dispatcher
 from ..runtime.engine import Engine, build_engine
+from ..runtime.engine_messages import running_profile
 from ..runtime.event_fields import event_samples
 from ..runtime.profile_runtime import ENGINE, PROFILE, SHARED
 from ..runtime.state import StateTree
@@ -69,8 +70,8 @@ def _explorer(engine: Engine, root: RootConfig, profile: ProfileConfig, names: K
     tree.declare(profile.shared, SHARED)
     tree.declare(profile.state, PROFILE)
     # What the engine writes when a profile starts, so the check starts where the profile does.
-    tree.set(("app", "profiles"), list(root.profiles))
-    tree.set(("app", "profile"), profile.id)
+    for path, value in running_profile(list(root.profiles), profile.id).items():
+        tree.set(path, value)
     windows = [window.id for window in profile.windows]
     nodes = [node.id for node in profile.nodes()]
     dispatcher = engine.dispatcher
