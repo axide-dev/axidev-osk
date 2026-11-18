@@ -89,6 +89,8 @@ axidev-osk linux remove-permissions
 
 Permission setup creates a dedicated `uinput` group, installs the udev rule, and adds the selected user. Log out and back in after a new membership is added. Permission removal disables the Axidev OSK rule but preserves the shared group and its memberships.
 
+The setup commands also prepare a system that has not booted yet, such as an installer's chroot. They treat a system as offline when systemd would: `SYSTEMD_OFFLINE` is set, or the command runs in a chroot. A system booted without systemd counts as online. Offline, permission setup writes only the files the system reads when it boots and does not load the module or reload udev. `status-permissions` then skips the `/dev/uinput` checks. `setup-greeter` finds the login manager from its systemd unit file on disk when the system is offline or no running systemd can answer.
+
 Linux autostart uses the desktop-session XDG autostart standard. It starts the current visible keyboard after the selected user logs into a graphical desktop.
 
 ```bash

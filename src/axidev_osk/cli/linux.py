@@ -32,6 +32,9 @@ VENDOR_UDEV_RULE_PATHS = (
     Path("/lib/udev/rules.d") / UDEV_RULE_NAME,
 )
 UINPUT_PATH = Path("/dev/uinput")
+SYSTEMD_BOOTED_PATH = Path("/run/systemd/system")
+SYSTEMD_BOOLEAN_TRUE = frozenset({"1", "yes", "y", "true", "t", "on"})
+SYSTEMD_BOOLEAN_FALSE = frozenset({"0", "no", "n", "false", "f", "off"})
 AUTOSTART_RELATIVE_PATH = Path(".config/autostart/axidev-osk.desktop")
 AUTOSTART_MANAGED_LINE = "X-Axidev-OSK-Managed=true\n"
 
@@ -220,13 +223,15 @@ def _setup_permissions(account: Account) -> None:
 
     _reload_udev(ensure_device=True)
     print(f"Linux uinput permissions are configured for {account.name}.")
+    if _target_is_offline():
+        print("The system loads uinput and applies the udev rule when it boots.")
     if membership_added:
         print("Log out and back in before starting Axidev OSK.")
 
 
 def _status_permissions(account: Account) -> int:
     assert grp is not None
-    checks: list[tuple[str, bool]] = []
+    checks: list[tuple[str, bool | None]] = []
     try:
         group = grp.getgrnam(UINPUT_GROUP)
     except KeyError:
@@ -236,13 +241,24 @@ def _status_permissions(account: Account) -> int:
     checks.append(("module load", _read_text(MODULES_LOAD_PATH) == MODULES_LOAD_TEXT))
     checks.append(("udev rule", _permission_rule_is_enabled()))
     checks.append(("group membership", group is not None and _account_in_group(account, group)))
-    checks.append(("/dev/uinput mode", group is not None and _uinput_mode_is_ready(group.gr_gid)))
+    # The device node offline belongs to the running kernel, not to the target system.
+    offline = _target_is_offline()
+    checks.append((
+        "/dev/uinput mode",
+        None if offline else group is not None and _uinput_mode_is_ready(group.gr_gid),
+    ))
     if account.uid == _effective_uid():
-        checks.append(("current session access", os.access(UINPUT_PATH, os.W_OK)))
+        checks.append((
+            "current session access",
+            None if offline else os.access(UINPUT_PATH, os.W_OK),
+        ))
 
     for label, passed in checks:
-        print(f"{'ok' if passed else 'missing'}: {label}")
-    return 0 if all(passed for _, passed in checks) else 1
+        if passed is None:
+            print(f"skipped: {label} (the system has not booted)")
+        else:
+            print(f"{'ok' if passed else 'missing'}: {label}")
+    return 0 if all(passed is not False for _, passed in checks) else 1
 
 
 def _remove_permissions() -> None:
@@ -278,6 +294,10 @@ def _uinput_mode_is_ready(group_gid: int) -> bool:
 
 
 def _reload_udev(*, ensure_device: bool = False) -> None:
+    # Offline, no udev daemon serves the target and the running kernel belongs to
+    # another system; the target reads the rules and modules-load.d when it boots.
+    if _target_is_offline():
+        return
     _run_checked(["udevadm", "control", "--reload-rules"])
     if ensure_device:
         _run_checked(["modprobe", "uinput"])
@@ -416,6 +436,44 @@ def _run_checked(command: list[str]) -> None:
         raise LinuxSetupError(f"required command is missing: {command[0]}") from exc
     except subprocess.CalledProcessError as exc:
         raise LinuxSetupError(f"command failed with status {exc.returncode}: {' '.join(command)}") from exc
+
+
+def _target_is_offline() -> bool:
+    """Whether this system is a target that has not booted, such as an installer's chroot.
+
+    It applies systemctl's own test: ``SYSTEMD_OFFLINE`` decides when set to a
+    boolean, otherwise a chroot means offline. A system that booted without
+    systemd is online.
+    """
+
+    override = os.environ.get("SYSTEMD_OFFLINE", "").strip().lower()
+    if override in SYSTEMD_BOOLEAN_TRUE:
+        return True
+    if override in SYSTEMD_BOOLEAN_FALSE:
+        return False
+    return _running_in_chroot()
+
+
+def _systemd_reachable() -> bool:
+    """Whether a running systemd can answer questions: the system is online and booted with it."""
+
+    return not _target_is_offline() and SYSTEMD_BOOTED_PATH.is_dir()
+
+
+def _running_in_chroot() -> bool:
+    detect_virt = shutil.which("systemd-detect-virt")
+    if detect_virt is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [detect_virt, "--chroot"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return completed.returncode == 0
 
 
 def _effective_uid() -> int:

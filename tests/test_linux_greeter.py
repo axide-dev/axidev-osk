@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from axidev_osk.cli import linux, linux_greeter
+from fake_programs import FakePrograms
 
 
 class GreeterParserTests(unittest.TestCase):
@@ -822,6 +823,87 @@ class SupervisorTests(unittest.TestCase):
             result = linux_greeter._run_attached_supervisor("lightdm", 42, {"DISPLAY": ":0"})
 
         self.assertEqual(result, 0)
+
+class OfflineTargetGreeterTests(unittest.TestCase):
+    """An installer configures the login screen of a target that has never booted, inside a chroot."""
+
+    LOCK_SCREEN_UI = (
+        "Item {\n"
+        "    MouseArea {\n"
+        "        id: lockScreenRoot\n\n"
+        "        property bool uiVisible: false\n"
+        "    }\n"
+        "}\n"
+    )
+
+    def test_offline_plasma_setup_finds_the_manager_from_its_unit_file(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            programs = FakePrograms(root)
+            # Without a running systemd, systemctl prints nothing and fails.
+            programs.add("systemctl", 1)
+            for name in ("groupadd", "usermod", "udevadm", "modprobe"):
+                programs.add(name)
+            unit_directories = (root / "etc-systemd-system", root / "usr-lib-systemd-system")
+            for directory in unit_directories:
+                directory.mkdir()
+            (unit_directories[1] / "plasmalogin.service").write_text(
+                "[Service]\nExecStart=/usr/bin/plasmalogin\n", encoding="utf-8"
+            )
+            kwin_unit = root / "plasma-login-kwin_wayland.service"
+            kwin_unit.write_text(NativeAdapterTests.PLASMA_KWIN_UNIT, encoding="utf-8")
+            lock_screen_ui = root / "LockScreenUi.qml"
+            lock_screen_ui.write_text(self.LOCK_SCREEN_UI, encoding="utf-8")
+            input_method = root / "axidev-osk-input-panel.desktop"
+            state_path = root / "greeter.json"
+            launcher = Path("/opt/axidev-osk/bin/axidev-osk")
+            account = linux.Account("plasmalogin", 981, 981, root)
+            group = Mock(gr_gid=991, gr_mem=[])
+            fake_grp = Mock()
+            fake_grp.getgrnam.return_value = group
+
+            with (
+                patch.dict(linux.os.environ, {"PATH": str(programs.directory), "SYSTEMD_OFFLINE": "1"}),
+                patch.object(linux_greeter, "SYSTEMD_SYSTEM_UNIT_DIRECTORIES", unit_directories),
+                patch.object(linux_greeter, "PLASMA_INPUT_METHOD_PATH", input_method),
+                patch.object(linux_greeter, "PLASMA_KWIN_DROPIN_PATH", root / "kwin.d" / "50-axidev-osk.conf"),
+                patch.object(linux_greeter, "PLASMA_KWIN_UNIT_PATHS", (kwin_unit,)),
+                patch.object(linux_greeter, "KWIN_CONFIG_PATH", root / "kwinrc"),
+                patch.object(linux_greeter, "PLASMA_LOCK_SCREEN_UI_PATH", lock_screen_ui),
+                patch.object(linux_greeter, "STATE_PATH", state_path),
+                patch.object(linux_greeter, "_plasma_version", return_value=(6, 8, 2)),
+                patch.object(linux_greeter, "_installed_launcher", return_value=launcher),
+                patch.object(linux, "_resolve_account", return_value=account),
+                patch.object(linux, "grp", fake_grp),
+                patch.object(linux, "MODULES_LOAD_PATH", root / "axidev-osk-uinput.conf"),
+                patch.object(linux, "UDEV_RULE_PATH", root / linux.UDEV_RULE_NAME),
+                redirect_stdout(io.StringIO()),
+            ):
+                result = linux_greeter._setup("plasma-login")
+
+            self.assertEqual(result, 0)
+            self.assertEqual(json.loads(state_path.read_text(encoding="utf-8"))["manager"], "plasma-login")
+            self.assertTrue(input_method.is_file())
+            self.assertIn(linux_greeter.PLASMA_LOCK_SCREEN_ROOT_PATCH, lock_screen_ui.read_text(encoding="utf-8"))
+            self.assertEqual(programs.calls(), ["usermod -aG uinput plasmalogin"])
+
+    def test_offline_unit_lookup_follows_systemd_precedence_and_masking(self) -> None:
+        adapter = linux_greeter._manager_adapter("plasma-login")
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            override, vendor = root / "etc", root / "usr-lib"
+            override.mkdir()
+            vendor.mkdir()
+            with (
+                patch.dict(linux.os.environ, {"SYSTEMD_OFFLINE": "1"}),
+                patch.object(linux_greeter, "SYSTEMD_SYSTEM_UNIT_DIRECTORIES", (override, vendor)),
+            ):
+                self.assertFalse(linux_greeter._manager_installed(adapter))
+                (vendor / adapter.unit).write_text("[Service]\n", encoding="utf-8")
+                self.assertTrue(linux_greeter._manager_installed(adapter))
+                (override / adapter.unit).symlink_to("/dev/null")
+                self.assertFalse(linux_greeter._manager_installed(adapter))
+
 
 if __name__ == "__main__":
     unittest.main()

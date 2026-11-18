@@ -52,6 +52,14 @@ LIGHTDM_WRAPPER_PATH = Path("/etc/axidev-osk/lightdm-greeter-wrapper")
 GREETD_WRAPPER_PATH = Path("/etc/axidev-osk/greetd-session-wrapper")
 NATIVE_SUPERVISOR_PATH = Path("/etc/axidev-osk/greeter-keyboard-supervisor")
 DEFAULT_LAUNCHER_PATH = Path("/usr/local/bin/axidev-osk")
+SYSTEMD_SYSTEM_UNIT_DIRECTORIES = (
+    Path("/etc/systemd/system"),
+    Path("/run/systemd/system"),
+    Path("/usr/local/lib/systemd/system"),
+    Path("/usr/lib/systemd/system"),
+    Path("/lib/systemd/system"),
+)
+"""System unit directories in systemd's order of precedence, as systemd.unit(5) lists them."""
 MANAGED_GREETD_COMMAND = str(GREETD_WRAPPER_PATH)
 MANAGED_GREETD_COMMENT = (
     "# Managed by Axidev OSK. Run 'sudo axidev-osk linux remove-greeter' before "
@@ -431,6 +439,8 @@ def _installed_managers() -> list[str]:
 
 
 def _manager_installed(adapter: _ManagerAdapter) -> bool:
+    if not linux._systemd_reachable():
+        return _unit_file_installed(adapter.unit)
     systemctl = shutil.which("systemctl")
     if systemctl is None:
         return False
@@ -444,6 +454,26 @@ def _manager_installed(adapter: _ManagerAdapter) -> bool:
     except OSError:
         return False
     return completed.returncode == 0 and completed.stdout.strip() == "loaded"
+
+
+def _unit_file_installed(unit: str) -> bool:
+    """Whether systemd would load ``unit`` from disk, which is what an offline target can show.
+
+    The first directory that holds the unit decides, and a unit linked to
+    ``/dev/null`` or left empty there is masked, as systemd treats it.
+    """
+
+    for directory in SYSTEMD_SYSTEM_UNIT_DIRECTORIES:
+        path = directory / unit
+        if not (path.exists() or path.is_symlink()):
+            continue
+        try:
+            if path.resolve() == Path("/dev/null"):
+                return False
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
+    return False
 
 
 def _select_manager(

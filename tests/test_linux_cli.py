@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from axidev_osk.cli import linux
 from axidev_osk.cli import build_parser
+from fake_programs import FakePrograms
 
 
 class LinuxCliTests(unittest.TestCase):
@@ -299,6 +301,7 @@ class LinuxCliTests(unittest.TestCase):
         input_path.exists.return_value = True
         with (
             patch.object(linux, "UINPUT_PATH", input_path),
+            patch.object(linux, "_target_is_offline", return_value=False),
             patch.object(linux, "_run_checked") as run,
         ):
             linux._reload_udev(ensure_device=True)
@@ -313,6 +316,100 @@ class LinuxCliTests(unittest.TestCase):
                 unittest.mock.call(["udevadm", "settle"]),
             ],
         )
+
+
+class OfflineTargetTests(unittest.TestCase):
+    """A target that has not booted, such as an installer's chroot, is detected as systemd detects it."""
+
+    def _offline(self, root: Path, *, chroot: bool, override: str | None) -> bool:
+        programs = FakePrograms(root)
+        programs.add("systemd-detect-virt", 0 if chroot else 1)
+        environment = {"PATH": str(programs.directory)}
+        if override is not None:
+            environment["SYSTEMD_OFFLINE"] = override
+        with patch.dict(linux.os.environ, environment):
+            if override is None:
+                linux.os.environ.pop("SYSTEMD_OFFLINE", None)
+            return linux._target_is_offline()
+
+    def test_system_outside_a_chroot_is_online(self) -> None:
+        with TemporaryDirectory() as temporary:
+            self.assertFalse(self._offline(Path(temporary), chroot=False, override=None))
+
+    def test_chroot_is_offline(self) -> None:
+        with TemporaryDirectory() as temporary:
+            self.assertTrue(self._offline(Path(temporary), chroot=True, override=None))
+
+    def test_systemd_offline_variable_decides_both_ways(self) -> None:
+        with TemporaryDirectory() as first, TemporaryDirectory() as second:
+            self.assertTrue(self._offline(Path(first), chroot=False, override="1"))
+            self.assertFalse(self._offline(Path(second), chroot=True, override="0"))
+
+
+class OfflinePermissionSetupTests(unittest.TestCase):
+    def test_system_booted_without_systemd_loads_the_module_and_reloads_udev(self) -> None:
+        # OpenRC, runit and containers have no /run/systemd/system, yet their kernel and
+        # udev are the running ones.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            programs = FakePrograms(root)
+            for name in ("groupadd", "usermod", "udevadm", "modprobe"):
+                programs.add(name)
+            programs.add("systemd-detect-virt", 1)
+            account = linux.Account("alice", 1000, 1000, root)
+            fake_grp = Mock()
+            fake_grp.getgrnam.return_value = SimpleNamespace(gr_gid=991, gr_mem=[])
+            environment = {"PATH": str(programs.directory)}
+            with (
+                patch.dict(linux.os.environ, environment),
+                patch.object(linux, "grp", fake_grp),
+                patch.object(linux, "SYSTEMD_BOOTED_PATH", root / "missing-run-systemd-system"),
+                patch.object(linux, "MODULES_LOAD_PATH", root / "axidev-osk-uinput.conf"),
+                patch.object(linux, "UDEV_RULE_PATH", root / linux.UDEV_RULE_NAME),
+                patch.object(linux, "VENDOR_UDEV_RULE_PATHS", ()),
+                patch.object(linux, "UINPUT_PATH", root / "missing-uinput"),
+                redirect_stdout(io.StringIO()),
+            ):
+                linux.os.environ.pop("SYSTEMD_OFFLINE", None)
+                linux._setup_permissions(account)
+
+            calls = programs.calls()
+            self.assertIn("modprobe uinput", calls)
+            self.assertIn("udevadm control --reload-rules", calls)
+
+    def test_offline_setup_configures_boot_files_without_touching_the_running_kernel(self) -> None:
+        # The running kernel and udev belong to the installer, so setup writes only
+        # what the target reads at boot, and status reports success without the device.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            programs = FakePrograms(root)
+            for name in ("groupadd", "usermod", "udevadm", "modprobe"):
+                programs.add(name)
+            modules_load = root / "modules-load.d" / "axidev-osk-uinput.conf"
+            udev_rule = root / "rules.d" / linux.UDEV_RULE_NAME
+            account = linux.Account("alice", 1000, 1000, root)
+            group = SimpleNamespace(gr_gid=991, gr_mem=[])
+            fake_grp = Mock()
+            fake_grp.getgrnam.return_value = group
+            with (
+                patch.dict(linux.os.environ, {"PATH": str(programs.directory), "SYSTEMD_OFFLINE": "1"}),
+                patch.object(linux, "grp", fake_grp),
+                patch.object(linux, "MODULES_LOAD_PATH", modules_load),
+                patch.object(linux, "UDEV_RULE_PATH", udev_rule),
+                patch.object(linux, "VENDOR_UDEV_RULE_PATHS", ()),
+                patch.object(linux, "UINPUT_PATH", root / "missing-uinput"),
+                patch.object(linux, "_effective_uid", return_value=0),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                linux._setup_permissions(account)
+                group.gr_mem.append("alice")
+                status = linux._status_permissions(account)
+
+            self.assertEqual(programs.calls(), ["usermod -aG uinput alice"])
+            self.assertEqual(modules_load.read_text(encoding="utf-8"), "uinput\n")
+            self.assertEqual(udev_rule.read_text(encoding="utf-8"), linux.UDEV_RULE_TEXT)
+            self.assertEqual(status, 0)
+            self.assertIn("skipped: /dev/uinput mode", output.getvalue())
 
 
 if __name__ == "__main__":
